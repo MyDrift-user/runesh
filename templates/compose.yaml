@@ -1,0 +1,46 @@
+# Docker Compose template for Rust + Next.js projects.
+# Copy to your project and adjust service names, ports, and volumes.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-myapp}
+      POSTGRES_USER: ${POSTGRES_USER:-myapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-myapp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-myapp}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-myapp}
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      # OIDC (optional)
+      # OIDC_ISSUER: https://login.microsoftonline.com/{tenant}/v2.0
+      # OIDC_CLIENT_ID: ...
+      # OIDC_CLIENT_SECRET: ...
+      # OIDC_REDIRECT_URI: http://localhost:8080/auth/callback
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
+    driver: bridge

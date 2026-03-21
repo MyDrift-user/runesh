@@ -1,0 +1,48 @@
+{
+  "name": "@runesh/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./components/*": "./src/components/*.tsx",
+    "./hooks/*": "./src/hooks/*.ts",
+    "./lib/*": "./src/lib/*.ts",
+    "./styles/*": "./src/styles/*",
+    "./fonts": "./src/fonts/index.ts",
+    "./editor/*": "./src/components/editor/*.tsx",
+    "./editor/extensions": "./src/components/editor/extensions.ts",
+    "./editor/collapsible-heading-extension": "./src/components/editor/collapsible-heading-extension.ts",
+    "./editor/search-highlight-extension": "./src/components/editor/search-highlight-extension.ts"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.2.0",
+    "@tanstack/react-query": "^5.90.21",
+    "@tiptap/core": "^2.27.2",
+    "@tiptap/extension-table": "^2.27.2",
+    "@tiptap/extension-table-cell": "^2.27.2",
+    "@tiptap/extension-table-header": "^2.27.2",
+    "@tiptap/extension-table-row": "^2.27.2",
+    "@tiptap/pm": "^2.27.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "lowlight": "^3.3.0",
+    "lucide-react": "^0.577.0",
+    "next-themes": "^0.4.6",
+    "novel": "^1.0.2",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.5.0",
+    "tiptap-extension-global-drag-handle": "^0.1.18",
+    "use-debounce": "^10.1.0"
+  },
+  "peerDependencies": {
+    "next": ">=15",
+    "react": ">=19",
+    "react-dom": ">=19"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5"
+  }
+}

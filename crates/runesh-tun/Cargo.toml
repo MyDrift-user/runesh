@@ -1,0 +1,14 @@
+[package]
+name = "runesh-tun"
+version.workspace = true
+edition.workspace = true
+description = "Cross-platform TUN device abstraction for virtual networking"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+wintun = "0.5"

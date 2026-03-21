@@ -1,0 +1,10 @@
+{
+  "name": "runesh",
+  "private": true,
+  "description": "Shared code across Rust + Next.js + shadcn/ui projects",
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  }
+}
