@@ -11,57 +11,57 @@ Instead of copy-pasting the same sidebar, editor, auth flow, error handling, and
 | Category | Components |
 |----------|-----------|
 | **Layout** | `AppSidebar`, `DashboardShell`, `SearchBar`, `PageHeader` |
-| **Editor** | Novel WYSIWYG with custom `TableMenu`, `BubbleMenu`, `SlashCommand`, collapsible headings, search highlighting |
-| **Data** | `DataTable` (sortable, paginated, server-side support) |
-| **Providers** | `ThemeProvider`, `QueryProvider` |
-| **Auth** | `api` client (auto token refresh, 401 retry), `token-store`, PKCE utilities |
+| **Editor** | Novel WYSIWYG with `TableMenu`, `BubbleMenu`, `SlashCommand`, collapsible headings, search highlighting |
+| **Data** | `DataTable` (sortable, paginated, server-side support), `ConfirmDialog` |
+| **Providers** | `AuthProvider`, `ThemeProvider`, `QueryProvider` |
+| **Auth** | `api` client (auto token refresh, 401 retry, file upload with progress), `token-store`, PKCE utilities |
+| **Hooks** | `useIsMobile`, `useWebSocket` (auto-reconnect, auth), `usePermissions` |
+| **Utils** | `cn()`, `formatFileSize()`, `formatRelativeTime()`, `formatDateLabel()`, pagination types |
 | **Styles** | `globals.css` (OKLCH theme, dark mode), font config (Chiron GoRound TC) |
-| **Hooks** | `useIsMobile` |
-| **Utils** | `cn()` (clsx + tailwind-merge) |
 
 ### Backend Rust Crates
 
 | Crate | What it provides |
 |-------|-----------------|
-| **runesh-core** | `AppError` (HTTP status mapping), `RateLimiter` (sliding window), `BroadcastRegistry` (WebSocket pub/sub), `save_upload` (multipart handler), `create_pool` (SQLx PostgreSQL) |
-| **runesh-auth** | OIDC discovery + PKCE, JWT access/refresh tokens, Axum middleware, `AuthStore` trait for project-specific extensibility |
+| **runesh-core** | `AppError` (7 variants with HTTP mapping), `Pagination` extractor + `PaginatedResponse`, `RateLimiter`, `BroadcastRegistry` (WebSocket), `save_upload`, `create_pool`, `shutdown_signal`, request ID + logging + CORS middleware, health check handler, cross-platform service installer |
+| **runesh-auth** | OIDC discovery + PKCE, JWT access/refresh tokens, Axum middleware, `AuthStore` trait |
 | **runesh-tun** | Cross-platform TUN device (Windows wintun + Linux /dev/net/tun) |
 
 ### Templates
 
 | File | Purpose |
 |------|---------|
-| `templates/Dockerfile` | Multi-stage build: Node frontend + Rust backend + Caddy proxy |
-| `templates/compose.yaml` | PostgreSQL + app service with health checks |
+| `templates/Dockerfile` | Multi-stage: Node frontend + Rust backend + Caddy proxy |
+| `templates/compose.yaml` | PostgreSQL + app with health checks |
+| `templates/.env.example` | All environment variables for a new project |
 
 ## Quick start
 
 ### Frontend
 
 ```json
-// In your project's package.json
-"dependencies": {
-  "@runesh/ui": "file:../RUNESH/packages/ui"
-}
+"@runesh/ui": "file:../RUNESH/packages/ui"
 ```
 
 ```tsx
 import { AppSidebar } from "@runesh/ui/components/layout/app-sidebar"
 import { DashboardShell } from "@runesh/ui/components/layout/dashboard-shell"
+import { AuthProvider, useAuth } from "@runesh/ui/components/providers/auth-provider"
 import { api } from "@runesh/ui/lib/api-client"
 import { DataTable } from "@runesh/ui/components/ui/data-table"
+import { useWebSocket } from "@runesh/ui/hooks/use-websocket"
 ```
 
 ### Backend
 
 ```toml
-# In your project's Cargo.toml
 runesh-core = { path = "../RUNESH/crates/runesh-core" }
 runesh-auth = { path = "../RUNESH/crates/runesh-auth" }
 ```
 
 ```rust
-use runesh_core::{AppError, RateLimiter};
+use runesh_core::{AppError, Pagination, PaginatedResponse, shutdown_signal};
+use runesh_core::middleware::{cors, health, logging, request_id};
 use runesh_auth::{OidcProvider, AuthStore};
 ```
 

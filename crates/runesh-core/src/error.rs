@@ -24,6 +24,12 @@ pub enum AppError {
     #[error("Bad request: {0}")]
     BadRequest(String),
 
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
+    #[error("Rate limited")]
+    RateLimited,
+
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -35,6 +41,8 @@ impl AppError {
             AppError::Unauthorized => 401,
             AppError::Forbidden(_) => 403,
             AppError::BadRequest(_) => 400,
+            AppError::Conflict(_) => 409,
+            AppError::RateLimited => 429,
             AppError::Internal(_) => 500,
         }
     }
@@ -45,6 +53,8 @@ impl AppError {
             AppError::Unauthorized => "unauthorized",
             AppError::Forbidden(_) => "forbidden",
             AppError::BadRequest(_) => "bad_request",
+            AppError::Conflict(_) => "conflict",
+            AppError::RateLimited => "rate_limited",
             AppError::Internal(_) => "internal",
         }
     }
@@ -76,8 +86,11 @@ impl axum::response::IntoResponse for AppError {
 #[cfg(feature = "sqlx")]
 impl From<sqlx::Error> for AppError {
     fn from(e: sqlx::Error) -> Self {
-        match e {
+        match &e {
             sqlx::Error::RowNotFound => AppError::NotFound("Resource not found".into()),
+            sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
+                AppError::Conflict("Resource already exists".into())
+            }
             _ => AppError::Internal(e.to_string()),
         }
     }
