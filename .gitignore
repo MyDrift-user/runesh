@@ -1,0 +1,25 @@
+# Rust
+target/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Bun
+bun.lock
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini

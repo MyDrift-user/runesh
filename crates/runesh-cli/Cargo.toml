@@ -1,0 +1,15 @@
+[package]
+name = "runesh-cli"
+version.workspace = true
+edition.workspace = true
+description = "CLI tool to scaffold new Rust + Next.js + shadcn/ui projects with RUNESH shared code"
+
+[[bin]]
+name = "runesh"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+console = "0.15"
+indicatif = "0.17"

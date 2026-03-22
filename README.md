@@ -4,6 +4,23 @@ Shared code connector for Rust + Next.js + shadcn/ui projects.
 
 Instead of copy-pasting the same sidebar, editor, auth flow, error handling, and deployment config across projects, RUNESH provides a single source of truth. Improvements here propagate to all consumer projects.
 
+## Create a new project
+
+```bash
+# Build the CLI once
+cargo build -p runesh-cli --release
+
+# Scaffold a new project
+./target/release/runesh init my-app
+```
+
+The interactive wizard will ask for:
+- **Project type**: Web only or Web + Tauri desktop
+- **Features**: OIDC auth, rate limiting, WebSocket, file upload, Docker
+- **Database name** and **backend port**
+
+It generates the full project structure, links `@runesh/ui`, runs `bun install`, and initializes shadcn/ui.
+
 ## What's included
 
 ### Frontend (`@runesh/ui`)
