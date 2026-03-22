@@ -2,7 +2,14 @@
 
 import { getAccessToken, clearTokens, isTokenExpiringSoon, getRefreshToken, storeTokens } from "./token-store";
 
-const API_BASE = typeof process !== "undefined" ? (process.env.NEXT_PUBLIC_API_URL || "") : "";
+// Same-origin by default (Caddy proxies /api/* to the backend).
+// Only override for dev setups where frontend and backend run on different ports.
+let API_BASE = "";
+
+/** Override the API base URL (e.g. for dev: `setApiBase("http://localhost:3001")`) */
+export function setApiBase(base: string) {
+  API_BASE = base;
+}
 
 // Serialize concurrent refresh attempts so only one hits the server
 let refreshPromise: Promise<boolean> | null = null;
