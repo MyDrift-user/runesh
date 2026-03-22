@@ -14,12 +14,18 @@ pub mod request_id {
     /// Middleware that ensures every request has a unique ID.
     ///
     /// Reads `X-Request-Id` from the incoming request or generates a UUID.
-    /// Sets the ID on the response headers and tracing span.
+    /// Validates that incoming IDs are alphanumeric/dashes only (max 64 chars)
+    /// to prevent log injection. Sets the ID on response headers and tracing span.
     pub async fn request_id_middleware(req: Request<Body>, next: Next) -> Response {
         let request_id = req
             .headers()
             .get("x-request-id")
             .and_then(|v| v.to_str().ok())
+            .filter(|s| {
+                s.len() <= 64
+                    && s.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            })
             .map(|s| s.to_string())
             .unwrap_or_else(|| Uuid::new_v4().to_string());
 
@@ -89,13 +95,18 @@ pub mod cors {
             .max_age(std::time::Duration::from_secs(3600));
 
         if origins.contains(&"*") {
-            layer.allow_origin(tower_http::cors::Any)
+            tracing::warn!("CORS configured with wildcard origin -- do not use in production with credentials");
+            layer
+                .allow_origin(tower_http::cors::Any)
+                .allow_credentials(false)
         } else {
             let parsed: Vec<HeaderValue> = origins
                 .iter()
                 .filter_map(|o| o.parse().ok())
                 .collect();
-            layer.allow_origin(parsed)
+            layer
+                .allow_origin(parsed)
+                .allow_credentials(true)
         }
     }
 }

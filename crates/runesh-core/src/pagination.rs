@@ -8,12 +8,14 @@ use serde::{Deserialize, Serialize};
 ///
 /// ```ignore
 /// async fn list(Query(pg): Query<Pagination>) -> Result<Json<PaginatedResponse<Item>>, AppError> {
-///     let items = sqlx::query_as("SELECT * FROM items ORDER BY $1 LIMIT $2 OFFSET $3")
-///         .bind(pg.sort_by.as_deref().unwrap_or("created_at"))
+///     let col = pg.validated_sort_column(&["name", "created_at"]);
+///     let dir = pg.sort_direction();
+///     let sql = format!("SELECT * FROM items ORDER BY {col} {dir} LIMIT $1 OFFSET $2");
+///     let items = sqlx::query_as(&sql)
 ///         .bind(pg.limit())
 ///         .bind(pg.offset())
 ///         .fetch_all(&pool).await?;
-///     let total = sqlx::query_scalar("SELECT COUNT(*) FROM items")
+///     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM items")
 ///         .fetch_one(&pool).await?;
 ///     Ok(Json(pg.response(items, total)))
 /// }
@@ -47,6 +49,20 @@ impl Pagination {
             Some("desc" | "DESC") => "DESC",
             _ => "ASC",
         }
+    }
+
+    /// Get the sort column, validated against an allowlist to prevent SQL injection.
+    ///
+    /// Use this in queries instead of raw `sort_by`:
+    /// ```ignore
+    /// let col = pg.validated_sort_column(&["name", "email", "created_at"]);
+    /// let sql = format!("SELECT * FROM users ORDER BY {} {} LIMIT $1 OFFSET $2", col, pg.sort_direction());
+    /// ```
+    pub fn validated_sort_column<'a>(&'a self, allowed: &[&'a str]) -> &'a str {
+        self.sort_by
+            .as_deref()
+            .filter(|s| allowed.contains(s))
+            .unwrap_or_else(|| allowed.first().copied().unwrap_or("id"))
     }
 
     /// Build a `PaginatedResponse` from items and total count.

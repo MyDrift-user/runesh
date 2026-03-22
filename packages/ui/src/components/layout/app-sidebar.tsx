@@ -62,6 +62,7 @@ export function AppSidebar({
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
+  // UI-only filter -- the backend MUST enforce authorization on admin endpoints independently.
   const filteredNav = navItems.filter((item) => {
     if (item.adminOnly) {
       return user?.role === "admin"

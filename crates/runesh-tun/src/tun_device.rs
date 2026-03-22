@@ -4,7 +4,7 @@ use crate::error::TunError;
 
 /// Configuration for creating a TUN device.
 pub struct TunConfig {
-    /// Interface name (e.g. "my-overlay")
+    /// Interface name (alphanumeric and hyphens only, max 15 chars)
     pub name: String,
     /// IP address to assign to the interface
     pub address: Ipv4Addr,
@@ -12,6 +12,21 @@ pub struct TunConfig {
     pub netmask: Ipv4Addr,
     /// Maximum transmission unit
     pub mtu: u16,
+}
+
+impl TunConfig {
+    /// Validate the interface name to prevent command injection.
+    fn validate(&self) -> Result<(), TunError> {
+        if self.name.is_empty() || self.name.len() > 15 {
+            return Err(TunError::Network("Interface name must be 1-15 characters".into()));
+        }
+        if !self.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(TunError::Network(
+                "Interface name must contain only alphanumeric characters and hyphens".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 // ---- Windows implementation using Wintun ----------------------------------------
@@ -36,6 +51,8 @@ mod platform {
 
     impl TunDevice {
         pub fn create(config: TunConfig) -> Result<Self, TunError> {
+            config.validate()?;
+
             // Load wintun.dll from same directory as executable, or system path
             let dll_path = std::env::current_exe()
                 .ok()
@@ -166,6 +183,8 @@ mod platform {
 
     impl TunDevice {
         pub fn create(config: TunConfig) -> Result<Self, TunError> {
+            config.validate()?;
+
             let iface = &config.name;
 
             // Delete if exists

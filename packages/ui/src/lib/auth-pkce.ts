@@ -65,15 +65,16 @@ interface StoredPending extends OidcPending {
   ts: number;
 }
 
+// Use sessionStorage for PKCE verifier (scoped to tab, not accessible from other windows)
 export function storePending(pending: OidcPending): void {
   const data: StoredPending = { ...pending, ts: Date.now() };
-  localStorage.setItem(PENDING_KEY, JSON.stringify(data));
+  sessionStorage.setItem(PENDING_KEY, JSON.stringify(data));
 }
 
 export function retrievePending(): OidcPending | null {
-  const raw = localStorage.getItem(PENDING_KEY);
+  const raw = sessionStorage.getItem(PENDING_KEY);
   if (!raw) return null;
-  localStorage.removeItem(PENDING_KEY);
+  sessionStorage.removeItem(PENDING_KEY);
   try {
     const data: StoredPending = JSON.parse(raw);
     if (data.ts && Date.now() - data.ts > PENDING_TTL_MS) return null;

@@ -5,10 +5,16 @@ import { getAccessToken, clearTokens, isTokenExpiringSoon, getRefreshToken, stor
 // Same-origin by default (Caddy proxies /api/* to the backend).
 // Only override for dev setups where frontend and backend run on different ports.
 let API_BASE = "";
+let apiBaseSet = false;
 
-/** Override the API base URL (e.g. for dev: `setApiBase("http://localhost:3001")`) */
+/** Override the API base URL. Can only be called once (set-once pattern). */
 export function setApiBase(base: string) {
+  if (apiBaseSet) {
+    console.warn("setApiBase() called more than once -- ignoring");
+    return;
+  }
   API_BASE = base;
+  apiBaseSet = true;
 }
 
 // Serialize concurrent refresh attempts so only one hits the server
@@ -71,10 +77,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(error.error || "Request failed");
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error || "Request failed");
   }
-  if (res.status === 204) return {} as T;
+  if (res.status === 204) return undefined as unknown as T;
   return res.json();
 }
 
@@ -99,6 +105,10 @@ export async function uploadFile(
   formData: FormData,
   onProgress?: (pct: number) => void,
 ): Promise<unknown> {
+  // Refresh token before upload to avoid expiry mid-upload
+  if (isTokenExpiringSoon()) {
+    await tryRefresh();
+  }
   const token = getAccessToken();
 
   if (onProgress) {
@@ -113,9 +123,9 @@ export async function uploadFile(
       });
       xhr.addEventListener("load", () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          try { resolve(JSON.parse(xhr.responseText)); } catch { resolve({}); }
+          try { resolve(JSON.parse(xhr.responseText)); } catch { resolve(undefined); }
         } else {
-          reject(new Error(xhr.statusText || "Upload failed"));
+          reject(new Error("Upload failed"));
         }
       });
       xhr.addEventListener("error", () => reject(new Error("Upload failed")));
@@ -127,6 +137,6 @@ export async function uploadFile(
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}${path}`, { method: "POST", headers, body: formData });
   if (!res.ok) throw new Error("Upload failed");
-  if (res.status === 204) return {};
+  if (res.status === 204) return undefined;
   return res.json();
 }

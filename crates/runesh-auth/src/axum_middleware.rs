@@ -22,10 +22,12 @@ pub struct AuthExemptPaths(pub Vec<String>);
 
 impl Default for AuthExemptPaths {
     fn default() -> Self {
+        // NOTE: /ws/ is NOT exempt by default -- WebSocket auth should be
+        // handled by validating the token in the first message or query param
+        // at the handler level, not by skipping middleware.
         Self(vec![
             "/auth/".into(),
             "/health".into(),
-            "/ws/".into(),
         ])
     }
 }

@@ -1,10 +1,9 @@
 //! JWT access token generation and validation + refresh token utilities.
 
 use chrono::Utc;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 use crate::error::AuthError;
 
@@ -12,7 +11,7 @@ use crate::error::AuthError;
 
 /// Token timing configuration.
 pub struct TokenConfig {
-    /// JWT signing secret.
+    /// JWT signing secret (must be at least 32 bytes).
     pub secret: String,
     /// Access token lifetime in seconds (default: 900 = 15 minutes).
     pub access_token_ttl: i64,
@@ -21,7 +20,12 @@ pub struct TokenConfig {
 }
 
 impl TokenConfig {
+    /// Create a new token config. Panics if secret is shorter than 32 bytes.
     pub fn new(secret: String) -> Self {
+        assert!(
+            secret.len() >= 32,
+            "JWT secret must be at least 32 bytes for HMAC-SHA256 security"
+        );
         Self {
             secret,
             access_token_ttl: 900,
@@ -32,8 +36,7 @@ impl TokenConfig {
 
 // ── JWT Claims ──────────────────────────────────────────────────────────────
 
-/// Claims embedded in every JWT. Projects can extend by embedding additional
-/// data in their [`AuthStore`] response rather than the JWT itself.
+/// Claims embedded in every JWT.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     /// User ID (UUID string).
@@ -76,8 +79,9 @@ pub fn issue_access_token(
         iat: now,
     };
 
+    // Explicitly use HS256 to prevent algorithm confusion attacks
     let token = encode(
-        &Header::default(),
+        &Header::new(Algorithm::HS256),
         &claims,
         &EncodingKey::from_secret(config.secret.as_bytes()),
     )?;
@@ -87,26 +91,50 @@ pub fn issue_access_token(
 
 /// Validate an access token and return its claims.
 pub fn validate_access_token(token: &str, secret: &str) -> Result<Claims, AuthError> {
+    // Pin to HS256 only - reject tokens with other algorithms
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
+    validation.set_required_spec_claims(&["sub", "exp", "iat"]);
+
     let data = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
-        &Validation::default(),
+        &validation,
     )?;
     Ok(data.claims)
 }
 
 // ── Refresh tokens ──────────────────────────────────────────────────────────
 
-/// Generate a new random refresh token string.
+/// Generate a cryptographically random 256-bit refresh token.
 pub fn generate_refresh_token() -> String {
-    Uuid::new_v4().to_string() + &Uuid::new_v4().to_string()
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
 }
 
-/// Hash a refresh token for safe storage.
+/// Hash a refresh token for safe storage (SHA-256).
 pub fn hash_refresh_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+/// Constant-time comparison of a refresh token against a stored hash.
+/// Use this instead of `==` to prevent timing attacks.
+pub fn verify_refresh_token(token: &str, stored_hash: &str) -> bool {
+    let computed = hash_refresh_token(token);
+    if computed.len() != stored_hash.len() {
+        return false;
+    }
+    // Constant-time comparison
+    computed
+        .as_bytes()
+        .iter()
+        .zip(stored_hash.as_bytes().iter())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
 }
 
 /// Compute the refresh token expiry timestamp.

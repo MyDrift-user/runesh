@@ -7,9 +7,39 @@ use std::process::Command;
 
 use crate::error::AppError;
 
+/// Validate a service name contains only safe characters.
+fn validate_name(name: &str) -> Result<(), AppError> {
+    if name.is_empty() || name.len() > 64 {
+        return Err(AppError::BadRequest("Service name must be 1-64 characters".into()));
+    }
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
+        return Err(AppError::BadRequest(
+            "Service name must contain only alphanumeric, dash, underscore, or dot".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Validate display name has no control characters or newlines.
+fn validate_display_name(name: &str) -> Result<(), AppError> {
+    if name.chars().any(|c| c.is_control()) {
+        return Err(AppError::BadRequest("Display name must not contain control characters".into()));
+    }
+    Ok(())
+}
+
+/// XML-escape a string for safe embedding in plist files.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 /// Install a system service that starts at boot.
 ///
-/// - `name`: service name (e.g. "myapp-agent")
+/// - `name`: service name (alphanumeric, dash, underscore, dot only)
 /// - `display_name`: human-readable name
 /// - `binary`: path to the executable
 /// - `args`: command-line arguments
@@ -19,6 +49,8 @@ pub fn install_service(
     binary: &Path,
     args: &[&str],
 ) -> Result<(), AppError> {
+    validate_name(name)?;
+    validate_display_name(display_name)?;
     #[cfg(target_os = "windows")]
     return install_windows(name, display_name, binary, args);
 
@@ -132,10 +164,10 @@ fn install_linux(name: &str, display_name: &str, binary: &Path, args: &[&str]) -
 
 #[cfg(target_os = "macos")]
 fn install_macos(name: &str, display_name: &str, binary: &Path, args: &[&str]) -> Result<(), AppError> {
-    let bin_path = binary.to_string_lossy();
+    let bin_path = xml_escape(&binary.to_string_lossy());
     let args_xml = args
         .iter()
-        .map(|a| format!("    <string>{a}</string>"))
+        .map(|a| format!("    <string>{}</string>", xml_escape(a)))
         .collect::<Vec<_>>()
         .join("\n");
 

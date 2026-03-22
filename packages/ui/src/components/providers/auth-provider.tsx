@@ -32,8 +32,6 @@ interface AuthProviderProps {
   loginPath?: string;
   /** Refresh interval in ms (default: 780000 = 13 minutes) */
   refreshInterval?: number;
-  /** Paths that don't require auth (checked with startsWith) */
-  publicPaths?: string[];
 }
 
 export function AuthProvider({
@@ -41,7 +39,6 @@ export function AuthProvider({
   meEndpoint = "/api/auth/me",
   loginPath = "/login",
   refreshInterval = 780_000,
-  publicPaths = ["/login", "/auth/callback", "/setup"],
 }: AuthProviderProps) {
   const [user, setUser] = useState<StoredUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);

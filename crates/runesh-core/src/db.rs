@@ -6,11 +6,13 @@ use std::time::Duration;
 /// Create a PostgreSQL connection pool with production-ready defaults.
 ///
 /// Reads `DATABASE_URL` from the environment if `url` is not provided.
+/// Returns an error (never panics) if the URL is missing or connection fails.
 pub async fn create_pool(url: Option<&str>) -> Result<PgPool, sqlx::Error> {
     let database_url = match url {
         Some(u) => u.to_string(),
-        None => std::env::var("DATABASE_URL")
-            .expect("DATABASE_URL must be set"),
+        None => std::env::var("DATABASE_URL").map_err(|_| {
+            sqlx::Error::Configuration("DATABASE_URL environment variable is not set".into())
+        })?,
     };
 
     PgPoolOptions::new()

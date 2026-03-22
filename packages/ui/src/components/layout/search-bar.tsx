@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import {
   CommandDialog,
@@ -61,19 +61,23 @@ export function SearchBar({
     return () => document.removeEventListener("keydown", down)
   }, [])
 
+  // Guard against out-of-order responses
+  const searchIdRef = useRef(0)
+
   const search = useCallback(async (q: string) => {
     if (q.length < 2) {
       setResults([])
       return
     }
+    const id = ++searchIdRef.current
     setLoading(true)
     try {
       const r = await onSearch(q)
-      setResults(r)
+      if (id === searchIdRef.current) setResults(r)
     } catch {
       // silently fail search
     } finally {
-      setLoading(false)
+      if (id === searchIdRef.current) setLoading(false)
     }
   }, [onSearch])
 
