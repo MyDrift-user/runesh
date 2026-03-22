@@ -10,13 +10,13 @@ Instead of copy-pasting the same sidebar, editor, auth flow, error handling, and
 
 | Category | Components |
 |----------|-----------|
-| **Layout** | `AppSidebar`, `DashboardShell`, `SearchBar`, `PageHeader` |
+| **Layout** | `AppSidebar`, `DashboardShell`, `SearchBar`, `PageHeader`, `TitleBar` (Tauri frameless) |
 | **Editor** | Novel WYSIWYG with `TableMenu`, `BubbleMenu`, `SlashCommand`, collapsible headings, search highlighting |
 | **Data** | `DataTable` (sortable, paginated, server-side support), `ConfirmDialog` |
 | **Providers** | `AuthProvider`, `ThemeProvider`, `QueryProvider` |
 | **Auth** | `api` client (auto token refresh, 401 retry, file upload with progress), `token-store`, PKCE utilities |
-| **Hooks** | `useIsMobile`, `useWebSocket` (auto-reconnect, auth), `usePermissions` |
-| **Utils** | `cn()`, `formatFileSize()`, `formatRelativeTime()`, `formatDateLabel()`, pagination types |
+| **Hooks** | `useIsMobile`, `useWebSocket` (auto-reconnect, auth), `usePermissions`, `useWindowControls` (Tauri), `useTauri` (detection) |
+| **Utils** | `cn()`, `formatFileSize()`, `formatRelativeTime()`, `formatDateLabel()`, pagination types, `createInvoke()` (typed Tauri IPC) |
 | **Styles** | `globals.css` (OKLCH theme, dark mode), font config (Chiron GoRound TC) |
 
 ### Backend Rust Crates
@@ -25,6 +25,7 @@ Instead of copy-pasting the same sidebar, editor, auth flow, error handling, and
 |-------|-----------------|
 | **runesh-core** | `AppError` (7 variants with HTTP mapping), `Pagination` extractor + `PaginatedResponse`, `RateLimiter`, `BroadcastRegistry` (WebSocket), `save_upload`, `create_pool`, `shutdown_signal`, request ID + logging + CORS middleware, health check handler, cross-platform service installer |
 | **runesh-auth** | OIDC discovery + PKCE, JWT access/refresh tokens, Axum middleware, `AuthStore` trait |
+| **runesh-tauri** | Tauri v2 utilities: TOML config management, system tray setup, process finder/launcher, Windows UAC elevation |
 | **runesh-tun** | Cross-platform TUN device (Windows wintun + Linux /dev/net/tun) |
 
 ### Templates
@@ -34,6 +35,7 @@ Instead of copy-pasting the same sidebar, editor, auth flow, error handling, and
 | `templates/Dockerfile` | Multi-stage: Node frontend + Rust backend + Caddy proxy |
 | `templates/compose.yaml` | PostgreSQL + app with health checks |
 | `templates/.env.example` | All environment variables for a new project |
+| `templates/tauri/` | Tauri v2 desktop app scaffold (Cargo.toml, lib.rs, tauri.conf.json, capabilities) |
 
 ## Quick start
 
@@ -63,6 +65,20 @@ runesh-auth = { path = "../RUNESH/crates/runesh-auth" }
 use runesh_core::{AppError, Pagination, PaginatedResponse, shutdown_signal};
 use runesh_core::middleware::{cors, health, logging, request_id};
 use runesh_auth::{OidcProvider, AuthStore};
+```
+
+### Tauri Desktop
+
+```toml
+# In your Tauri app's Cargo.toml
+runesh-tauri = { path = "../RUNESH/crates/runesh-tauri" }
+```
+
+```tsx
+// Frontend: frameless window with custom title bar
+import { TitleBar } from "@runesh/ui/components/layout/title-bar"
+import { useTauri } from "@runesh/ui/hooks/use-tauri"
+import { createInvoke } from "@runesh/ui/lib/tauri-invoke"
 ```
 
 ## Consumer projects

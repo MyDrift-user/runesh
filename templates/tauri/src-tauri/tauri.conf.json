@@ -1,0 +1,39 @@
+{
+  "productName": "YOUR_APP",
+  "version": "0.1.0",
+  "identifier": "com.yourorg.yourapp",
+  "build": {
+    "frontendDist": "../web/out",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "cd ../web && pnpm dev",
+    "beforeBuildCommand": "cd ../web && pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "YOUR_APP",
+        "width": 1200,
+        "height": 800,
+        "center": true,
+        "decorations": false,
+        "resizable": true,
+        "minWidth": 800,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https: wss:; img-src 'self' data: https:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
