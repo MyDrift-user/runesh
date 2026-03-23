@@ -23,17 +23,20 @@ enum Commands {
         name: Option<String>,
 
         /// GitHub repo URL for RUNESH (for Cargo git deps).
-        /// Defaults to RUNESH_REPO env var or the built-in default.
         #[arg(long)]
         repo: Option<String>,
 
-        /// Use local file paths instead of git/npm references (for offline dev).
+        /// Use local file paths instead of git/npm references.
         #[arg(long)]
         local: bool,
 
         /// Local path to the RUNESH repo (only used with --local).
         #[arg(long)]
         runesh_path: Option<String>,
+
+        /// Skip interactive prompts, use defaults (server + web + auth + rate limit + openapi + docker).
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
 }
 
@@ -41,8 +44,8 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Init { name, repo, local, runesh_path } => {
-            if let Err(e) = init::run(name, repo, local, runesh_path) {
+        Commands::Init { name, repo, local, runesh_path, yes } => {
+            if let Err(e) = init::run(name, repo, local, runesh_path, yes) {
                 eprintln!("\x1b[31merror:\x1b[0m {e}");
                 std::process::exit(1);
             }

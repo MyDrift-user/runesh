@@ -272,6 +272,20 @@ CREATE TABLE refresh_tokens (
 }
 
 pub fn web_package_json(c: &ProjectConfig) -> String {
+    let mut editor_deps = String::new();
+    if c.with_editor {
+        editor_deps = r#",
+    "novel": "^1.0.2",
+    "@tiptap/extension-table": "^2.27.2",
+    "@tiptap/extension-table-cell": "^2.27.2",
+    "@tiptap/extension-table-header": "^2.27.2",
+    "@tiptap/extension-table-row": "^2.27.2",
+    "tiptap-extension-global-drag-handle": "^0.1.18",
+    "lowlight": "^3.3.0",
+    "use-debounce": "^10.1.0",
+    "@tailwindcss/typography": "^0.5.19""#.into();
+    }
+
     format!(r#"{{
   "name": "{name}",
   "version": "0.1.0",
@@ -296,7 +310,7 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "shadcn": "^4.0.5",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
-    "tw-animate-css": "^1.4.0"
+    "tw-animate-css": "^1.4.0"{editor_deps}
   }},
   "devDependencies": {{
     "@tailwindcss/postcss": "^4",
@@ -308,7 +322,7 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "tailwindcss": "^4",
     "typescript": "^5"
   }}
-}}"#, name = c.name, ui_dep = c.npm_ui_dep())
+}}"#, name = c.name, ui_dep = c.npm_ui_dep(), editor_deps = editor_deps)
 }
 
 pub const TSCONFIG: &str = r#"{
@@ -414,6 +428,177 @@ export default function Home() {{
 }
 
 pub const UTILS_TS: &str = r#"export { cn } from "@runesh/ui/lib/utils";
+"#;
+
+// ── Novel WYSIWYG Editor templates ──────────────────────────────────────────
+
+pub fn editor_page(c: &ProjectConfig) -> String {
+    format!(r#""use client";
+
+import {{ useState }} from "react";
+import {{ PageHeader }} from "@runesh/ui/components/layout/page-header";
+import {{ RichEditor }} from "@/components/editor";
+
+export default function EditorPage() {{
+  const [content, setContent] = useState<string | null>(null);
+
+  return (
+    <div className="p-6 space-y-6">
+      <PageHeader title="Editor" description="Rich text editor with slash commands, tables, and more." />
+      <RichEditor
+        initialContent={{content}}
+        onChange={{(json) => setContent(JSON.stringify(json))}}
+      />
+    </div>
+  );
+}}
+"#)
+}
+
+pub const EDITOR_COMPONENT: &str = r#""use client";
+
+import { useMemo, useState, useRef, useEffect } from "react";
+import {
+  EditorRoot,
+  EditorContent,
+  EditorCommand,
+  EditorCommandItem,
+  EditorCommandList,
+  EditorCommandEmpty,
+  type JSONContent,
+  type EditorInstance,
+  handleCommandNavigation,
+} from "novel";
+import { useDebouncedCallback } from "use-debounce";
+import { defaultExtensions } from "@runesh/ui/editor/extensions";
+import { slashCommand, suggestionItems } from "@runesh/ui/editor/slash-command";
+import { EditorBubbleMenu } from "@runesh/ui/editor/bubble-menu";
+import { TableMenu } from "@runesh/ui/editor/table-menu";
+import { SearchHighlightExtension } from "@runesh/ui/editor/search-highlight-extension";
+import { CollapsibleHeadingExtension } from "@runesh/ui/editor/collapsible-heading-extension";
+import { FileHandlerExtension, type UploadFn } from "@runesh/ui/editor/file-handler";
+import { uploadFile } from "@runesh/ui/lib/api-client";
+
+// Upload handler -- sends files to your API and returns the URL
+const onUpload: UploadFn = async (file: File) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  const result = await uploadFile("/api/uploads", formData) as { url?: string };
+  return result?.url || "";
+};
+
+interface RichEditorProps {
+  initialContent?: string | null;
+  onChange?: (json: JSONContent) => void;
+}
+
+export function RichEditor({ initialContent, onChange }: RichEditorProps) {
+  const extensions = useMemo(
+    () => [
+      ...defaultExtensions,
+      slashCommand,
+      SearchHighlightExtension,
+      CollapsibleHeadingExtension,
+      FileHandlerExtension.configure({ onUpload }),
+    ],
+    []
+  );
+  const [editorInstance, setEditorInstance] = useState<EditorInstance | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Listen for file uploads from slash commands
+  useEffect(() => {
+    if (!editorInstance) return;
+    const handler = async (e: Event) => {
+      const file = (e as CustomEvent).detail?.file as File;
+      if (!file) return;
+      const url = await onUpload(file);
+      if (!url) return;
+
+      if (file.type.startsWith("image/")) {
+        editorInstance.chain().focus().insertContent({ type: "image", attrs: { src: url } }).run();
+      } else if (file.type.startsWith("video/")) {
+        editorInstance.chain().focus().insertContent({ type: "video", attrs: { src: url, fileName: file.name } }).run();
+      } else if (file.type.startsWith("audio/")) {
+        editorInstance.chain().focus().insertContent({ type: "audio", attrs: { src: url, fileName: file.name } }).run();
+      } else {
+        editorInstance.chain().focus().insertContent({
+          type: "fileAttachment",
+          attrs: { src: url, fileName: file.name, fileSize: file.size, fileType: file.type },
+        }).run();
+      }
+    };
+    document.addEventListener("editor-file-upload", handler);
+    return () => document.removeEventListener("editor-file-upload", handler);
+  }, [editorInstance]);
+
+  const parsedContent = useMemo(() => {
+    if (!initialContent) return undefined;
+    try {
+      const parsed = JSON.parse(initialContent);
+      if (parsed?.type === "doc") return parsed;
+    } catch {}
+    return undefined;
+  }, [initialContent]);
+
+  const debouncedUpdate = useDebouncedCallback((editor: EditorInstance) => {
+    onChange?.(editor.getJSON());
+  }, 500);
+
+  return (
+    <div ref={scrollRef} className="relative min-h-[500px] border rounded-lg overflow-y-auto">
+      {editorInstance && (
+        <TableMenu editor={editorInstance} scrollContainer={scrollRef.current} />
+      )}
+      <EditorRoot>
+        <EditorContent
+          extensions={extensions}
+          initialContent={parsedContent}
+          onUpdate={({ editor }) => {
+            setEditorInstance(editor);
+            debouncedUpdate(editor);
+          }}
+          onCreate={({ editor }) => setEditorInstance(editor)}
+          editorProps={{
+            handleDOMEvents: {
+              keydown: (_view, event) => handleCommandNavigation(event),
+            },
+            attributes: {
+              class:
+                "prose prose-neutral dark:prose-invert prose-headings:font-bold focus:outline-none max-w-3xl mx-auto px-8 sm:px-12 py-8 pb-32",
+            },
+          }}
+          className="min-h-[500px]"
+        >
+          <EditorCommand className="z-50 h-auto max-h-[330px] w-72 overflow-y-auto rounded-lg border border-muted bg-background px-1 py-2 shadow-xl">
+            <EditorCommandEmpty className="px-2 text-muted-foreground text-sm">
+              No results
+            </EditorCommandEmpty>
+            <EditorCommandList>
+              {suggestionItems.map((item) => (
+                <EditorCommandItem
+                  value={item.title}
+                  onCommand={(val) => item.command?.(val)}
+                  className="flex w-full items-center space-x-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent aria-selected:bg-accent cursor-pointer"
+                  key={item.title}
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-md border border-muted bg-background">
+                    {item.icon}
+                  </div>
+                  <div>
+                    <p className="font-medium">{item.title}</p>
+                    <p className="text-xs text-muted-foreground">{item.description}</p>
+                  </div>
+                </EditorCommandItem>
+              ))}
+            </EditorCommandList>
+          </EditorCommand>
+          <EditorBubbleMenu />
+        </EditorContent>
+      </EditorRoot>
+    </div>
+  );
+}
 "#;
 
 pub fn dot_env(c: &ProjectConfig) -> String {
@@ -696,6 +881,7 @@ pub fn claude_md(c: &ProjectConfig) -> String {
     if c.with_rate_limit { features.push("Rate limiting"); }
     if c.with_ws { features.push("WebSocket broadcast"); }
     if c.with_upload { features.push("File upload"); }
+    if c.with_editor { features.push("Novel WYSIWYG editor (wiki/rich text)"); }
     if c.with_openapi { features.push("OpenAPI / Swagger UI"); }
     if c.with_docker { features.push("Docker deployment"); }
     if c.has_tauri { features.push("Tauri v2 desktop"); }

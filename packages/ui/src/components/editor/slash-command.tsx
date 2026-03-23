@@ -11,6 +11,10 @@ import {
     TextQuote,
     Minus,
     Table,
+    ImageIcon,
+    Video,
+    Music,
+    Paperclip,
 } from "lucide-react";
 import { createSuggestionItems, Command, renderItems } from "novel";
 
@@ -155,6 +159,86 @@ export const suggestionItems = createSuggestionItems([
         icon: <Minus size={18} />,
         command: ({ editor, range }) => {
             editor.chain().focus().deleteRange(range).setHorizontalRule().run();
+        },
+    },
+    {
+        title: "Image",
+        description: "Upload or embed an image.",
+        searchTerms: ["image", "photo", "picture", "img"],
+        icon: <ImageIcon size={18} />,
+        command: ({ editor, range }) => {
+            editor.chain().focus().deleteRange(range).run();
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = "image/*";
+            input.onchange = () => {
+                const file = input.files?.[0];
+                if (file) {
+                    // Triggers the FileHandlerExtension's onUpload if configured
+                    const event = new CustomEvent("editor-file-upload", { detail: { file } });
+                    document.dispatchEvent(event);
+                }
+            };
+            input.click();
+        },
+    },
+    {
+        title: "Video",
+        description: "Upload a video file.",
+        searchTerms: ["video", "movie", "mp4", "clip"],
+        icon: <Video size={18} />,
+        command: ({ editor, range }) => {
+            editor.chain().focus().deleteRange(range).run();
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = "video/*";
+            input.onchange = () => {
+                const file = input.files?.[0];
+                if (file) {
+                    const event = new CustomEvent("editor-file-upload", { detail: { file } });
+                    document.dispatchEvent(event);
+                }
+            };
+            input.click();
+        },
+    },
+    {
+        title: "Audio",
+        description: "Upload an audio file.",
+        searchTerms: ["audio", "sound", "music", "mp3"],
+        icon: <Music size={18} />,
+        command: ({ editor, range }) => {
+            editor.chain().focus().deleteRange(range).run();
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = "audio/*";
+            input.onchange = () => {
+                const file = input.files?.[0];
+                if (file) {
+                    const event = new CustomEvent("editor-file-upload", { detail: { file } });
+                    document.dispatchEvent(event);
+                }
+            };
+            input.click();
+        },
+    },
+    {
+        title: "File",
+        description: "Attach any file (PDF, document, etc).",
+        searchTerms: ["file", "attachment", "pdf", "document", "upload"],
+        icon: <Paperclip size={18} />,
+        command: ({ editor, range }) => {
+            editor.chain().focus().deleteRange(range).run();
+            const input = document.createElement("input");
+            input.type = "file";
+            input.onchange = () => {
+                const file = input.files?.[0];
+                if (file) {
+                    const event = new CustomEvent("editor-file-upload", { detail: { file } });
+                    document.dispatchEvent(event);
+                }
+            };
+            input.click();
         },
     },
 ]);

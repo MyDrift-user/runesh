@@ -12,6 +12,7 @@ pub fn run(
     repo_override: Option<String>,
     use_local: bool,
     local_path: Option<String>,
+    accept_defaults: bool,
 ) -> Result<(), String> {
     println!("\n  {}  {}\n", style("RUNESH").bold().cyan(), style("Project Scaffolder").dim());
 
@@ -34,34 +35,70 @@ pub fn run(
 
     // ── Step 1: Pick components ─────────────────────────────────────────
 
-    println!("  {} Select the components for your project:\n", style("1/3").dim());
+    let (has_server, has_web, has_tauri, has_desktop_frontend, has_extension);
 
-    let components = &[
-        "Rust API server (Axum + PostgreSQL)",
-        "Web frontend (Next.js + shadcn/ui)",
-        "Tauri desktop app",
-        "Desktop frontend (separate from web, for Tauri)",
-        "Chrome extension (WXT + React)",
-    ];
+    if accept_defaults {
+        has_server = true;
+        has_web = true;
+        has_tauri = false;
+        has_desktop_frontend = false;
+        has_extension = false;
+        println!("  {} Using defaults: Rust server + Web frontend\n", style("->").green());
+    } else {
+        println!("  {} Select the components for your project:\n", style("1/3").dim());
 
-    let selected = MultiSelect::new()
-        .with_prompt("Components (space to toggle, enter to confirm)")
-        .items(components)
-        .defaults(&[true, true, false, false, false])
-        .interact()
-        .map_err(|e| e.to_string())?;
+        let components = &[
+            "Rust API server (Axum + PostgreSQL)",
+            "Web frontend (Next.js + shadcn/ui)",
+            "Tauri desktop app",
+            "Desktop frontend (separate from web, for Tauri)",
+            "Chrome extension (WXT + React)",
+        ];
 
-    let has_server = selected.contains(&0);
-    let has_web = selected.contains(&1);
-    let has_tauri = selected.contains(&2);
-    let has_desktop_frontend = selected.contains(&3);
-    let has_extension = selected.contains(&4);
+        let selected = MultiSelect::new()
+            .with_prompt("Components (space to toggle, enter to confirm)")
+            .items(components)
+            .defaults(&[true, true, false, false, false])
+            .interact()
+            .map_err(|e| e.to_string())?;
 
-    if selected.is_empty() {
-        return Err("No components selected".into());
+        if selected.is_empty() {
+            return Err("No components selected".into());
+        }
+
+        has_server = selected.contains(&0);
+        has_web = selected.contains(&1);
+        has_tauri = selected.contains(&2);
+        has_desktop_frontend = selected.contains(&3);
+        has_extension = selected.contains(&4);
     }
 
-    // ── Step 2: Pick server features (if server selected) ───────────────
+    // ── Step 2: Pick frontend features (if web selected) ──────────────
+
+    let mut with_editor = false;
+
+    if has_web {
+        if accept_defaults {
+            with_editor = true;
+        } else {
+            println!("\n  {} Select frontend features:\n", style("2/4").dim());
+
+            let features = &[
+                "Novel WYSIWYG editor (wiki/rich text with tables, slash commands)",
+            ];
+
+            let sel = MultiSelect::new()
+                .with_prompt("Frontend features (space to toggle)")
+                .items(features)
+                .defaults(&[true])
+                .interact()
+                .map_err(|e| e.to_string())?;
+
+            with_editor = sel.contains(&0);
+        }
+    }
+
+    // ── Step 3: Pick server features (if server selected) ───────────────
 
     let mut with_auth = false;
     let mut with_rate_limit = false;
@@ -71,48 +108,59 @@ pub fn run(
     let mut with_docker = false;
 
     if has_server {
-        println!("\n  {} Select server features:\n", style("2/3").dim());
+        if accept_defaults {
+            with_auth = true;
+            with_rate_limit = true;
+            with_openapi = true;
+            with_docker = true;
+        } else {
+            println!("\n  {} Select server features:\n", style("3/4").dim());
 
-        let features = &[
-            "OIDC Authentication (runesh-auth)",
-            "Rate Limiting",
-            "WebSocket Broadcast",
-            "File Upload Handler",
-            "OpenAPI / Swagger UI (utoipa)",
-            "Docker (Dockerfile + compose.yaml)",
-        ];
+            let features = &[
+                "OIDC Authentication (runesh-auth)",
+                "Rate Limiting",
+                "WebSocket Broadcast",
+                "File Upload Handler",
+                "OpenAPI / Swagger UI (utoipa)",
+                "Docker (Dockerfile + compose.yaml)",
+            ];
 
-        let sel = MultiSelect::new()
-            .with_prompt("Server features (space to toggle)")
-            .items(features)
-            .defaults(&[true, true, false, false, true, true])
-            .interact()
-            .map_err(|e| e.to_string())?;
+            let sel = MultiSelect::new()
+                .with_prompt("Server features (space to toggle)")
+                .items(features)
+                .defaults(&[true, true, false, false, true, true])
+                .interact()
+                .map_err(|e| e.to_string())?;
 
-        with_auth = sel.contains(&0);
-        with_rate_limit = sel.contains(&1);
-        with_ws = sel.contains(&2);
-        with_upload = sel.contains(&3);
-        with_openapi = sel.contains(&4);
-        with_docker = sel.contains(&5);
+            with_auth = sel.contains(&0);
+            with_rate_limit = sel.contains(&1);
+            with_ws = sel.contains(&2);
+            with_upload = sel.contains(&3);
+            with_openapi = sel.contains(&4);
+            with_docker = sel.contains(&5);
+        }
     }
 
     // ── Step 3: Server config (if server selected) ──────────────────────
 
     let (db_name, port) = if has_server {
-        println!("\n  {} Configure:\n", style("3/3").dim());
+        if accept_defaults {
+            (project_name.clone(), "3001".into())
+        } else {
+            println!("\n  {} Configure:\n", style("4/4").dim());
 
-        let db: String = Input::new()
-            .with_prompt("Database name")
-            .default(project_name.clone())
-            .interact_text()
-            .map_err(|e| e.to_string())?;
-        let p: String = Input::new()
-            .with_prompt("Backend port")
-            .default("3001".into())
-            .interact_text()
-            .map_err(|e| e.to_string())?;
-        (db, p)
+            let db: String = Input::new()
+                .with_prompt("Database name")
+                .default(project_name.clone())
+                .interact_text()
+                .map_err(|e| e.to_string())?;
+            let p: String = Input::new()
+                .with_prompt("Backend port")
+                .default("3001".into())
+                .interact_text()
+                .map_err(|e| e.to_string())?;
+            (db, p)
+        }
     } else {
         (String::new(), String::new())
     };
@@ -136,6 +184,7 @@ pub fn run(
         with_rate_limit,
         with_ws,
         with_upload,
+        with_editor,
         with_openapi,
         with_docker,
     };
@@ -216,6 +265,7 @@ pub(crate) struct ProjectConfig {
     pub with_rate_limit: bool,
     pub with_ws: bool,
     pub with_upload: bool,
+    pub with_editor: bool,
     pub with_openapi: bool,
     pub with_docker: bool,
 }
@@ -438,6 +488,11 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         w("web/src/app/layout.tsx", &templates::layout_tsx(c, false))?;
         w("web/src/app/page.tsx", &templates::home_page(c))?;
         w("web/src/lib/utils.ts", templates::UTILS_TS)?;
+
+        if c.with_editor {
+            w("web/src/app/editor/page.tsx", &templates::editor_page(c))?;
+            w("web/src/components/editor.tsx", templates::EDITOR_COMPONENT)?;
+        }
     }
 
     // ── Docker ──────────────────────────────────────────────────────────

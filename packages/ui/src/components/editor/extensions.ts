@@ -17,7 +17,11 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import GlobalDragHandle from "tiptap-extension-global-drag-handle";
+import Image from "@tiptap/extension-image";
 import { cx } from "class-variance-authority";
+import { VideoExtension } from "./video-extension";
+import { AudioExtension } from "./audio-extension";
+import { FileAttachmentExtension } from "./file-attachment-extension";
 import { common, createLowlight } from "lowlight";
 
 /**
@@ -234,6 +238,13 @@ const tableHeader = TableHeader.configure({
     },
 });
 
+const image = Image.configure({
+    HTMLAttributes: {
+        class: cx("rounded-lg max-w-full h-auto my-4"),
+    },
+    allowBase64: true,
+});
+
 export const defaultExtensions = [
     starterKit,
     tiptapLink,
@@ -245,6 +256,10 @@ export const defaultExtensions = [
     tableRow,
     tableCell,
     tableHeader,
+    image,
+    VideoExtension,
+    AudioExtension,
+    FileAttachmentExtension,
     TiptapUnderline,
     HighlightExtension,
     TextStyle,

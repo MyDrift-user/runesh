@@ -14,12 +14,17 @@
     "./editor/*": "./src/components/editor/*.tsx",
     "./editor/extensions": "./src/components/editor/extensions.ts",
     "./editor/collapsible-heading-extension": "./src/components/editor/collapsible-heading-extension.ts",
-    "./editor/search-highlight-extension": "./src/components/editor/search-highlight-extension.ts"
+    "./editor/search-highlight-extension": "./src/components/editor/search-highlight-extension.ts",
+    "./editor/file-handler": "./src/components/editor/file-handler.tsx",
+    "./editor/video-extension": "./src/components/editor/video-extension.tsx",
+    "./editor/audio-extension": "./src/components/editor/audio-extension.tsx",
+    "./editor/file-attachment-extension": "./src/components/editor/file-attachment-extension.tsx"
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",
     "@tanstack/react-query": "^5.90.21",
     "@tiptap/core": "^2.27.2",
+    "@tiptap/extension-image": "^2.27.2",
     "@tiptap/extension-table": "^2.27.2",
     "@tiptap/extension-table-cell": "^2.27.2",
     "@tiptap/extension-table-header": "^2.27.2",
