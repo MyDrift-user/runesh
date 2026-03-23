@@ -112,22 +112,67 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
         }
     };
 
-    // Extract Bearer token
-    let auth_header = req
+    // Extract token: try Authorization header first (API clients), then cookie (sessions)
+    let cookie_str = req.headers().get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let bearer_token = req
         .headers()
         .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok());
+        .and_then(|v| v.to_str().ok())
+        .filter(|h| h.starts_with("Bearer "))
+        .map(|h| h[7..].to_string());
 
-    let token = match auth_header {
-        Some(h) if h.starts_with("Bearer ") => &h[7..],
-        _ => {
+    // Try both cookie name formats (with and without __Host- prefix)
+    let cookie_token = cookie_str.split(';').find_map(|c| {
+        let c = c.trim();
+        c.strip_prefix("__Host-access=")
+            .or_else(|| c.strip_prefix("access="))
+    }).map(|s| s.to_string());
+
+    let is_cookie_auth = bearer_token.is_none() && cookie_token.is_some();
+
+    let token = match bearer_token.or(cookie_token) {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "missing or invalid Authorization header"})),
+                Json(serde_json::json!({"error": "not authenticated"})),
             )
                 .into_response();
         }
     };
+
+    // CSRF check for state-changing methods when using cookie auth
+    if is_cookie_auth {
+        let method = req.method().clone();
+        if matches!(method, axum::http::Method::POST | axum::http::Method::PUT | axum::http::Method::PATCH | axum::http::Method::DELETE) {
+            // Verify X-CSRF-Token header matches CSRF cookie
+            let csrf_cookie = cookie_str.split(';').find_map(|c| {
+                let c = c.trim();
+                c.strip_prefix("__Host-csrf=")
+                    .or_else(|| c.strip_prefix("csrf="))
+            });
+            let csrf_header = req.headers().get("x-csrf-token")
+                .and_then(|v| v.to_str().ok());
+
+            let csrf_valid = match (csrf_cookie, csrf_header) {
+                (Some(c), Some(h)) if !c.is_empty() && c.len() == h.len() => {
+                    c.as_bytes().iter().zip(h.as_bytes().iter())
+                        .fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+                }
+                _ => false,
+            };
+
+            if !csrf_valid {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({"error": "invalid CSRF token"})),
+                ).into_response();
+            }
+        }
+    }
 
     match validate_access_token(token, &secret) {
         Ok(claims) => {

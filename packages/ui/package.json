@@ -1,7 +1,9 @@
 {
   "name": "@runesh/ui",
   "version": "0.1.0",
-  "private": true,
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "type": "module",
   "exports": {
     "./components/*": "./src/components/*.tsx",

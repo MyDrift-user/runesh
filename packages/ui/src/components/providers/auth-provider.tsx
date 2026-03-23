@@ -1,19 +1,27 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
-import { getAccessToken, getStoredUser, storeTokens, clearTokens, isTokenExpiringSoon, type StoredUser } from "@/lib/token-store";
 import { api } from "@/lib/api-client";
 
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  avatar_url: string | null;
+  permissions?: string[];
+}
+
 interface AuthContextValue {
-  user: StoredUser | null;
+  user: AuthUser | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  /** Call after successful login to store tokens and set user */
-  setSession: (accessToken: string, refreshToken: string, expiresIn: number, user: StoredUser) => void;
-  /** Clear session and redirect to login */
+  /** Redirect to OIDC login */
+  login: () => void;
+  /** Clear session and redirect to login page */
   logout: () => void;
-  /** Get current access token (refreshes if needed) */
-  getToken: () => string | null;
+  /** Refresh current user data from server */
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -26,95 +34,87 @@ export function useAuth() {
 
 interface AuthProviderProps {
   children: React.ReactNode;
-  /** API endpoint to validate token and get current user (default: "/api/auth/me") */
-  meEndpoint?: string;
   /** Where to redirect on logout (default: "/login") */
   loginPath?: string;
-  /** Refresh interval in ms (default: 780000 = 13 minutes) */
+  /** How often to refresh the session in ms (default: 780000 = 13 min) */
   refreshInterval?: number;
 }
 
 export function AuthProvider({
   children,
-  meEndpoint = "/api/auth/me",
   loginPath = "/login",
   refreshInterval = 780_000,
 }: AuthProviderProps) {
-  const [user, setUser] = useState<StoredUser | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const refreshTimer = useRef<ReturnType<typeof setInterval>>();
 
-  const logout = useCallback(() => {
-    clearTokens();
+  const fetchUser = useCallback(async () => {
+    try {
+      const me = await api.get<AuthUser>("/api/auth/me");
+      setUser(me);
+      return true;
+    } catch {
+      setUser(null);
+      return false;
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await api.post("/api/auth/logout");
+    } catch {
+      // best-effort
+    }
     setUser(null);
     if (typeof window !== "undefined") {
-      window.location.href = loginPath;
+      // Validate loginPath is a safe relative path (prevent open redirect)
+      const safePath = loginPath.startsWith("/") && !loginPath.startsWith("//") && !loginPath.includes(":")
+        ? loginPath : "/login";
+      window.location.href = safePath;
     }
   }, [loginPath]);
 
-  const setSession = useCallback((accessToken: string, refreshToken: string, expiresIn: number, userData: StoredUser) => {
-    storeTokens(accessToken, refreshToken, expiresIn, userData);
-    setUser(userData);
+  const login = useCallback(() => {
+    // Redirect to OIDC login start - backend returns the auth URL
+    window.location.href = "/api/auth/login/start";
   }, []);
 
-  const getToken = useCallback(() => getAccessToken(), []);
+  const refreshUser = useCallback(async () => {
+    await fetchUser();
+  }, [fetchUser]);
 
-  // Validate stored session on mount
+  // Check session on mount
   useEffect(() => {
-    const init = async () => {
-      const token = getAccessToken();
-      const stored = getStoredUser();
+    fetchUser().finally(() => setIsLoading(false));
+  }, [fetchUser]);
 
-      if (!token) {
-        setIsLoading(false);
-        return;
-      }
-
-      // Try to validate with the server
-      try {
-        const me = await api.get<StoredUser>(meEndpoint);
-        setUser(me);
-      } catch {
-        // Server unreachable or token invalid - use stored user if token not expired
-        if (stored && !isTokenExpiringSoon()) {
-          setUser(stored);
-        } else {
-          clearTokens();
-        }
-      }
-      setIsLoading(false);
-    };
-
-    init();
-  }, [meEndpoint]);
-
-  // Schedule periodic token refresh
+  // Periodic session refresh (keeps cookies alive)
   useEffect(() => {
     if (!user) return;
 
     refreshTimer.current = setInterval(async () => {
-      if (isTokenExpiringSoon()) {
-        try {
-          await api.get(meEndpoint); // triggers auto-refresh via api-client
-        } catch {
-          logout();
-        }
+      try {
+        await api.post("/api/auth/refresh");
+        await fetchUser();
+      } catch {
+        setUser(null);
       }
     }, refreshInterval);
 
     return () => {
       if (refreshTimer.current) clearInterval(refreshTimer.current);
     };
-  }, [user, meEndpoint, refreshInterval, logout]);
+  }, [user, refreshInterval, fetchUser]);
 
   return (
     <AuthContext.Provider value={{
       user,
       isLoading,
       isAuthenticated: !!user,
-      setSession,
+      login,
       logout,
-      getToken,
+      refreshUser,
     }}>
       {children}
     </AuthContext.Provider>

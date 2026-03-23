@@ -1,13 +1,10 @@
 "use client";
 
-import { getAccessToken, clearTokens, isTokenExpiringSoon, getRefreshToken, storeTokens } from "./token-store";
-
 // Same-origin by default (Caddy proxies /api/* to the backend).
-// Only override for dev setups where frontend and backend run on different ports.
 let API_BASE = "";
 let apiBaseSet = false;
 
-/** Override the API base URL. Can only be called once (set-once pattern). */
+/** Override the API base URL. Can only be called once. */
 export function setApiBase(base: string) {
   if (apiBaseSet) {
     console.warn("setApiBase() called more than once -- ignoring");
@@ -17,24 +14,29 @@ export function setApiBase(base: string) {
   apiBaseSet = true;
 }
 
-// Serialize concurrent refresh attempts so only one hits the server
+/** Read the CSRF token from the __Host-csrf cookie only (no fallback). */
+function getCsrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie
+    .split(";")
+    .map((c) => c.trim())
+    .find((c) => c.startsWith("__Host-csrf="));
+  return match?.split("=")[1] ?? null;
+}
+
+// Deduplicate concurrent refresh attempts
 let refreshPromise: Promise<boolean> | null = null;
 
-async function tryRefresh(): Promise<boolean> {
+async function refreshSession(): Promise<boolean> {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
-    const refreshToken = getRefreshToken();
-    if (!refreshToken) return false;
     try {
       const res = await fetch(`${API_BASE}/api/auth/refresh`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
+        credentials: "include",
+        headers: { "X-CSRF-Token": getCsrfToken() ?? "" },
       });
-      if (!res.ok) return false;
-      const data = await res.json();
-      storeTokens(data.access_token, data.refresh_token, data.expires_in);
-      return true;
+      return res.ok;
     } catch {
       return false;
     }
@@ -47,33 +49,53 @@ async function tryRefresh(): Promise<boolean> {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  // Auto-refresh if token is expiring soon
-  if (isTokenExpiringSoon()) {
-    await tryRefresh();
-  }
-
-  const token = getAccessToken();
+  const method = options?.method?.toUpperCase() ?? "GET";
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options?.headers as Record<string, string>),
   };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+
+  // Add CSRF token for state-changing methods
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    const csrf = getCsrfToken();
+    if (csrf) headers["X-CSRF-Token"] = csrf;
   }
 
-  let res = await fetch(`${API_BASE}${path}`, { ...options, headers, cache: "no-store" as RequestCache });
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+    credentials: "include",
+    cache: "no-store" as RequestCache,
+  });
 
-  // Retry once on 401 with token refresh
-  if (res.status === 401 && token) {
-    const ok = await tryRefresh();
-    if (ok) {
-      headers["Authorization"] = `Bearer ${getAccessToken()}`;
-      res = await fetch(`${API_BASE}${path}`, { ...options, headers, cache: "no-store" as RequestCache });
-    } else {
-      clearTokens();
-      if (typeof window !== "undefined") window.location.href = "/login";
-      throw new Error("Session expired");
+  // On 401, try refreshing the session once (deduplicated)
+  if (res.status === 401) {
+    const refreshed = await refreshSession();
+    if (refreshed) {
+      // Re-read CSRF token after refresh (it may have rotated)
+      const freshCsrf = getCsrfToken();
+      if (freshCsrf && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+        headers["X-CSRF-Token"] = freshCsrf;
+      }
+
+      const retryRes = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers,
+        credentials: "include",
+        cache: "no-store" as RequestCache,
+      });
+
+      if (retryRes.ok) {
+        if (retryRes.status === 204) return undefined as unknown as T;
+        return retryRes.json();
+      }
     }
+
+    // Refresh failed - redirect to login
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+    throw new Error("Session expired");
   }
 
   if (!res.ok) {
@@ -84,7 +106,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-/** Shared API client with auto token refresh and 401 retry. */
+/** Shared API client with cookie-based auth, CSRF protection, and 401 auto-refresh. */
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
@@ -98,25 +120,20 @@ export const api = {
 
 /**
  * Upload a file with optional progress tracking.
- * Uses XMLHttpRequest when onProgress is provided for granular updates.
  */
 export async function uploadFile(
   path: string,
   formData: FormData,
   onProgress?: (pct: number) => void,
 ): Promise<unknown> {
-  // Refresh token before upload to avoid expiry mid-upload
-  if (isTokenExpiringSoon()) {
-    await tryRefresh();
-  }
-  const token = getAccessToken();
-
   if (onProgress) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", `${API_BASE}${path}`);
-      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-      xhr.timeout = 3_600_000; // 1 hour for large files
+      xhr.withCredentials = true;
+      const csrf = getCsrfToken();
+      if (csrf) xhr.setRequestHeader("X-CSRF-Token", csrf);
+      xhr.timeout = 3_600_000;
 
       xhr.upload.addEventListener("progress", (e) => {
         if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
@@ -134,8 +151,15 @@ export async function uploadFile(
   }
 
   const headers: Record<string, string> = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${API_BASE}${path}`, { method: "POST", headers, body: formData });
+  const csrf = getCsrfToken();
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers,
+    body: formData,
+    credentials: "include",
+  });
   if (!res.ok) throw new Error("Upload failed");
   if (res.status === 204) return undefined;
   return res.json();

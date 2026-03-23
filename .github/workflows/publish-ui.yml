@@ -1,0 +1,35 @@
+name: Publish @runesh/ui
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/ui/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Setup .npmrc for GitHub Packages
+        run: |
+          echo "@runesh:registry=https://npm.pkg.github.com" >> packages/ui/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> packages/ui/.npmrc
+
+      - name: Install dependencies
+        working-directory: packages/ui
+        run: bun install --no-save
+
+      - name: Publish to GitHub Packages
+        working-directory: packages/ui
+        run: bun publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

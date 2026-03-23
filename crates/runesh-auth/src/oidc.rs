@@ -104,14 +104,15 @@ impl OidcProvider {
     }
 
     /// Exchange an authorization code for tokens and fetch user info.
+    ///
+    /// Always uses the configured `redirect_uri` to prevent open-redirect attacks.
     pub async fn exchange_code(
         &self,
         code: &str,
         code_verifier: &str,
-        redirect_uri: Option<&str>,
     ) -> Result<(TokenResponse, OidcUserInfo), AuthError> {
         let http = reqwest::Client::new();
-        let redirect = redirect_uri.unwrap_or(&self.redirect_uri);
+        let redirect = &self.redirect_uri;
 
         let mut params: Vec<(&str, &str)> = vec![
             ("grant_type", "authorization_code"),
@@ -339,7 +340,7 @@ impl OidcSessionStore {
             let sessions = self.sessions.read().await;
             if sessions.len() >= self.max_sessions {
                 tracing::warn!("OIDC session store at capacity, rejecting new session");
-                // Return empty session - caller should handle gracefully
+                return (String::new(), String::new());
             }
         }
         let session_id = Uuid::new_v4().to_string();

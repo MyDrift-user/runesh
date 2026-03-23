@@ -2,6 +2,11 @@ use clap::{Parser, Subcommand};
 
 mod init;
 
+/// Default GitHub repo for RUNESH shared code.
+/// Override with --repo flag or RUNESH_REPO env var.
+pub const DEFAULT_REPO: &str = "https://github.com/USER/RUNESH";
+pub const DEFAULT_NPM_SCOPE: &str = "@runesh";
+
 #[derive(Parser)]
 #[command(name = "runesh", version, about = "Scaffold and manage RUNESH-based projects")]
 struct Cli {
@@ -11,10 +16,24 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Create a new project with RUNESH shared code
+    /// Create a new project in the current directory (or a new subdirectory)
     Init {
-        /// Project name (e.g. "my-app"). Creates a directory with this name.
+        /// Initialize in a new subdirectory with this name.
+        /// If omitted, initializes in the current directory.
         name: Option<String>,
+
+        /// GitHub repo URL for RUNESH (for Cargo git deps).
+        /// Defaults to RUNESH_REPO env var or the built-in default.
+        #[arg(long)]
+        repo: Option<String>,
+
+        /// Use local file paths instead of git/npm references (for offline dev).
+        #[arg(long)]
+        local: bool,
+
+        /// Local path to the RUNESH repo (only used with --local).
+        #[arg(long)]
+        runesh_path: Option<String>,
     },
 }
 
@@ -22,8 +41,8 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Init { name } => {
-            if let Err(e) = init::run(name) {
+        Commands::Init { name, repo, local, runesh_path } => {
+            if let Err(e) = init::run(name, repo, local, runesh_path) {
                 eprintln!("\x1b[31merror:\x1b[0m {e}");
                 std::process::exit(1);
             }

@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getAccessToken } from "@/lib/token-store";
 
 interface UseWebSocketOptions {
-  /** WebSocket URL (e.g. "ws://localhost:8080/ws") */
+  /** WebSocket URL (e.g. "wss://localhost:8080/ws") */
   url: string;
   /** Auto-reconnect on disconnect (default: true) */
   autoReconnect?: boolean;
@@ -12,8 +11,13 @@ interface UseWebSocketOptions {
   maxReconnectDelay?: number;
   /** Max reconnect attempts before giving up (default: 20) */
   maxReconnectAttempts?: number;
-  /** Send auth token as first message after connect instead of in URL (default: true) */
+  /** Authenticate via a server-issued ticket (default: true).
+   *  Calls ticketEndpoint to get a single-use ticket, then sends it
+   *  as the first WebSocket message. The server validates and maps
+   *  the ticket to a session. */
   withAuth?: boolean;
+  /** Endpoint that returns { ticket: string } (default: "/api/auth/ws-ticket") */
+  ticketEndpoint?: string;
   /** Called when a message is received */
   onMessage?: (data: unknown) => void;
   /** Called on connection open */
@@ -41,6 +45,7 @@ export function useWebSocket({
   maxReconnectDelay = 30_000,
   maxReconnectAttempts = 20,
   withAuth = true,
+  ticketEndpoint = "/api/auth/ws-ticket",
   onMessage,
   onOpen,
   onClose,
@@ -65,19 +70,33 @@ export function useWebSocket({
   const connect = useCallback(() => {
     if (typeof window === "undefined") return;
 
-    // Connect without token in URL - send auth as first message instead
+    // Enforce WSS in production
+    if (process.env.NODE_ENV === "production" && url.startsWith("ws://")) {
+      console.error("Refusing insecure WebSocket connection in production. Use wss://");
+      return;
+    }
+
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => {
+    ws.onopen = async () => {
       setReadyState(WebSocket.OPEN);
       reconnectAttempt.current = 0;
 
-      // Send auth token as first message (not in URL to avoid log exposure)
+      // Authenticate via single-use ticket (not raw token)
       if (withAuth) {
-        const token = getAccessToken();
-        if (token) {
-          ws.send(JSON.stringify({ type: "auth", token }));
+        try {
+          const res = await fetch(ticketEndpoint, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+          });
+          if (res.ok) {
+            const { ticket } = await res.json();
+            ws.send(JSON.stringify({ type: "auth", ticket }));
+          }
+        } catch {
+          // Auth failed - connection will proceed unauthenticated
         }
       }
 
@@ -111,14 +130,14 @@ export function useWebSocket({
     ws.onerror = () => {
       ws.close();
     };
-  }, [url, withAuth, autoReconnect, maxReconnectDelay, maxReconnectAttempts]);
+  }, [url, withAuth, ticketEndpoint, autoReconnect, maxReconnectDelay, maxReconnectAttempts]);
 
   useEffect(() => {
     connect();
     return () => {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (wsRef.current) {
-        wsRef.current.onclose = null; // prevent reconnect on intentional close
+        wsRef.current.onclose = null;
         wsRef.current.close();
       }
     };

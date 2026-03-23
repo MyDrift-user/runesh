@@ -6,7 +6,7 @@ description = "Shared OIDC authentication with extensible provider hooks"
 
 [features]
 default = ["axum"]
-axum = ["dep:axum", "dep:tower"]
+axum = ["dep:axum", "dep:axum-extra", "dep:tower"]
 
 [dependencies]
 tokio = { workspace = true }
@@ -28,4 +28,5 @@ async-trait = "0.1"
 
 # Optional: Axum middleware support
 axum = { version = "0.8", optional = true }
+axum-extra = { version = "0.10", features = ["cookie"], optional = true }
 tower = { version = "0.5", optional = true }

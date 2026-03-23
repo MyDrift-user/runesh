@@ -51,6 +51,12 @@ pub fn install_service(
 ) -> Result<(), AppError> {
     validate_name(name)?;
     validate_display_name(display_name)?;
+    // Validate args contain no control characters or newlines
+    for arg in args {
+        if arg.chars().any(|c| c.is_control()) {
+            return Err(AppError::BadRequest("Arguments must not contain control characters".into()));
+        }
+    }
     #[cfg(target_os = "windows")]
     return install_windows(name, display_name, binary, args);
 
@@ -66,6 +72,7 @@ pub fn install_service(
 
 /// Uninstall a system service.
 pub fn uninstall_service(name: &str) -> Result<(), AppError> {
+    validate_name(name)?;
     #[cfg(target_os = "windows")]
     {
         let _ = Command::new("sc").args(["stop", name]).output();

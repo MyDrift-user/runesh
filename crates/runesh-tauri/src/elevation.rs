@@ -53,15 +53,30 @@ pub fn run_elevated(binary: &Path, args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// Check if the current process is running with elevated privileges.
+/// Check if the current process is running with elevated (Administrator) privileges.
+///
+/// Uses the proper Win32 API (OpenProcessToken + GetTokenInformation) instead
+/// of heuristics like file write tests.
 pub fn is_elevated() -> bool {
-    // Simple heuristic: try to write to a protected location
-    let test_path = std::path::Path::new("C:\\Windows\\Temp\\runesh_elevation_test");
-    match std::fs::write(test_path, "test") {
-        Ok(_) => {
-            let _ = std::fs::remove_file(test_path);
-            true
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return false;
         }
-        Err(_) => false,
+        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut size = 0u32;
+        let result = GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elevation as *mut _ as *mut _,
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut size,
+        );
+        CloseHandle(token);
+        result != 0 && elevation.TokenIsElevated != 0
     }
 }

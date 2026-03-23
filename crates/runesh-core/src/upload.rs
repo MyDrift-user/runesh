@@ -2,6 +2,55 @@
 
 use crate::error::AppError;
 
+// ── Magic bytes validation ──────────────────────────────────────────────────
+
+/// Known file signatures (magic bytes) for common file types.
+const MAGIC_BYTES: &[(&str, &[u8])] = &[
+    ("jpg",  &[0xFF, 0xD8, 0xFF]),
+    ("jpeg", &[0xFF, 0xD8, 0xFF]),
+    ("png",  &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+    ("gif",  &[0x47, 0x49, 0x46, 0x38]),
+    ("webp", &[0x52, 0x49, 0x46, 0x46]), // RIFF header (also check WEBP at offset 8)
+    ("pdf",  &[0x25, 0x50, 0x44, 0x46]),
+    ("zip",  &[0x50, 0x4B, 0x03, 0x04]),
+    ("svg",  b"<?xml"),
+    ("svg",  b"<svg"),
+];
+
+/// Validate that file contents match the claimed extension by checking magic bytes.
+///
+/// Returns `Ok(())` if the magic bytes match the extension, or if the extension
+/// is not in the known signatures list (unknown types pass through).
+/// Returns `Err` if the magic bytes contradict the claimed extension.
+pub fn validate_magic_bytes(data: &[u8], extension: &str) -> Result<(), AppError> {
+    let ext = extension.to_ascii_lowercase();
+
+    // Find expected magic bytes for this extension
+    let expected: Vec<&[u8]> = MAGIC_BYTES
+        .iter()
+        .filter(|(e, _)| *e == ext)
+        .map(|(_, magic)| *magic)
+        .collect();
+
+    // If we don't have signatures for this extension, allow it
+    if expected.is_empty() {
+        return Ok(());
+    }
+
+    // Check if the file starts with any of the expected signatures
+    let matches = expected.iter().any(|magic| {
+        data.len() >= magic.len() && data[..magic.len()] == **magic
+    });
+
+    if !matches {
+        return Err(AppError::BadRequest(format!(
+            "File content does not match .{ext} format (magic bytes mismatch)"
+        )));
+    }
+
+    Ok(())
+}
+
 /// Metadata about an uploaded file.
 pub struct UploadedFile {
     /// Original filename from the client.
@@ -51,10 +100,10 @@ pub async fn save_upload(
         .unwrap_or("");
 
     if let Some(allowed) = allowed_extensions {
-        if !ext.is_empty() && !allowed.iter().any(|a| a.eq_ignore_ascii_case(ext)) {
+        // Reject files with no extension OR disallowed extensions
+        if ext.is_empty() || !allowed.iter().any(|a| a.eq_ignore_ascii_case(ext)) {
             return Err(AppError::BadRequest(format!(
-                "File extension '.{}' is not allowed. Allowed: {}",
-                ext,
+                "File must have an allowed extension. Allowed: {}",
                 allowed.join(", ")
             )));
         }
@@ -85,6 +134,11 @@ pub async fn save_upload(
             data.len(),
             max_size
         )));
+    }
+
+    // Validate magic bytes match the claimed extension
+    if !ext.is_empty() {
+        validate_magic_bytes(&data, ext)?;
     }
 
     tokio::fs::write(&storage_path, &data)

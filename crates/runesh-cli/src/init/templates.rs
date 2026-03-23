@@ -1,7 +1,7 @@
 use super::ProjectConfig;
 
 pub fn cargo_workspace(c: &ProjectConfig) -> String {
-    let mut members = format!(r#"[workspace]
+    let mut content = format!(r#"[workspace]
 members = ["crates/*"]
 resolver = "2"
 
@@ -25,16 +25,15 @@ chrono = {{ version = "0.4", features = ["serde"] }}
 dotenvy = "0.15"
 
 # RUNESH shared crates
-runesh-core = {{ path = "{}/crates/runesh-core" }}
-"#, c.runesh_rel);
+{core_dep}
+"#, core_dep = c.cargo_dep("runesh-core"));
 
     if c.with_auth {
-        members.push_str(&format!(
-            "runesh-auth = {{ path = \"{}/crates/runesh-auth\" }}\n", c.runesh_rel
-        ));
+        content.push_str(&c.cargo_dep("runesh-auth"));
+        content.push('\n');
     }
 
-    members
+    content
 }
 
 pub fn server_cargo(c: &ProjectConfig) -> String {
@@ -190,7 +189,7 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "lint": "eslint"
   }},
   "dependencies": {{
-    "@runesh/ui": "file:{runesh_rel}/packages/ui",
+    {ui_dep},
     "@base-ui/react": "^1.2.0",
     "@tanstack/react-query": "^5.90.21",
     "class-variance-authority": "^0.7.1",
@@ -215,7 +214,7 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "tailwindcss": "^4",
     "typescript": "^5"
   }}
-}}"#, name = c.name, runesh_rel = c.runesh_rel)
+}}"#, name = c.name, ui_dep = c.npm_ui_dep())
 }
 
 pub const TSCONFIG: &str = r#"{
@@ -280,10 +279,8 @@ import {{ Toaster }} from "sonner";
 import {{ ThemeProvider }} from "@runesh/ui/components/providers/theme-provider";
 import {{ QueryProvider }} from "@runesh/ui/components/providers/query-provider";
 import {{ AuthProvider }} from "@runesh/ui/components/providers/auth-provider";
-import {{ setTokenPrefix }} from "@runesh/ui/lib/token-store";
 import {{ CHIRON_GOROUND_URL, FONT_FAMILY_SANS }} from "@runesh/ui/fonts";
 {tauri_import}
-setTokenPrefix("{snake_name}");
 
 export default function RootLayout({{ children }}: {{ children: React.ReactNode }}) {{
   return (
@@ -306,7 +303,7 @@ export default function RootLayout({{ children }}: {{ children: React.ReactNode 
     </html>
   );
 }}
-"#, title = title, snake_name = c.snake_name, tauri_import = tauri_import, title_bar = title_bar)
+"#, title = title, tauri_import = tauri_import, title_bar = title_bar)
 }
 
 pub fn home_page(c: &ProjectConfig) -> String {
@@ -489,8 +486,8 @@ tauri-plugin-shell = "2"
 tokio = {{ version = "1", features = ["full"] }}
 serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
-runesh-tauri = {{ path = "{runesh_rel}/crates/runesh-tauri" }}
-"#, name = c.name, snake = c.snake_name, runesh_rel = c.runesh_rel)
+{tauri_dep}
+"#, name = c.name, snake = c.snake_name, tauri_dep = c.cargo_dep("runesh-tauri"))
 }
 
 pub fn tauri_main(c: &ProjectConfig) -> String {
@@ -607,7 +604,7 @@ pub fn claude_md(c: &ProjectConfig) -> String {
 ## Stack
 - Backend: Rust (Axum) + PostgreSQL (SQLx)
 - Frontend: Next.js + React + shadcn/ui + Tailwind CSS v4
-- Shared code: RUNESH ({runesh_rel})
+- Shared code: RUNESH ({source})
 - Package manager: bun
 
 ## Features
@@ -633,7 +630,10 @@ cd web && bun dev
 {tauri_dev}```
 "#,
         name = c.name,
-        runesh_rel = c.runesh_rel,
+        source = match &c.source {
+            super::RuneshSource::Git(url) => url.as_str(),
+            super::RuneshSource::Local(path) => path.as_str(),
+        },
         features = features.iter().map(|f| format!("- {f}")).collect::<Vec<_>>().join("\n"),
         tauri = if c.separate_desktop {
             format!("├── desktop/                  # Desktop Next.js frontend\n├── crates/{}-desktop/       # Desktop Rust backend\n├── src-tauri/                # Tauri v2 shell\n", c.name)
@@ -657,7 +657,7 @@ pub fn desktop_package_json(c: &ProjectConfig) -> String {
     "start": "next start"
   }},
   "dependencies": {{
-    "@runesh/ui": "file:{runesh_rel}/packages/ui",
+    {ui_dep},
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@base-ui/react": "^1.2.0",
@@ -681,7 +681,7 @@ pub fn desktop_package_json(c: &ProjectConfig) -> String {
     "tailwindcss": "^4",
     "typescript": "^5"
   }}
-}}"#, name = c.name, runesh_rel = c.runesh_rel)
+}}"#, name = c.name, ui_dep = c.npm_ui_dep())
 }
 
 pub const NEXT_CONFIG_STATIC: &str = r#"import type { NextConfig } from "next";
@@ -766,8 +766,8 @@ tokio = {{ version = "1", features = ["full"] }}
 serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
 {name}-desktop = {{ path = "../crates/{name}-desktop" }}
-runesh-tauri = {{ path = "{runesh_rel}/crates/runesh-tauri" }}
-"#, name = c.name, snake = c.snake_name, runesh_rel = c.runesh_rel)
+{tauri_dep}
+"#, name = c.name, snake = c.snake_name, tauri_dep = c.cargo_dep("runesh-tauri"))
 }
 
 pub fn tauri_conf_separate(c: &ProjectConfig) -> String {

@@ -1,4 +1,4 @@
-//! Shared Axum middleware: request ID, structured logging, CORS, health check.
+//! Shared Axum middleware: request ID, structured logging, CORS, security headers, health check.
 
 #[cfg(feature = "axum")]
 pub mod request_id {
@@ -91,7 +91,12 @@ pub mod cors {
                 Method::DELETE,
                 Method::OPTIONS,
             ])
-            .allow_headers(tower_http::cors::Any)
+            .allow_headers([
+                "Content-Type".parse().unwrap(),
+                "Authorization".parse().unwrap(),
+                "X-CSRF-Token".parse().unwrap(),
+                "X-Request-Id".parse().unwrap(),
+            ])
             .max_age(std::time::Duration::from_secs(3600));
 
         if origins.contains(&"*") {
@@ -108,6 +113,57 @@ pub mod cors {
                 .allow_origin(parsed)
                 .allow_credentials(true)
         }
+    }
+}
+
+#[cfg(feature = "axum")]
+pub mod security_headers {
+    use axum::{
+        body::Body,
+        extract::Request,
+        middleware::Next,
+        response::Response,
+    };
+
+    /// Middleware that sets recommended security headers on every response.
+    ///
+    /// Headers set:
+    /// - `X-Content-Type-Options: nosniff` (prevents MIME sniffing)
+    /// - `X-Frame-Options: DENY` (prevents clickjacking)
+    /// - `Strict-Transport-Security: max-age=31536000; includeSubDomains` (HSTS)
+    /// - `Referrer-Policy: strict-origin-when-cross-origin`
+    /// - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+    /// - `X-XSS-Protection: 0` (disable legacy XSS filter to prevent false positives)
+    ///
+    /// Usage:
+    /// ```ignore
+    /// use axum::middleware;
+    /// use runesh_core::middleware::security_headers::security_headers_middleware;
+    ///
+    /// let app = Router::new()
+    ///     .layer(middleware::from_fn(security_headers_middleware));
+    /// ```
+    pub async fn security_headers_middleware(req: Request<Body>, next: Next) -> Response {
+        let mut response = next.run(req).await;
+        let headers = response.headers_mut();
+
+        headers.insert("x-content-type-options", "nosniff".parse().unwrap());
+        headers.insert("x-frame-options", "DENY".parse().unwrap());
+        headers.insert(
+            "strict-transport-security",
+            "max-age=31536000; includeSubDomains".parse().unwrap(),
+        );
+        headers.insert(
+            "referrer-policy",
+            "strict-origin-when-cross-origin".parse().unwrap(),
+        );
+        headers.insert(
+            "permissions-policy",
+            "camera=(), microphone=(), geolocation=()".parse().unwrap(),
+        );
+        headers.insert("x-xss-protection", "0".parse().unwrap());
+
+        response
     }
 }
 
