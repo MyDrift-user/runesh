@@ -124,10 +124,11 @@ pub fn setup_swagger<S: Clone + Send + Sync + 'static>(
         "Swagger UI enabled"
     );
 
-    let swagger_ui = utoipa_swagger_ui::SwaggerUi::new(format!("{}/<_:path>", config.ui_path))
-        .url(&config.spec_path, doc);
+    let swagger_ui = utoipa_swagger_ui::SwaggerUi::new(format!("{}/{{_:.*}}", config.ui_path))
+        .url(config.spec_path.clone(), doc);
 
-    router.merge(swagger_ui)
+    let swagger_router: Router<S> = Router::from(swagger_ui);
+    router.merge(swagger_router)
 }
 
 /// Re-export utoipa types for convenience.

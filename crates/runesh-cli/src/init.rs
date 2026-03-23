@@ -75,26 +75,34 @@ pub fn run(
 
     // ── Step 2: Pick frontend features (if web selected) ──────────────
 
+    let mut with_dashboard = false;
     let mut with_editor = false;
+    let mut with_data_table = false;
 
     if has_web {
         if accept_defaults {
+            with_dashboard = true;
             with_editor = true;
+            with_data_table = true;
         } else {
             println!("\n  {} Select frontend features:\n", style("2/4").dim());
 
             let features = &[
-                "Novel WYSIWYG editor (wiki/rich text with tables, slash commands)",
+                "Dashboard shell (sidebar + toolbar + search command palette)",
+                "Novel WYSIWYG editor (wiki/rich text, file attachments, tables)",
+                "Data table (sortable, paginated, searchable)",
             ];
 
             let sel = MultiSelect::new()
                 .with_prompt("Frontend features (space to toggle)")
                 .items(features)
-                .defaults(&[true])
+                .defaults(&[true, true, true])
                 .interact()
                 .map_err(|e| e.to_string())?;
 
-            with_editor = sel.contains(&0);
+            with_dashboard = sel.contains(&0);
+            with_editor = sel.contains(&1);
+            with_data_table = sel.contains(&2);
         }
     }
 
@@ -184,7 +192,9 @@ pub fn run(
         with_rate_limit,
         with_ws,
         with_upload,
+        with_dashboard,
         with_editor,
+        with_data_table,
         with_openapi,
         with_docker,
     };
@@ -265,7 +275,9 @@ pub(crate) struct ProjectConfig {
     pub with_rate_limit: bool,
     pub with_ws: bool,
     pub with_upload: bool,
+    pub with_dashboard: bool,
     pub with_editor: bool,
+    pub with_data_table: bool,
     pub with_openapi: bool,
     pub with_docker: bool,
 }
@@ -489,9 +501,20 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         w("web/src/app/page.tsx", &templates::home_page(c))?;
         w("web/src/lib/utils.ts", templates::UTILS_TS)?;
 
+        // Dashboard shell (sidebar + toolbar + search)
+        if c.with_dashboard {
+            w("web/src/components/app-shell.tsx", &templates::app_shell(c))?;
+        }
+
+        // Novel WYSIWYG editor
         if c.with_editor {
             w("web/src/app/editor/page.tsx", &templates::editor_page(c))?;
             w("web/src/components/editor.tsx", templates::EDITOR_COMPONENT)?;
+        }
+
+        // Data table example page
+        if c.with_data_table {
+            w("web/src/app/examples/page.tsx", &templates::data_table_page(c))?;
         }
     }
 

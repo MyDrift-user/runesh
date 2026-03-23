@@ -370,15 +370,21 @@ pub const GLOBALS_CSS_IMPORT: &str = r#"@import "@runesh/ui/styles/globals.css";
 
 pub fn layout_tsx(c: &ProjectConfig, is_desktop: bool) -> String {
     let title = if is_desktop { format!("{} Desktop", c.name) } else { c.name.clone() };
-    let tauri_import = if is_desktop {
-        r#"import { TitleBar } from "@runesh/ui/components/layout/title-bar";
-import { useTauri } from "@runesh/ui/hooks/use-tauri";
-"#
-    } else { "" };
-    let title_bar = if is_desktop {
-        format!(r#"        {{/* Frameless window title bar */}}
-        <TitleBar title="{}" />"#, title)
-    } else { String::new() };
+
+    let mut extra_imports = String::new();
+    let mut inner_before = String::new();
+    let mut inner_after = String::new();
+
+    if is_desktop {
+        extra_imports.push_str("import { TitleBar } from \"@runesh/ui/components/layout/title-bar\";\n");
+        inner_before.push_str(&format!("              <TitleBar title=\"{}\" />\n", title));
+    }
+
+    if !is_desktop && c.with_dashboard {
+        extra_imports.push_str("import { AppShell } from \"@/components/app-shell\";\n");
+        inner_before.push_str("              <AppShell>\n");
+        inner_after.push_str("              </AppShell>\n");
+    }
 
     format!(r#""use client";
 
@@ -388,8 +394,7 @@ import {{ ThemeProvider }} from "@runesh/ui/components/providers/theme-provider"
 import {{ QueryProvider }} from "@runesh/ui/components/providers/query-provider";
 import {{ AuthProvider }} from "@runesh/ui/components/providers/auth-provider";
 import {{ CHIRON_GOROUND_URL, FONT_FAMILY_SANS }} from "@runesh/ui/fonts";
-{tauri_import}
-
+{extra_imports}
 export default function RootLayout({{ children }}: {{ children: React.ReactNode }}) {{
   return (
     <html lang="en" suppressHydrationWarning>
@@ -401,9 +406,8 @@ export default function RootLayout({{ children }}: {{ children: React.ReactNode 
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           <QueryProvider>
             <AuthProvider>
-{title_bar}
-              {{children}}
-            </AuthProvider>
+{inner_before}              {{children}}
+{inner_after}            </AuthProvider>
           </QueryProvider>
         </ThemeProvider>
         <Toaster />
@@ -411,7 +415,7 @@ export default function RootLayout({{ children }}: {{ children: React.ReactNode 
     </html>
   );
 }}
-"#, title = title, tauri_import = tauri_import, title_bar = title_bar)
+"#, title = title, extra_imports = extra_imports, inner_before = inner_before, inner_after = inner_after)
 }
 
 pub fn home_page(c: &ProjectConfig) -> String {
@@ -429,6 +433,167 @@ export default function Home() {{
 
 pub const UTILS_TS: &str = r#"export { cn } from "@runesh/ui/lib/utils";
 "#;
+
+// ── Dashboard shell template ────────────────────────────────────────────────
+
+pub fn app_shell(c: &ProjectConfig) -> String {
+    format!(r#""use client";
+
+import {{ usePathname }} from "next/navigation";
+import {{ Home, Settings, FileText, Table2 }} from "lucide-react";
+import {{ AppSidebar, type NavItem }} from "@runesh/ui/components/layout/app-sidebar";
+import {{ DashboardShell }} from "@runesh/ui/components/layout/dashboard-shell";
+import {{ SearchBar, type SearchResult }} from "@runesh/ui/components/layout/search-bar";
+import {{ useAuth }} from "@runesh/ui/components/providers/auth-provider";
+
+const navItems: NavItem[] = [
+  {{ title: "Dashboard", href: "/", icon: Home }},
+  {{ title: "Editor", href: "/editor", icon: FileText }},
+  {{ title: "Examples", href: "/examples", icon: Table2 }},
+  {{ title: "Settings", href: "/settings", icon: Settings, adminOnly: true }},
+];
+
+async function onSearch(query: string): Promise<SearchResult[]> {{
+  // Replace with your actual search API
+  return navItems
+    .filter((item) => item.title.toLowerCase().includes(query.toLowerCase()))
+    .map((item) => ({{
+      id: item.href,
+      title: item.title,
+      href: item.href,
+      group: "Pages",
+    }}));
+}}
+
+export function AppShell({{ children }}: {{ children: React.ReactNode }}) {{
+  const pathname = usePathname();
+  const {{ user, logout, isLoading, isAuthenticated }} = useAuth();
+
+  // Public pages bypass the shell
+  if (pathname.startsWith("/login") || pathname.startsWith("/auth")) {{
+    return <>{{children}}</>;
+  }}
+
+  const sidebar = (
+    <AppSidebar
+      navItems={{navItems}}
+      user={{user ? {{ username: user.name, email: user.email, role: user.role }} : null}}
+      onLogout={{logout}}
+      brandIcon={{<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-bold">{{"{initial}"}}</div>}}
+      brandName="{name}"
+    />
+  );
+
+  return (
+    <DashboardShell
+      sidebar={{sidebar}}
+      searchBar={{<SearchBar onSearch={{onSearch}} placeholder="Search..." />}}
+      isLoading={{isLoading}}
+      isAuthenticated={{isAuthenticated}}
+      shortcutHint={{
+        <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex">
+          <span className="text-xs">Ctrl</span>K
+        </kbd>
+      }}
+    >
+      {{children}}
+    </DashboardShell>
+  );
+}}
+"#, name = c.name, initial = c.name.chars().next().unwrap_or('R').to_uppercase())
+}
+
+// ── Data table example page ─────────────────────────────────────────────────
+
+pub fn data_table_page(_c: &ProjectConfig) -> String {
+    r#""use client";
+
+import { useState } from "react";
+import { PageHeader } from "@runesh/ui/components/layout/page-header";
+import { DataTable, type DataTableColumn } from "@runesh/ui/components/ui/data-table";
+import { ConfirmDialog } from "@runesh/ui/components/ui/confirm-dialog";
+import { formatRelativeTime, formatFileSize } from "@runesh/ui/lib/format";
+import { Button } from "@runesh/ui/components/ui/button"; // needs shadcn button installed
+import { Trash2 } from "lucide-react";
+
+// Example data type
+interface ExampleItem {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  size: number;
+  createdAt: string;
+}
+
+// Example data
+const DEMO_DATA: ExampleItem[] = Array.from({ length: 50 }, (_, i) => ({
+  id: String(i + 1),
+  name: `User ${i + 1}`,
+  email: `user${i + 1}@example.com`,
+  role: i % 5 === 0 ? "admin" : "user",
+  size: Math.floor(Math.random() * 10_000_000),
+  createdAt: new Date(Date.now() - Math.random() * 30 * 86400000).toISOString(),
+}));
+
+const columns: DataTableColumn<ExampleItem>[] = [
+  { key: "name", header: "Name", getValue: (r) => r.name },
+  { key: "email", header: "Email", getValue: (r) => r.email },
+  {
+    key: "role",
+    header: "Role",
+    getValue: (r) => r.role,
+    renderCell: (r) => (
+      <span className={`text-xs px-2 py-0.5 rounded-full ${r.role === "admin" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+        {r.role}
+      </span>
+    ),
+  },
+  {
+    key: "size",
+    header: "Size",
+    getValue: (r) => r.size,
+    renderCell: (r) => formatFileSize(r.size),
+  },
+  {
+    key: "createdAt",
+    header: "Created",
+    getValue: (r) => r.createdAt,
+    renderCell: (r) => formatRelativeTime(r.createdAt),
+  },
+];
+
+export default function ExamplesPage() {
+  const [data, setData] = useState(DEMO_DATA);
+
+  return (
+    <div className="p-6 space-y-6">
+      <PageHeader title="Examples" description="Data table, confirm dialog, and format utilities in action.">
+        <Button variant="outline" onClick={() => setData(DEMO_DATA)}>
+          Reset Data
+        </Button>
+      </PageHeader>
+
+      <DataTable
+        columns={columns}
+        data={data}
+        searchPlaceholder="Search users..."
+        renderRowActions={(row) => (
+          <ConfirmDialog
+            trigger={<button className="text-muted-foreground hover:text-destructive"><Trash2 className="h-4 w-4" /></button>}
+            title="Delete user?"
+            description={`This will permanently delete ${row.name}. This action cannot be undone.`}
+            confirmText="Delete"
+            destructive
+            onConfirm={() => setData((prev) => prev.filter((r) => r.id !== row.id))}
+          />
+        )}
+      />
+    </div>
+  );
+}
+"#.into()
+}
 
 // ── Novel WYSIWYG Editor templates ──────────────────────────────────────────
 
@@ -881,7 +1046,9 @@ pub fn claude_md(c: &ProjectConfig) -> String {
     if c.with_rate_limit { features.push("Rate limiting"); }
     if c.with_ws { features.push("WebSocket broadcast"); }
     if c.with_upload { features.push("File upload"); }
-    if c.with_editor { features.push("Novel WYSIWYG editor (wiki/rich text)"); }
+    if c.with_dashboard { features.push("Dashboard shell (sidebar + toolbar + search)"); }
+    if c.with_editor { features.push("Novel WYSIWYG editor (wiki/rich text, file attachments)"); }
+    if c.with_data_table { features.push("Data table (sortable, paginated, searchable)"); }
     if c.with_openapi { features.push("OpenAPI / Swagger UI"); }
     if c.with_docker { features.push("Docker deployment"); }
     if c.has_tauri { features.push("Tauri v2 desktop"); }

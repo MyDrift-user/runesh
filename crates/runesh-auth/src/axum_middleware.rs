@@ -174,7 +174,7 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
         }
     }
 
-    match validate_access_token(token, &secret) {
+    match validate_access_token(&token, &secret) {
         Ok(claims) => {
             let mut req = req;
             req.extensions_mut().insert(claims);

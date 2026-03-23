@@ -240,7 +240,11 @@ pub fn clear_session_cookies(
     session_config: &SessionConfig,
 ) {
     let headers = response.headers_mut().unwrap();
-    for name in &[ACCESS_COOKIE, REFRESH_COOKIE, CSRF_COOKIE] {
+    for name in &[
+        session_config.access_cookie_name(),
+        session_config.refresh_cookie_name(),
+        session_config.csrf_cookie_name(),
+    ] {
         headers.append(
             SET_COOKIE,
             session_config.clear_cookie(name).parse().unwrap(),
@@ -266,8 +270,9 @@ pub fn extract_refresh_token(cookies: &axum_extra::extract::CookieJar, config: &
 pub fn validate_csrf(
     cookies: &axum_extra::extract::CookieJar,
     headers: &axum::http::HeaderMap,
+    config: &SessionConfig,
 ) -> bool {
-    let cookie_csrf = cookies.get(CSRF_COOKIE).map(|c| c.value().to_string());
+    let cookie_csrf = cookies.get(&config.csrf_cookie_name()).map(|c| c.value().to_string());
     let header_csrf = headers
         .get("x-csrf-token")
         .and_then(|v| v.to_str().ok())

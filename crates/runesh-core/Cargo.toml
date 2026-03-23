@@ -30,7 +30,7 @@ futures-util = { version = "0.3", optional = true }
 # Optional: OpenAPI/Swagger
 utoipa = { version = "5", features = ["chrono", "uuid", "axum_extras"], optional = true }
 utoipa-axum = { version = "0.2", optional = true }
-utoipa-swagger-ui = { version = "8", features = ["axum"], optional = true }
+utoipa-swagger-ui = { version = "9", features = ["axum"], optional = true }
 
 # Optional: SQLx integration
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono"], optional = true }

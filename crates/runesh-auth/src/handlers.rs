@@ -219,7 +219,7 @@ async fn refresh<S: AuthStore>(
     State(state): State<Arc<AuthState<S>>>,
     jar: CookieJar,
 ) -> impl IntoResponse {
-    let refresh_token = match session::extract_refresh_token(&jar) {
+    let refresh_token = match session::extract_refresh_token(&jar, &state.session_config) {
         Some(t) => t,
         None => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
             "error": "No refresh token"
@@ -254,7 +254,7 @@ async fn logout<S: AuthStore>(
     jar: CookieJar,
 ) -> impl IntoResponse {
     // Revoke refresh tokens if we can identify the user
-    if let Some(access) = session::extract_access_token(&jar) {
+    if let Some(access) = session::extract_access_token(&jar, &state.session_config) {
         if let Ok(claims) = token::validate_access_token(&access, &state.token_config.secret) {
             let _ = state.store.revoke_all_refresh_tokens(&claims.sub).await;
         }
@@ -275,7 +275,7 @@ async fn me<S: AuthStore>(
     State(state): State<Arc<AuthState<S>>>,
     jar: CookieJar,
 ) -> impl IntoResponse {
-    let access_token = match session::extract_access_token(&jar) {
+    let access_token = match session::extract_access_token(&jar, &state.session_config) {
         Some(t) => t,
         None => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
             "error": "Not authenticated"
