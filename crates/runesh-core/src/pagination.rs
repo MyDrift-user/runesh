@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 /// }
 /// ```
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct Pagination {
     #[serde(default = "default_page")]
     pub page: i64,
@@ -78,6 +79,7 @@ impl Pagination {
 
 /// Paginated API response. Matches the frontend `PaginatedResponse<T>` type.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PaginatedResponse<T: Serialize> {
     pub items: Vec<T>,
     pub total: i64,

@@ -67,6 +67,7 @@ pub fn run(
     let mut with_rate_limit = false;
     let mut with_ws = false;
     let mut with_upload = false;
+    let mut with_openapi = false;
     let mut with_docker = false;
 
     if has_server {
@@ -77,13 +78,14 @@ pub fn run(
             "Rate Limiting",
             "WebSocket Broadcast",
             "File Upload Handler",
+            "OpenAPI / Swagger UI (utoipa)",
             "Docker (Dockerfile + compose.yaml)",
         ];
 
         let sel = MultiSelect::new()
             .with_prompt("Server features (space to toggle)")
             .items(features)
-            .defaults(&[true, true, false, false, true])
+            .defaults(&[true, true, false, false, true, true])
             .interact()
             .map_err(|e| e.to_string())?;
 
@@ -91,7 +93,8 @@ pub fn run(
         with_rate_limit = sel.contains(&1);
         with_ws = sel.contains(&2);
         with_upload = sel.contains(&3);
-        with_docker = sel.contains(&4);
+        with_openapi = sel.contains(&4);
+        with_docker = sel.contains(&5);
     }
 
     // ── Step 3: Server config (if server selected) ──────────────────────
@@ -133,6 +136,7 @@ pub fn run(
         with_rate_limit,
         with_ws,
         with_upload,
+        with_openapi,
         with_docker,
     };
 
@@ -212,6 +216,7 @@ pub(crate) struct ProjectConfig {
     pub with_rate_limit: bool,
     pub with_ws: bool,
     pub with_upload: bool,
+    pub with_openapi: bool,
     pub with_docker: bool,
 }
 
@@ -220,6 +225,14 @@ impl ProjectConfig {
         match &self.source {
             RuneshSource::Git(repo) => format!("{crate_name} = {{ git = \"{repo}\" }}"),
             RuneshSource::Local(path) => format!("{crate_name} = {{ path = \"{path}/crates/{crate_name}\" }}"),
+        }
+    }
+
+    pub fn cargo_dep_with_features(&self, crate_name: &str, features: &[&str]) -> String {
+        let feats = features.iter().map(|f| format!("\"{f}\"")).collect::<Vec<_>>().join(", ");
+        match &self.source {
+            RuneshSource::Git(repo) => format!("{crate_name} = {{ git = \"{repo}\", features = [{feats}] }}"),
+            RuneshSource::Local(path) => format!("{crate_name} = {{ path = \"{path}/crates/{crate_name}\", features = [{feats}] }}"),
         }
     }
 

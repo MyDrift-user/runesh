@@ -5,6 +5,7 @@
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ErrorBody {
     pub error: String,
     pub code: String,

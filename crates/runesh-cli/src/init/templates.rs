@@ -27,7 +27,11 @@ clap = {{ version = "4", features = ["derive", "env"] }}
 
 # RUNESH shared crates
 {core_dep}
-"#, core_dep = c.cargo_dep("runesh-core"));
+"#, core_dep = if c.with_openapi {
+        c.cargo_dep_with_features("runesh-core", &["openapi"])
+    } else {
+        c.cargo_dep("runesh-core")
+    });
 
     if c.with_auth {
         content.push_str(&c.cargo_dep("runesh-auth"));
@@ -63,6 +67,10 @@ runesh-core.workspace = true
     if c.with_auth {
         deps.push_str("runesh-auth.workspace = true\n");
     }
+    if c.with_openapi {
+        deps.push_str("utoipa = { version = \"5\", features = [\"chrono\", \"uuid\", \"axum_extras\"] }\n");
+        deps.push_str("utoipa-axum = \"0.2\"\n");
+    }
 
     deps
 }
@@ -71,6 +79,7 @@ pub fn server_main(c: &ProjectConfig) -> String {
     let mut extra_cli_fields = String::new();
     let mut extra_imports = String::new();
     let mut extra_middleware = String::new();
+    let mut extra_setup = String::new();
 
     if c.with_rate_limit {
         extra_imports.push_str("use runesh_core::rate_limit::{RateLimiter, rate_limit_layer};\n");
@@ -90,6 +99,24 @@ pub fn server_main(c: &ProjectConfig) -> String {
         extra_middleware.push_str(r#"        .layer(middleware::from_fn(auth_middleware))
         .layer(axum::Extension(JwtSecret(cli.jwt_secret.clone())))
         .layer(axum::Extension(AuthExemptPaths::default()))
+"#);
+    }
+    if c.with_openapi {
+        extra_imports.push_str("use utoipa::OpenApi;\nuse runesh_core::openapi::{setup_swagger, SwaggerConfig, add_bearer_security};\n");
+        extra_cli_fields.push_str(r#"
+    /// Enable Swagger UI
+    #[arg(long, env = "SWAGGER_ENABLED", default_value = "true")]
+    swagger: bool,
+"#);
+        extra_setup.push_str(r#"
+    // OpenAPI / Swagger UI
+    let app = if cli.swagger {
+        let mut doc = ApiDoc::openapi();
+        add_bearer_security(&mut doc);
+        setup_swagger(app, doc, SwaggerConfig::from_env())
+    } else {
+        app
+    };
 "#);
     }
 
@@ -164,20 +191,20 @@ async fn main() {{
         .layer(middleware::from_fn(runesh_core::middleware::logging::logging_middleware))
         .layer(middleware::from_fn(runesh_core::middleware::request_id::request_id_middleware))
         .with_state(pool);
-
+{extra_setup}
     let addr: SocketAddr = format!("{{}}:{{}}", cli.host, cli.port)
         .parse()
         .expect("Invalid host:port");
     tracing::info!("Listening on {{addr}}");
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app)
+    axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
 }}
-
-async fn health(axum::extract::State(pool): axum::extract::State<PgPool>) -> Json<serde_json::Value> {{
+{openapi_struct}
+{health_annotation}async fn health(axum::extract::State(pool): axum::extract::State<PgPool>) -> Json<serde_json::Value> {{
     runesh_core::middleware::health::health_handler(axum::extract::State(pool)).await
 }}
 "#,
@@ -186,6 +213,28 @@ async fn health(axum::extract::State(pool): axum::extract::State<PgPool>) -> Jso
         extra_imports = extra_imports,
         extra_cli_fields = extra_cli_fields,
         extra_middleware = extra_middleware,
+        extra_setup = extra_setup,
+        health_annotation = if c.with_openapi {
+            "#[utoipa::path(get, path = \"/api/v1/health\", tag = \"System\", responses((status = 200, description = \"Health check\")))]\n"
+        } else { "" },
+        openapi_struct = if c.with_openapi {
+            format!(r#"
+/// OpenAPI documentation.
+/// Add your routes and schemas here as you build them.
+#[derive(OpenApi)]
+#[openapi(
+    info(title = "{name} API", version = "0.1.0"),
+    paths(health),
+    components(schemas(runesh_core::error::ErrorBody)),
+    tags(
+        (name = "System", description = "Health and system endpoints"),
+    ),
+)]
+struct ApiDoc;
+"#, name = c.name)
+        } else {
+            String::new()
+        },
     )
 }
 
@@ -368,11 +417,17 @@ pub const UTILS_TS: &str = r#"export { cn } from "@runesh/ui/lib/utils";
 "#;
 
 pub fn dot_env(c: &ProjectConfig) -> String {
-    format!(r#"DATABASE_URL=postgres://{db}:{db}@localhost:5432/{db}
+    let mut env = format!(r#"DATABASE_URL=postgres://{db}:{db}@localhost:5432/{db}
 JWT_SECRET=change-this-to-a-random-64-char-string-in-production!!
 PORT={port}
 RUST_LOG=info
-"#, db = c.db_name, port = c.port)
+"#, db = c.db_name, port = c.port);
+
+    if c.with_openapi {
+        env.push_str("SWAGGER_ENABLED=true\n");
+    }
+
+    env
 }
 
 pub const GITIGNORE: &str = r#"# Rust
@@ -641,6 +696,7 @@ pub fn claude_md(c: &ProjectConfig) -> String {
     if c.with_rate_limit { features.push("Rate limiting"); }
     if c.with_ws { features.push("WebSocket broadcast"); }
     if c.with_upload { features.push("File upload"); }
+    if c.with_openapi { features.push("OpenAPI / Swagger UI"); }
     if c.with_docker { features.push("Docker deployment"); }
     if c.has_tauri { features.push("Tauri v2 desktop"); }
     if c.has_extension { features.push("Chrome extension (WXT)"); }

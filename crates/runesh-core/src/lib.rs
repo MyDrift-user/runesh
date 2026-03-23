@@ -12,6 +12,9 @@ pub mod middleware;
 #[cfg(feature = "sqlx")]
 pub mod db;
 
+#[cfg(feature = "openapi")]
+pub mod openapi;
+
 pub use error::AppError;
 pub use pagination::{Pagination, PaginatedResponse};
 pub use rate_limit::RateLimiter;
