@@ -1,0 +1,35 @@
+{
+  "name": "YOUR_APP-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt --browser firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build --browser firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip --browser firefox"
+  },
+  "dependencies": {
+    "@runesh/ui": "*",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "clsx": "^2.1.1",
+    "class-variance-authority": "^0.7.1",
+    "tailwind-merge": "^3.5.0",
+    "lucide-react": "^0.577.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.300",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@wxt-dev/module-react": "latest",
+    "wxt": "latest",
+    "typescript": "^5",
+    "tailwindcss": "^4",
+    "@tailwindcss/postcss": "^4",
+    "autoprefixer": "^10",
+    "postcss": "^8"
+  }
+}

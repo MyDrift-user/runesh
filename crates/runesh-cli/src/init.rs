@@ -86,13 +86,17 @@ pub fn run(
             "Web only (Rust API + Next.js)",
             "Web + Desktop (shared backend, Tauri wraps the web frontend)",
             "Web + Desktop (separate backends and separate frontends)",
+            "Web + Chrome Extension",
+            "Chrome Extension only (no backend)",
         ])
         .default(0)
         .interact()
         .map_err(|e| e.to_string())?;
 
-    let with_tauri = project_type >= 1;
+    let with_tauri = project_type == 1 || project_type == 2;
     let separate_desktop = project_type == 2;
+    let with_extension = project_type == 3 || project_type == 4;
+    let extension_only = project_type == 4;
 
     let feature_options = &[
         "OIDC Authentication (runesh-auth)",
@@ -109,17 +113,21 @@ pub fn run(
         .interact()
         .map_err(|e| e.to_string())?;
 
-    let db_name: String = Input::new()
-        .with_prompt("Database name")
-        .default(project_name.clone())
-        .interact_text()
-        .map_err(|e| e.to_string())?;
-
-    let port: String = Input::new()
-        .with_prompt("Web backend port")
-        .default("3001".into())
-        .interact_text()
-        .map_err(|e| e.to_string())?;
+    let (db_name, port) = if extension_only {
+        (String::new(), String::new())
+    } else {
+        let db: String = Input::new()
+            .with_prompt("Database name")
+            .default(project_name.clone())
+            .interact_text()
+            .map_err(|e| e.to_string())?;
+        let p: String = Input::new()
+            .with_prompt("Web backend port")
+            .default("3001".into())
+            .interact_text()
+            .map_err(|e| e.to_string())?;
+        (db, p)
+    };
 
     println!("\n  {} Creating project...\n", style("->").green());
 
@@ -129,13 +137,15 @@ pub fn run(
         db_name,
         port,
         source,
-        with_auth: selected_features.contains(&0),
-        with_rate_limit: selected_features.contains(&1),
-        with_ws: selected_features.contains(&2),
-        with_upload: selected_features.contains(&3),
+        with_auth: !extension_only && selected_features.contains(&0),
+        with_rate_limit: !extension_only && selected_features.contains(&1),
+        with_ws: !extension_only && selected_features.contains(&2),
+        with_upload: !extension_only && selected_features.contains(&3),
         with_tauri,
         separate_desktop,
-        with_docker: selected_features.contains(&4),
+        with_extension,
+        extension_only,
+        with_docker: !extension_only && selected_features.contains(&4),
     };
 
     create_dirs(&root, &config)?;
@@ -148,24 +158,37 @@ pub fn run(
             "{scope}:registry=https://npm.pkg.github.com\n",
             scope = crate::DEFAULT_NPM_SCOPE
         );
-        let web_npmrc = root.join("web").join(".npmrc");
-        fs::write(&web_npmrc, &npmrc_content)
-            .map_err(|e| format!("write .npmrc: {e}"))?;
+        if !config.extension_only {
+            let web_npmrc = root.join("web").join(".npmrc");
+            fs::write(&web_npmrc, &npmrc_content)
+                .map_err(|e| format!("write .npmrc: {e}"))?;
+        }
 
         if config.separate_desktop {
             let desktop_npmrc = root.join("desktop").join(".npmrc");
             fs::write(&desktop_npmrc, &npmrc_content)
                 .map_err(|e| format!("write desktop/.npmrc: {e}"))?;
         }
+
+        if config.with_extension {
+            let ext_npmrc = root.join("extension").join(".npmrc");
+            fs::write(&ext_npmrc, &npmrc_content)
+                .map_err(|e| format!("write extension/.npmrc: {e}"))?;
+        }
     }
 
     // ── Run bun install ────────────────────────────────────────────────
 
-    let web_dir = root.join("web");
-    run_bun_install(&web_dir, "web");
+    if !config.extension_only {
+        run_bun_install(&root.join("web"), "web");
+    }
 
     if config.separate_desktop {
         run_bun_install(&root.join("desktop"), "desktop");
+    }
+
+    if config.with_extension {
+        run_bun_install(&root.join("extension"), "extension");
     }
 
     // ── Done ───────────────────────────────────────────────────────────
@@ -176,10 +199,12 @@ pub fn run(
         println!("    cd {project_name}");
         println!();
     }
-    println!("    # Web backend:");
-    println!("    cargo run -p {project_name}-server");
-    println!("    # Web frontend:");
-    println!("    cd web && bun dev");
+    if !extension_only {
+        println!("    # Web backend:");
+        println!("    cargo run -p {project_name}-server");
+        println!("    # Web frontend:");
+        println!("    cd web && bun dev");
+    }
     if with_tauri && !separate_desktop {
         println!();
         println!("    # Desktop (wraps web frontend):");
@@ -195,6 +220,16 @@ pub fn run(
         println!();
         println!("    # Docker:");
         println!("    docker compose up -d");
+    }
+    if with_extension {
+        println!();
+        if extension_only {
+            println!("    # Extension dev:");
+        } else {
+            println!("    # Chrome extension:");
+        }
+        println!("    cd extension && bun dev");
+        println!("    # Load in Chrome: chrome://extensions -> Load unpacked -> .output/chrome-mv3");
     }
     println!();
 
@@ -222,6 +257,8 @@ pub(crate) struct ProjectConfig {
     pub with_upload: bool,
     pub with_tauri: bool,
     pub separate_desktop: bool,
+    pub with_extension: bool,
+    pub extension_only: bool,
     pub with_docker: bool,
 }
 
@@ -343,12 +380,13 @@ fn run_bun_install(dir: &Path, label: &str) {
 }
 
 fn create_dirs(root: &Path, config: &ProjectConfig) -> Result<(), String> {
-    let server_src = format!("crates/{}-server/src", config.name);
-    let dirs: Vec<&str> = vec!["crates", &server_src, "migrations",
-        "web/src/app", "web/src/components", "web/src/lib", "web/public"];
-
-    for d in &dirs {
-        fs::create_dir_all(root.join(d)).map_err(|e| format!("mkdir {d}: {e}"))?;
+    if !config.extension_only {
+        let server_src = format!("crates/{}-server/src", config.name);
+        let dirs: Vec<&str> = vec!["crates", &server_src, "migrations",
+            "web/src/app", "web/src/components", "web/src/lib", "web/public"];
+        for d in &dirs {
+            fs::create_dir_all(root.join(d)).map_err(|e| format!("mkdir {d}: {e}"))?;
+        }
     }
 
     if config.with_tauri {
@@ -365,6 +403,12 @@ fn create_dirs(root: &Path, config: &ProjectConfig) -> Result<(), String> {
         fs::create_dir_all(root.join(&desktop_crate)).map_err(|e| format!("mkdir {desktop_crate}: {e}"))?;
     }
 
+    if config.with_extension {
+        for d in &["extension/entrypoints/popup", "extension/entrypoints/background", "extension/public"] {
+            fs::create_dir_all(root.join(d)).map_err(|e| format!("mkdir {d}: {e}"))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -377,23 +421,26 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         fs::write(&full, content).map_err(|e| format!("write {path}: {e}"))
     };
 
-    w("Cargo.toml", &templates::cargo_workspace(c))?;
     w(".gitignore", templates::GITIGNORE)?;
-    w(".env", &templates::dot_env(c))?;
 
-    let sc = format!("crates/{}-server", c.name);
-    w(&format!("{sc}/Cargo.toml"), &templates::server_cargo(c))?;
-    w(&format!("{sc}/src/main.rs"), &templates::server_main(c))?;
-    w("migrations/001_initial.sql", &templates::initial_migration(c))?;
+    if !c.extension_only {
+        w("Cargo.toml", &templates::cargo_workspace(c))?;
+        w(".env", &templates::dot_env(c))?;
 
-    w("web/package.json", &templates::web_package_json(c))?;
-    w("web/tsconfig.json", templates::TSCONFIG)?;
-    w("web/next.config.ts", templates::NEXT_CONFIG)?;
-    w("web/postcss.config.mjs", templates::POSTCSS_CONFIG)?;
-    w("web/src/app/globals.css", templates::GLOBALS_CSS_IMPORT)?;
-    w("web/src/app/layout.tsx", &templates::layout_tsx(c, false))?;
-    w("web/src/app/page.tsx", &templates::home_page(c))?;
-    w("web/src/lib/utils.ts", templates::UTILS_TS)?;
+        let sc = format!("crates/{}-server", c.name);
+        w(&format!("{sc}/Cargo.toml"), &templates::server_cargo(c))?;
+        w(&format!("{sc}/src/main.rs"), &templates::server_main(c))?;
+        w("migrations/001_initial.sql", &templates::initial_migration(c))?;
+
+        w("web/package.json", &templates::web_package_json(c))?;
+        w("web/tsconfig.json", templates::TSCONFIG)?;
+        w("web/next.config.ts", templates::NEXT_CONFIG)?;
+        w("web/postcss.config.mjs", templates::POSTCSS_CONFIG)?;
+        w("web/src/app/globals.css", templates::GLOBALS_CSS_IMPORT)?;
+        w("web/src/app/layout.tsx", &templates::layout_tsx(c, false))?;
+        w("web/src/app/page.tsx", &templates::home_page(c))?;
+        w("web/src/lib/utils.ts", templates::UTILS_TS)?;
+    }
 
     if c.with_docker {
         w("Dockerfile", &templates::dockerfile(c))?;
@@ -423,6 +470,20 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         w("src-tauri/src/main.rs", &templates::tauri_main(c))?;
         w("src-tauri/src/lib.rs", &templates::tauri_lib(c))?;
         w("src-tauri/capabilities/default.json", templates::TAURI_CAPABILITIES)?;
+    }
+
+    // ── Chrome Extension (WXT) ────────────────────────────────────────
+
+    if c.with_extension {
+        w("extension/package.json", &templates::extension_package_json(c))?;
+        w("extension/wxt.config.ts", &templates::extension_wxt_config(c))?;
+        w("extension/tsconfig.json", templates::EXTENSION_TSCONFIG)?;
+        w("extension/postcss.config.js", templates::EXTENSION_POSTCSS)?;
+        w("extension/entrypoints/popup/index.html", &templates::extension_popup_html(c))?;
+        w("extension/entrypoints/popup/main.tsx", templates::EXTENSION_POPUP_MAIN)?;
+        w("extension/entrypoints/popup/App.tsx", &templates::extension_popup_app(c))?;
+        w("extension/entrypoints/popup/style.css", templates::EXTENSION_POPUP_CSS)?;
+        w("extension/entrypoints/background.ts", templates::EXTENSION_BACKGROUND)?;
     }
 
     w("CLAUDE.md", &templates::claude_md(c))?;

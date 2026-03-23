@@ -808,3 +808,163 @@ pub fn tauri_conf_separate(c: &ProjectConfig) -> String {
   }}
 }}"#, name = c.name)
 }
+
+// ── Chrome Extension templates (WXT + React) ────────────────────────────────
+
+pub fn extension_package_json(c: &ProjectConfig) -> String {
+    format!(r#"{{
+  "name": "{name}-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {{
+    "dev": "wxt",
+    "dev:firefox": "wxt --browser firefox",
+    "build": "wxt build",
+    "zip": "wxt zip"
+  }},
+  "dependencies": {{
+    {ui_dep},
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "clsx": "^2.1.1",
+    "class-variance-authority": "^0.7.1",
+    "tailwind-merge": "^3.5.0",
+    "lucide-react": "^0.577.0"
+  }},
+  "devDependencies": {{
+    "@types/chrome": "^0.0.300",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@wxt-dev/module-react": "latest",
+    "wxt": "latest",
+    "typescript": "^5",
+    "tailwindcss": "^4",
+    "@tailwindcss/postcss": "^4",
+    "autoprefixer": "^10",
+    "postcss": "^8"
+  }}
+}}"#, name = c.name, ui_dep = c.npm_ui_dep())
+}
+
+pub fn extension_wxt_config(c: &ProjectConfig) -> String {
+    format!(r#"import {{ defineConfig }} from "wxt";
+
+export default defineConfig({{
+  modules: ["@wxt-dev/module-react"],
+  manifest: {{
+    name: "{name}",
+    description: "{name} Chrome Extension",
+    permissions: ["storage"],
+  }},
+}});
+"#, name = c.name)
+}
+
+pub const EXTENSION_TSCONFIG: &str = r#"{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx"
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", ".output", ".wxt"]
+}
+"#;
+
+pub const EXTENSION_POSTCSS: &str = r#"export default {
+  plugins: {
+    "@tailwindcss/postcss": {},
+    autoprefixer: {},
+  },
+};
+"#;
+
+pub fn extension_popup_html(c: &ProjectConfig) -> String {
+    format!(r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{name}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
+"#, name = c.name)
+}
+
+pub const EXTENSION_POPUP_MAIN: &str = r#"import React from "react";
+import ReactDOM from "react-dom/client";
+import "./style.css";
+import { App } from "./App";
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
+"#;
+
+pub fn extension_popup_app(c: &ProjectConfig) -> String {
+    format!(r#"import {{ useChromeStorage }} from "@runesh/ui/hooks/use-chrome-storage";
+
+export function App() {{
+  const [count, setCount] = useChromeStorage("popup_count", 0);
+
+  return (
+    <div className="w-80 p-4 space-y-4">
+      <h1 className="text-lg font-bold">{name}</h1>
+      <p className="text-sm text-muted-foreground">Chrome Extension</p>
+      <button
+        className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        onClick={{() => setCount((c) => c + 1)}}
+      >
+        Count: {{count}}
+      </button>
+    </div>
+  );
+}}
+"#, name = c.name)
+}
+
+pub const EXTENSION_POPUP_CSS: &str = r#"@import "tailwindcss";
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+  }
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, sans-serif;
+}
+"#;
+
+pub const EXTENSION_BACKGROUND: &str = r#"export default defineBackground(() => {
+  console.log("Background service worker started");
+});
+"#;
