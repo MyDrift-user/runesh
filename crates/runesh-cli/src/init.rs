@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use console::style;
-use dialoguer::{Input, MultiSelect, Select};
+use dialoguer::{Input, MultiSelect};
 
 mod templates;
 
@@ -17,219 +17,171 @@ pub fn run(
 
     // ── Determine target directory ──────────────────────────────────────
 
-    let (root, project_name) = match name {
-        Some(ref n) => {
-            let dir = PathBuf::from(n);
-            if dir.exists() {
-                let has_content = fs::read_dir(&dir)
-                    .map_err(|e| format!("Cannot read {n}: {e}"))?
-                    .any(|e| {
-                        e.ok()
-                            .map(|e| e.file_name() != ".git" && e.file_name() != ".gitattributes")
-                            .unwrap_or(false)
-                    });
-                if has_content {
-                    return Err(format!("Directory '{n}' is not empty"));
-                }
-            }
-            (dir, n.clone())
-        }
-        None => {
-            let cwd = std::env::current_dir()
-                .map_err(|e| format!("Cannot get current directory: {e}"))?;
-
-            let has_content = fs::read_dir(&cwd)
-                .map_err(|e| format!("Cannot read current directory: {e}"))?
-                .any(|e| {
-                    e.ok()
-                        .map(|entry| {
-                            let s = entry.file_name().to_string_lossy().to_string();
-                            !s.starts_with(".git")
-                        })
-                        .unwrap_or(false)
-                });
-            if has_content {
-                return Err(
-                    "Current directory is not empty. Use 'runesh init <name>' to create a subdirectory, or run in an empty directory.".into()
-                );
-            }
-
-            let dir_name = cwd
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "my-app".into());
-
-            (cwd, dir_name)
-        }
-    };
-
+    let (root, project_name) = resolve_target_dir(name.as_deref())?;
     let snake_name = project_name.replace('-', "_");
 
     // ── Resolve RUNESH source ───────────────────────────────────────────
 
     let source = if use_local {
-        let path = resolve_local_path(&root, local_path)?;
-        RuneshSource::Local(path)
+        RuneshSource::Local(resolve_local_path(&root, local_path)?)
     } else {
-        let repo = repo_override
-            .or_else(|| std::env::var("RUNESH_REPO").ok())
-            .unwrap_or_else(|| crate::DEFAULT_REPO.into());
-        RuneshSource::Git(repo)
+        RuneshSource::Git(
+            repo_override
+                .or_else(|| std::env::var("RUNESH_REPO").ok())
+                .unwrap_or_else(|| crate::DEFAULT_REPO.into()),
+        )
     };
 
-    // ── Gather config ───────────────────────────────────────────────────
+    // ── Step 1: Pick components ─────────────────────────────────────────
 
-    let project_type = Select::new()
-        .with_prompt("Project type")
-        .items(&[
-            "Web only (Rust API + Next.js)",
-            "Web + Desktop (shared backend, Tauri wraps the web frontend)",
-            "Web + Desktop (separate backends and separate frontends)",
-            "Web + Chrome Extension",
-            "Chrome Extension only (no backend)",
-        ])
-        .default(0)
-        .interact()
-        .map_err(|e| e.to_string())?;
+    println!("  {} Select the components for your project:\n", style("1/3").dim());
 
-    let with_tauri = project_type == 1 || project_type == 2;
-    let separate_desktop = project_type == 2;
-    let with_extension = project_type == 3 || project_type == 4;
-    let extension_only = project_type == 4;
-
-    let feature_options = &[
-        "OIDC Authentication (runesh-auth)",
-        "Rate Limiting",
-        "WebSocket Broadcast",
-        "File Upload Handler",
-        "Docker (Dockerfile + compose.yaml)",
+    let components = &[
+        "Rust API server (Axum + PostgreSQL)",
+        "Web frontend (Next.js + shadcn/ui)",
+        "Tauri desktop app",
+        "Desktop frontend (separate from web, for Tauri)",
+        "Chrome extension (WXT + React)",
     ];
 
-    let selected_features = MultiSelect::new()
-        .with_prompt("Features to include (space to toggle)")
-        .items(feature_options)
-        .defaults(&[true, true, false, false, true])
+    let selected = MultiSelect::new()
+        .with_prompt("Components (space to toggle, enter to confirm)")
+        .items(components)
+        .defaults(&[true, true, false, false, false])
         .interact()
         .map_err(|e| e.to_string())?;
 
-    let (db_name, port) = if extension_only {
-        (String::new(), String::new())
-    } else {
+    let has_server = selected.contains(&0);
+    let has_web = selected.contains(&1);
+    let has_tauri = selected.contains(&2);
+    let has_desktop_frontend = selected.contains(&3);
+    let has_extension = selected.contains(&4);
+
+    if selected.is_empty() {
+        return Err("No components selected".into());
+    }
+
+    // ── Step 2: Pick server features (if server selected) ───────────────
+
+    let mut with_auth = false;
+    let mut with_rate_limit = false;
+    let mut with_ws = false;
+    let mut with_upload = false;
+    let mut with_docker = false;
+
+    if has_server {
+        println!("\n  {} Select server features:\n", style("2/3").dim());
+
+        let features = &[
+            "OIDC Authentication (runesh-auth)",
+            "Rate Limiting",
+            "WebSocket Broadcast",
+            "File Upload Handler",
+            "Docker (Dockerfile + compose.yaml)",
+        ];
+
+        let sel = MultiSelect::new()
+            .with_prompt("Server features (space to toggle)")
+            .items(features)
+            .defaults(&[true, true, false, false, true])
+            .interact()
+            .map_err(|e| e.to_string())?;
+
+        with_auth = sel.contains(&0);
+        with_rate_limit = sel.contains(&1);
+        with_ws = sel.contains(&2);
+        with_upload = sel.contains(&3);
+        with_docker = sel.contains(&4);
+    }
+
+    // ── Step 3: Server config (if server selected) ──────────────────────
+
+    let (db_name, port) = if has_server {
+        println!("\n  {} Configure:\n", style("3/3").dim());
+
         let db: String = Input::new()
             .with_prompt("Database name")
             .default(project_name.clone())
             .interact_text()
             .map_err(|e| e.to_string())?;
         let p: String = Input::new()
-            .with_prompt("Web backend port")
+            .with_prompt("Backend port")
             .default("3001".into())
             .interact_text()
             .map_err(|e| e.to_string())?;
         (db, p)
+    } else {
+        (String::new(), String::new())
     };
 
     println!("\n  {} Creating project...\n", style("->").green());
 
+    // ── Build config ────────────────────────────────────────────────────
+
     let config = ProjectConfig {
         name: project_name.clone(),
-        snake_name: snake_name.clone(),
+        snake_name,
         db_name,
         port,
         source,
-        with_auth: !extension_only && selected_features.contains(&0),
-        with_rate_limit: !extension_only && selected_features.contains(&1),
-        with_ws: !extension_only && selected_features.contains(&2),
-        with_upload: !extension_only && selected_features.contains(&3),
-        with_tauri,
-        separate_desktop,
-        with_extension,
-        extension_only,
-        with_docker: !extension_only && selected_features.contains(&4),
+        has_server,
+        has_web,
+        has_tauri,
+        has_desktop_frontend,
+        has_extension,
+        with_auth,
+        with_rate_limit,
+        with_ws,
+        with_upload,
+        with_docker,
     };
+
+    // ── Generate ────────────────────────────────────────────────────────
 
     create_dirs(&root, &config)?;
     write_files(&root, &config)?;
+    setup_npmrc(&root, &config)?;
+    run_bun_installs(&root, &config);
 
-    // ── Setup .npmrc for GitHub Packages ────────────────────────────────
-
-    if let RuneshSource::Git(_) = &config.source {
-        let npmrc_content = format!(
-            "{scope}:registry=https://npm.pkg.github.com\n",
-            scope = crate::DEFAULT_NPM_SCOPE
-        );
-        if !config.extension_only {
-            let web_npmrc = root.join("web").join(".npmrc");
-            fs::write(&web_npmrc, &npmrc_content)
-                .map_err(|e| format!("write .npmrc: {e}"))?;
-        }
-
-        if config.separate_desktop {
-            let desktop_npmrc = root.join("desktop").join(".npmrc");
-            fs::write(&desktop_npmrc, &npmrc_content)
-                .map_err(|e| format!("write desktop/.npmrc: {e}"))?;
-        }
-
-        if config.with_extension {
-            let ext_npmrc = root.join("extension").join(".npmrc");
-            fs::write(&ext_npmrc, &npmrc_content)
-                .map_err(|e| format!("write extension/.npmrc: {e}"))?;
-        }
-    }
-
-    // ── Run bun install ────────────────────────────────────────────────
-
-    if !config.extension_only {
-        run_bun_install(&root.join("web"), "web");
-    }
-
-    if config.separate_desktop {
-        run_bun_install(&root.join("desktop"), "desktop");
-    }
-
-    if config.with_extension {
-        run_bun_install(&root.join("extension"), "extension");
-    }
-
-    // ── Done ───────────────────────────────────────────────────────────
+    // ── Done ────────────────────────────────────────────────────────────
 
     println!("\n  {} Project '{}' ready!\n", style("OK").green().bold(), style(&project_name).cyan());
     println!("  Next steps:");
     if name.is_some() {
         println!("    cd {project_name}");
-        println!();
     }
-    if !extension_only {
-        println!("    # Web backend:");
+    if has_server {
+        println!();
+        println!("    # Backend:");
         println!("    cargo run -p {project_name}-server");
+    }
+    if has_web {
+        println!();
         println!("    # Web frontend:");
         println!("    cd web && bun dev");
     }
-    if with_tauri && !separate_desktop {
+    if has_tauri && !has_desktop_frontend {
         println!();
-        println!("    # Desktop (wraps web frontend):");
+        println!("    # Desktop (Tauri):");
         println!("    cd src-tauri && cargo tauri dev");
     }
-    if separate_desktop {
+    if has_tauri && has_desktop_frontend {
         println!();
-        println!("    # Desktop app:");
-        println!("    cd desktop && bun dev   # frontend on :3100");
+        println!("    # Desktop frontend:");
+        println!("    cd desktop && bun dev");
+        println!("    # Desktop app (Tauri):");
         println!("    cd src-tauri && cargo tauri dev");
     }
-    if config.with_docker {
+    if has_extension {
+        println!();
+        println!("    # Chrome extension:");
+        println!("    cd extension && bun dev");
+        println!("    # Load: chrome://extensions -> Load unpacked -> extension/.output/chrome-mv3");
+    }
+    if with_docker {
         println!();
         println!("    # Docker:");
         println!("    docker compose up -d");
-    }
-    if with_extension {
-        println!();
-        if extension_only {
-            println!("    # Extension dev:");
-        } else {
-            println!("    # Chrome extension:");
-        }
-        println!("    cd extension && bun dev");
-        println!("    # Load in Chrome: chrome://extensions -> Load unpacked -> .output/chrome-mv3");
     }
     println!();
 
@@ -239,9 +191,7 @@ pub fn run(
 // ── Types ───────────────────────────────────────────────────────────────────
 
 pub(crate) enum RuneshSource {
-    /// Git URL (e.g. "https://github.com/USER/RUNESH")
     Git(String),
-    /// Local file path (e.g. "../RUNESH")
     Local(String),
 }
 
@@ -251,164 +201,192 @@ pub(crate) struct ProjectConfig {
     pub db_name: String,
     pub port: String,
     pub source: RuneshSource,
+    // Components
+    pub has_server: bool,
+    pub has_web: bool,
+    pub has_tauri: bool,
+    pub has_desktop_frontend: bool,
+    pub has_extension: bool,
+    // Server features
     pub with_auth: bool,
     pub with_rate_limit: bool,
     pub with_ws: bool,
     pub with_upload: bool,
-    pub with_tauri: bool,
-    pub separate_desktop: bool,
-    pub with_extension: bool,
-    pub extension_only: bool,
     pub with_docker: bool,
 }
 
 impl ProjectConfig {
-    /// Cargo dependency string for a RUNESH crate.
     pub fn cargo_dep(&self, crate_name: &str) -> String {
         match &self.source {
-            RuneshSource::Git(repo) => {
-                format!("{crate_name} = {{ git = \"{repo}\" }}")
-            }
-            RuneshSource::Local(path) => {
-                format!("{crate_name} = {{ path = \"{path}/crates/{crate_name}\" }}")
-            }
+            RuneshSource::Git(repo) => format!("{crate_name} = {{ git = \"{repo}\" }}"),
+            RuneshSource::Local(path) => format!("{crate_name} = {{ path = \"{path}/crates/{crate_name}\" }}"),
         }
     }
 
-    /// npm dependency string for @runesh/ui.
     pub fn npm_ui_dep(&self) -> String {
         match &self.source {
-            RuneshSource::Git(_) => format!("\"@runesh/ui\": \"*\""),
+            RuneshSource::Git(_) => "\"@runesh/ui\": \"*\"".into(),
             RuneshSource::Local(path) => format!("\"@runesh/ui\": \"file:{path}/packages/ui\""),
         }
+    }
+
+    pub fn has_any_frontend(&self) -> bool {
+        self.has_web || self.has_desktop_frontend || self.has_extension
+    }
+
+    pub fn has_any_rust(&self) -> bool {
+        self.has_server || self.has_tauri
     }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+fn resolve_target_dir(name: Option<&str>) -> Result<(PathBuf, String), String> {
+    match name {
+        Some(n) => {
+            let dir = PathBuf::from(n);
+            if dir.exists() {
+                let has_content = fs::read_dir(&dir)
+                    .map_err(|e| format!("Cannot read {n}: {e}"))?
+                    .any(|e| e.ok().map(|e| {
+                        let s = e.file_name();
+                        s != ".git" && s != ".gitattributes" && s != ".gitignore"
+                    }).unwrap_or(false));
+                if has_content {
+                    return Err(format!("Directory '{n}' is not empty"));
+                }
+            }
+            Ok((dir, n.to_string()))
+        }
+        None => {
+            let cwd = std::env::current_dir().map_err(|e| format!("Cannot get cwd: {e}"))?;
+            let has_content = fs::read_dir(&cwd)
+                .map_err(|e| format!("Cannot read cwd: {e}"))?
+                .any(|e| e.ok().map(|entry| {
+                    !entry.file_name().to_string_lossy().starts_with(".git")
+                }).unwrap_or(false));
+            if has_content {
+                return Err("Current directory is not empty. Use 'runesh init <name>' to create a subdirectory.".into());
+            }
+            let dir_name = cwd.file_name().and_then(|n| n.to_str())
+                .map(|s| s.to_string()).unwrap_or_else(|| "my-app".into());
+            Ok((cwd, dir_name))
+        }
+    }
+}
+
 fn resolve_local_path(target_dir: &Path, explicit: Option<String>) -> Result<String, String> {
     if let Some(p) = explicit {
         let path = PathBuf::from(&p);
-        if path.join("Cargo.toml").exists() {
-            return make_relative(target_dir, &path);
-        }
+        if path.join("Cargo.toml").exists() { return make_relative(target_dir, &path); }
         return Err(format!("RUNESH not found at '{p}'"));
     }
-
     if let Ok(p) = std::env::var("RUNESH_PATH") {
         let path = PathBuf::from(&p);
-        if path.join("Cargo.toml").exists() {
-            return make_relative(target_dir, &path);
-        }
+        if path.join("Cargo.toml").exists() { return make_relative(target_dir, &path); }
     }
-
-    // Sibling directory
     let sibling = if target_dir.is_absolute() {
         target_dir.parent().map(|p| p.join("RUNESH"))
     } else {
-        std::env::current_dir()
-            .ok()
+        std::env::current_dir().ok()
             .and_then(|cwd| cwd.join(target_dir).parent().map(|p| p.join("RUNESH")))
     };
-
     if let Some(ref path) = sibling {
-        if path.join("Cargo.toml").exists() {
-            return make_relative(target_dir, path);
-        }
+        if path.join("Cargo.toml").exists() { return make_relative(target_dir, path); }
     }
-
-    println!("  {} RUNESH repo not found locally. Defaulting to ../RUNESH", style("!").yellow());
+    println!("  {} RUNESH not found locally. Defaulting to ../RUNESH", style("!").yellow());
     Ok("../RUNESH".into())
 }
 
 fn make_relative(from: &Path, to: &Path) -> Result<String, String> {
-    let from_abs = if from.is_absolute() {
-        from.to_path_buf()
-    } else {
-        std::env::current_dir().map_err(|e| e.to_string())?.join(from)
-    };
-    let to_abs = if to.is_absolute() {
-        to.to_path_buf()
-    } else {
-        std::env::current_dir().map_err(|e| e.to_string())?.join(to)
-    };
-
+    let from_abs = if from.is_absolute() { from.to_path_buf() }
+        else { std::env::current_dir().map_err(|e| e.to_string())?.join(from) };
+    let to_abs = if to.is_absolute() { to.to_path_buf() }
+        else { std::env::current_dir().map_err(|e| e.to_string())?.join(to) };
     let from_parts: Vec<_> = from_abs.components().collect();
     let to_parts: Vec<_> = to_abs.components().collect();
-
-    let common = from_parts.iter().zip(to_parts.iter())
-        .take_while(|(a, b)| a == b).count();
-
-    if common == 0 {
-        return Ok(to_abs.to_string_lossy().replace('\\', "/"));
-    }
-
-    let ups = from_parts.len() - common;
+    let common = from_parts.iter().zip(to_parts.iter()).take_while(|(a, b)| a == b).count();
+    if common == 0 { return Ok(to_abs.to_string_lossy().replace('\\', "/")); }
     let mut rel = String::new();
-    for _ in 0..ups {
-        rel.push_str("../");
-    }
+    for _ in 0..(from_parts.len() - common) { rel.push_str("../"); }
     for part in &to_parts[common..] {
         rel.push_str(&part.as_os_str().to_string_lossy());
         rel.push('/');
     }
     if rel.ends_with('/') { rel.pop(); }
-
     Ok(rel)
 }
 
-fn run_bun_install(dir: &Path, label: &str) {
-    println!("  {} Installing {} dependencies with bun...", style("->").green(), label);
-    let result = Command::new("bun").arg("install").current_dir(dir).status();
+fn setup_npmrc(root: &Path, config: &ProjectConfig) -> Result<(), String> {
+    if let RuneshSource::Git(_) = &config.source {
+        let npmrc = format!("{scope}:registry=https://npm.pkg.github.com\n", scope = crate::DEFAULT_NPM_SCOPE);
+        let frontends: Vec<&str> = [
+            if config.has_web { Some("web") } else { None },
+            if config.has_desktop_frontend { Some("desktop") } else { None },
+            if config.has_extension { Some("extension") } else { None },
+        ].into_iter().flatten().collect();
 
-    match result {
+        for dir in frontends {
+            fs::write(root.join(dir).join(".npmrc"), &npmrc)
+                .map_err(|e| format!("write {dir}/.npmrc: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn run_bun_installs(root: &Path, config: &ProjectConfig) {
+    for (dir, label) in [
+        (config.has_web, "web"),
+        (config.has_desktop_frontend, "desktop"),
+        (config.has_extension, "extension"),
+    ] {
+        if dir {
+            run_bun_install(&root.join(label), label);
+        }
+    }
+}
+
+fn run_bun_install(dir: &Path, label: &str) {
+    println!("  {} Installing {label} dependencies...", style("->").green());
+    match Command::new("bun").arg("install").current_dir(dir).status() {
         Ok(s) if s.success() => {}
         Ok(_) => println!("  {} bun install had warnings in {label}/ (non-fatal)", style("!").yellow()),
         Err(_) => println!("  {} bun not found - run 'bun install' in {label}/ manually", style("!").yellow()),
     }
 
-    println!("  {} Initializing shadcn/ui in {label}/...", style("->").green());
-    let shadcn = Command::new("bunx")
-        .args(["shadcn@latest", "init", "-y", "-d"])
-        .current_dir(dir)
-        .status();
-
-    match shadcn {
-        Ok(s) if s.success() => {}
-        _ => println!("  {} shadcn init skipped in {label}/", style("!").yellow()),
+    // Only init shadcn for Next.js frontends, not extensions
+    if label != "extension" {
+        println!("  {} Initializing shadcn/ui in {label}/...", style("->").green());
+        match Command::new("bunx").args(["shadcn@latest", "init", "-y", "-d"]).current_dir(dir).status() {
+            Ok(s) if s.success() => {}
+            _ => println!("  {} shadcn init skipped in {label}/", style("!").yellow()),
+        }
     }
 }
 
-fn create_dirs(root: &Path, config: &ProjectConfig) -> Result<(), String> {
-    if !config.extension_only {
-        let server_src = format!("crates/{}-server/src", config.name);
-        let dirs: Vec<&str> = vec!["crates", &server_src, "migrations",
-            "web/src/app", "web/src/components", "web/src/lib", "web/public"];
-        for d in &dirs {
-            fs::create_dir_all(root.join(d)).map_err(|e| format!("mkdir {d}: {e}"))?;
+fn create_dirs(root: &Path, c: &ProjectConfig) -> Result<(), String> {
+    let mk = |d: &str| fs::create_dir_all(root.join(d)).map_err(|e| format!("mkdir {d}: {e}"));
+
+    if c.has_server {
+        mk("crates")?;
+        mk(&format!("crates/{}-server/src", c.name))?;
+        mk("migrations")?;
+    }
+    if c.has_web {
+        for d in &["web/src/app", "web/src/components", "web/src/lib", "web/public"] { mk(d)?; }
+    }
+    if c.has_tauri {
+        for d in &["src-tauri/src", "src-tauri/icons", "src-tauri/capabilities"] { mk(d)?; }
+    }
+    if c.has_desktop_frontend {
+        for d in &["desktop/src/app", "desktop/src/components", "desktop/src/lib", "desktop/public"] { mk(d)?; }
+        if c.has_server {
+            mk(&format!("crates/{}-desktop/src", c.name))?;
         }
     }
-
-    if config.with_tauri {
-        for d in &["src-tauri/src", "src-tauri/icons", "src-tauri/capabilities"] {
-            fs::create_dir_all(root.join(d)).map_err(|e| format!("mkdir {d}: {e}"))?;
-        }
+    if c.has_extension {
+        for d in &["extension/entrypoints/popup", "extension/public"] { mk(d)?; }
     }
-
-    if config.separate_desktop {
-        for d in &["desktop/src/app", "desktop/src/components", "desktop/src/lib", "desktop/public"] {
-            fs::create_dir_all(root.join(d)).map_err(|e| format!("mkdir {d}: {e}"))?;
-        }
-        let desktop_crate = format!("crates/{}-desktop/src", config.name);
-        fs::create_dir_all(root.join(&desktop_crate)).map_err(|e| format!("mkdir {desktop_crate}: {e}"))?;
-    }
-
-    if config.with_extension {
-        for d in &["extension/entrypoints/popup", "extension/entrypoints/background", "extension/public"] {
-            fs::create_dir_all(root.join(d)).map_err(|e| format!("mkdir {d}: {e}"))?;
-        }
-    }
-
     Ok(())
 }
 
@@ -423,15 +401,22 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
 
     w(".gitignore", templates::GITIGNORE)?;
 
-    if !c.extension_only {
-        w("Cargo.toml", &templates::cargo_workspace(c))?;
-        w(".env", &templates::dot_env(c))?;
+    // ── Rust workspace ──────────────────────────────────────────────────
 
+    if c.has_any_rust() || c.has_server {
+        w("Cargo.toml", &templates::cargo_workspace(c))?;
+    }
+    if c.has_server {
+        w(".env", &templates::dot_env(c))?;
         let sc = format!("crates/{}-server", c.name);
         w(&format!("{sc}/Cargo.toml"), &templates::server_cargo(c))?;
         w(&format!("{sc}/src/main.rs"), &templates::server_main(c))?;
         w("migrations/001_initial.sql", &templates::initial_migration(c))?;
+    }
 
+    // ── Web frontend ────────────────────────────────────────────────────
+
+    if c.has_web {
         w("web/package.json", &templates::web_package_json(c))?;
         w("web/tsconfig.json", templates::TSCONFIG)?;
         w("web/next.config.ts", templates::NEXT_CONFIG)?;
@@ -442,16 +427,22 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         w("web/src/lib/utils.ts", templates::UTILS_TS)?;
     }
 
+    // ── Docker ──────────────────────────────────────────────────────────
+
     if c.with_docker {
         w("Dockerfile", &templates::dockerfile(c))?;
         w("compose.yaml", &templates::compose_yaml(c))?;
     }
 
-    if c.with_tauri {
-        if c.separate_desktop {
-            let dc = format!("crates/{}-desktop", c.name);
-            w(&format!("{dc}/Cargo.toml"), &templates::desktop_backend_cargo(c))?;
-            w(&format!("{dc}/src/lib.rs"), &templates::desktop_backend_lib(c))?;
+    // ── Tauri ───────────────────────────────────────────────────────────
+
+    if c.has_tauri {
+        if c.has_desktop_frontend {
+            if c.has_server {
+                let dc = format!("crates/{}-desktop", c.name);
+                w(&format!("{dc}/Cargo.toml"), &templates::desktop_backend_cargo(c))?;
+                w(&format!("{dc}/src/lib.rs"), &templates::desktop_backend_lib(c))?;
+            }
             w("desktop/package.json", &templates::desktop_package_json(c))?;
             w("desktop/tsconfig.json", templates::TSCONFIG)?;
             w("desktop/next.config.ts", templates::NEXT_CONFIG_STATIC)?;
@@ -472,9 +463,9 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         w("src-tauri/capabilities/default.json", templates::TAURI_CAPABILITIES)?;
     }
 
-    // ── Chrome Extension (WXT) ────────────────────────────────────────
+    // ── Chrome Extension ────────────────────────────────────────────────
 
-    if c.with_extension {
+    if c.has_extension {
         w("extension/package.json", &templates::extension_package_json(c))?;
         w("extension/wxt.config.ts", &templates::extension_wxt_config(c))?;
         w("extension/tsconfig.json", templates::EXTENSION_TSCONFIG)?;
@@ -485,6 +476,8 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         w("extension/entrypoints/popup/style.css", templates::EXTENSION_POPUP_CSS)?;
         w("extension/entrypoints/background.ts", templates::EXTENSION_BACKGROUND)?;
     }
+
+    // ── CLAUDE.md ───────────────────────────────────────────────────────
 
     w("CLAUDE.md", &templates::claude_md(c))?;
 

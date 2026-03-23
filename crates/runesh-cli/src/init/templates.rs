@@ -23,6 +23,7 @@ thiserror = "2"
 uuid = {{ version = "1", features = ["v4", "serde"] }}
 chrono = {{ version = "0.4", features = ["serde"] }}
 dotenvy = "0.15"
+clap = {{ version = "4", features = ["derive", "env"] }}
 
 # RUNESH shared crates
 {core_dep}
@@ -55,6 +56,7 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 dotenvy.workspace = true
+clap = {{ version = "4", features = ["derive", "env"] }}
 runesh-core.workspace = true
 "#, name = c.name);
 
@@ -66,67 +68,106 @@ runesh-core.workspace = true
 }
 
 pub fn server_main(c: &ProjectConfig) -> String {
-    let mut imports = String::from(r#"use std::net::SocketAddr;
-
-use axum::{routing::get, Router, Json, middleware};
-use sqlx::PgPool;
-use tracing_subscriber::EnvFilter;
-
-use runesh_core::shutdown_signal;
-"#);
+    let mut extra_cli_fields = String::new();
+    let mut extra_imports = String::new();
+    let mut extra_middleware = String::new();
 
     if c.with_rate_limit {
-        imports.push_str("use runesh_core::rate_limit::{RateLimiter, rate_limit_layer};\n");
-    }
-    if c.with_auth {
-        imports.push_str("use runesh_auth::axum_middleware::{auth_middleware, JwtSecret, AuthExemptPaths};\n");
-    }
-
-    let mut setup = String::from(r#"
-#[tokio::main]
-async fn main() {
-    dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
-        .init();
-
-    let pool = runesh_core::db::create_pool(None)
-        .await
-        .expect("Failed to connect to database");
-
-    sqlx::migrate!("../../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    let app = Router::new()
-        .route("/api/v1/health", get(health))
-"#);
-
-    if c.with_rate_limit {
-        setup.push_str(&format!(r#"        .layer(middleware::from_fn(move |req, next| {{
+        extra_imports.push_str("use runesh_core::rate_limit::{RateLimiter, rate_limit_layer};\n");
+        extra_middleware.push_str(r#"        .layer(middleware::from_fn(move |req, next| {
             let limiter = RateLimiter::new(100, 60);
             rate_limit_layer(limiter, true, req, next)
-        }}))
-"#));
+        }))
+"#);
     }
-
     if c.with_auth {
-        setup.push_str(r#"        .layer(middleware::from_fn(auth_middleware))
-        .layer(axum::Extension(JwtSecret(
-            std::env::var("JWT_SECRET").expect("JWT_SECRET must be set"),
-        )))
+        extra_imports.push_str("use runesh_auth::axum_middleware::{auth_middleware, JwtSecret, AuthExemptPaths};\n");
+        extra_cli_fields.push_str(r#"
+    /// JWT signing secret (min 32 chars)
+    #[arg(long, env = "JWT_SECRET")]
+    jwt_secret: String,
+"#);
+        extra_middleware.push_str(r#"        .layer(middleware::from_fn(auth_middleware))
+        .layer(axum::Extension(JwtSecret(cli.jwt_secret.clone())))
         .layer(axum::Extension(AuthExemptPaths::default()))
 "#);
     }
 
-    setup.push_str(&format!(r#"        .layer(runesh_core::middleware::cors::cors_layer(&["*"]))
+    format!(r#"use std::net::SocketAddr;
+
+use axum::{{routing::get, Router, Json, middleware}};
+use clap::Parser;
+use sqlx::PgPool;
+use tracing_subscriber::EnvFilter;
+
+use runesh_core::shutdown_signal;
+{extra_imports}
+/// {name} API server
+#[derive(Parser)]
+#[command(name = "{name}", version, about = "{name} API server")]
+struct Cli {{
+    /// Port to listen on
+    #[arg(short, long, env = "PORT", default_value = "{port}")]
+    port: u16,
+
+    /// Host to bind to
+    #[arg(long, env = "HOST", default_value = "0.0.0.0")]
+    host: String,
+
+    /// Database connection URL
+    #[arg(long, env = "DATABASE_URL")]
+    database_url: String,
+
+    /// Log level (trace, debug, info, warn, error)
+    #[arg(long, env = "RUST_LOG", default_value = "info")]
+    log_level: String,
+
+    /// CORS allowed origins (comma-separated, or * for all)
+    #[arg(long, env = "CORS_ORIGINS", default_value = "*")]
+    cors_origins: String,
+
+    /// Run database migrations on startup
+    #[arg(long, env = "RUN_MIGRATIONS", default_value = "true")]
+    migrate: bool,
+{extra_cli_fields}}}
+
+#[tokio::main]
+async fn main() {{
+    dotenvy::dotenv().ok();
+    let cli = Cli::parse();
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new(&cli.log_level))
+        )
+        .init();
+
+    let pool = runesh_core::db::create_pool(Some(&cli.database_url))
+        .await
+        .expect("Failed to connect to database");
+
+    if cli.migrate {{
+        sqlx::migrate!("../../migrations")
+            .run(&pool)
+            .await
+            .expect("Failed to run migrations");
+        tracing::info!("Migrations applied");
+    }}
+
+    let cors_origins: Vec<&str> = cli.cors_origins.split(',').map(|s| s.trim()).collect();
+
+    let app = Router::new()
+        .route("/api/v1/health", get(health))
+{extra_middleware}        .layer(runesh_core::middleware::cors::cors_layer(&cors_origins))
+        .layer(middleware::from_fn(runesh_core::middleware::security_headers::security_headers_middleware))
         .layer(middleware::from_fn(runesh_core::middleware::logging::logging_middleware))
         .layer(middleware::from_fn(runesh_core::middleware::request_id::request_id_middleware))
         .with_state(pool);
 
-    let port: u16 = std::env::var("PORT").unwrap_or_else(|_| "{port}".into()).parse().unwrap();
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let addr: SocketAddr = format!("{{}}:{{}}", cli.host, cli.port)
+        .parse()
+        .expect("Invalid host:port");
     tracing::info!("Listening on {{addr}}");
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
@@ -139,9 +180,13 @@ async fn main() {
 async fn health(axum::extract::State(pool): axum::extract::State<PgPool>) -> Json<serde_json::Value> {{
     runesh_core::middleware::health::health_handler(axum::extract::State(pool)).await
 }}
-"#, port = c.port));
-
-    format!("{imports}{setup}")
+"#,
+        name = c.name,
+        port = c.port,
+        extra_imports = extra_imports,
+        extra_cli_fields = extra_cli_fields,
+        extra_middleware = extra_middleware,
+    )
 }
 
 pub fn initial_migration(c: &ProjectConfig) -> String {
@@ -597,15 +642,52 @@ pub fn claude_md(c: &ProjectConfig) -> String {
     if c.with_ws { features.push("WebSocket broadcast"); }
     if c.with_upload { features.push("File upload"); }
     if c.with_docker { features.push("Docker deployment"); }
-    if c.with_tauri { features.push("Tauri v2 desktop"); }
+    if c.has_tauri { features.push("Tauri v2 desktop"); }
+    if c.has_extension { features.push("Chrome extension (WXT)"); }
+
+    // Build structure section dynamically
+    let mut structure = Vec::new();
+    if c.has_server {
+        structure.push(format!("crates/{}-server/    # Axum API server", c.name));
+        structure.push("migrations/              # PostgreSQL migrations".into());
+    }
+    if c.has_web {
+        structure.push("web/                     # Next.js frontend".into());
+    }
+    if c.has_desktop_frontend {
+        structure.push("desktop/                 # Desktop Next.js frontend".into());
+    }
+    if c.has_tauri {
+        structure.push("src-tauri/               # Tauri v2 desktop app".into());
+    }
+    if c.has_extension {
+        structure.push("extension/               # Chrome extension (WXT)".into());
+    }
+    if c.has_any_rust() {
+        structure.push("Cargo.toml               # Rust workspace".into());
+    }
+
+    // Build dev commands dynamically
+    let mut dev_cmds = Vec::new();
+    if c.has_server { dev_cmds.push(format!("cargo run -p {}-server", c.name)); }
+    if c.has_web { dev_cmds.push("cd web && bun dev".into()); }
+    if c.has_desktop_frontend { dev_cmds.push("cd desktop && bun dev".into()); }
+    if c.has_tauri { dev_cmds.push("cd src-tauri && cargo tauri dev".into()); }
+    if c.has_extension { dev_cmds.push("cd extension && bun dev".into()); }
+
+    let mut stack = Vec::new();
+    if c.has_server { stack.push("Backend: Rust (Axum) + PostgreSQL (SQLx)".into()); }
+    if c.has_web { stack.push("Frontend: Next.js + React + shadcn/ui + Tailwind CSS v4".into()); }
+    stack.push(format!("Shared code: RUNESH ({})", match &c.source {
+        super::RuneshSource::Git(url) => url.as_str(),
+        super::RuneshSource::Local(path) => path.as_str(),
+    }));
+    stack.push("Package manager: bun".into());
 
     format!(r#"# {name}
 
 ## Stack
-- Backend: Rust (Axum) + PostgreSQL (SQLx)
-- Frontend: Next.js + React + shadcn/ui + Tailwind CSS v4
-- Shared code: RUNESH ({source})
-- Package manager: bun
+{stack}
 
 ## Features
 {features}
@@ -613,34 +695,19 @@ pub fn claude_md(c: &ProjectConfig) -> String {
 ## Structure
 ```
 {name}/
-├── crates/{name}-server/    # Axum API server
-├── migrations/              # SQLx PostgreSQL migrations
-├── web/                     # Next.js frontend
-{tauri}├── Cargo.toml               # Rust workspace
-└── .env                     # Environment variables
+{structure}
 ```
 
 ## Development
 ```
-# Backend
-cargo run -p {name}-server
-
-# Frontend
-cd web && bun dev
-{tauri_dev}```
+{dev_cmds}
+```
 "#,
         name = c.name,
-        source = match &c.source {
-            super::RuneshSource::Git(url) => url.as_str(),
-            super::RuneshSource::Local(path) => path.as_str(),
-        },
+        stack = stack.iter().map(|s| format!("- {s}")).collect::<Vec<_>>().join("\n"),
         features = features.iter().map(|f| format!("- {f}")).collect::<Vec<_>>().join("\n"),
-        tauri = if c.separate_desktop {
-            format!("├── desktop/                  # Desktop Next.js frontend\n├── crates/{}-desktop/       # Desktop Rust backend\n├── src-tauri/                # Tauri v2 shell\n", c.name)
-        } else if c.with_tauri {
-            "├── src-tauri/                # Tauri v2 desktop app\n".into()
-        } else { String::new() },
-        tauri_dev = if c.with_tauri { "\n# Desktop\ncd src-tauri && cargo tauri dev".into() } else { String::new() },
+        structure = structure.iter().map(|s| format!("├── {s}")).collect::<Vec<_>>().join("\n"),
+        dev_cmds = dev_cmds.join("\n"),
     )
 }
 
