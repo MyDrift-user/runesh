@@ -1,11 +1,8 @@
 name: Publish @mydrift-user/runesh-ui
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "packages/ui/**"
-  workflow_dispatch:
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -14,10 +11,17 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    if: startsWith(github.event.release.tag_name, 'ui-v')
     steps:
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
+
+      - name: Set version from release tag
+        working-directory: packages/ui
+        run: |
+          VERSION="${GITHUB_REF_NAME#ui-v}"
+          bun run npm pkg set version="$VERSION"
 
       - name: Setup .npmrc for GitHub Packages
         run: |
