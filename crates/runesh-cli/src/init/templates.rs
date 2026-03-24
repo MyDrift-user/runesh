@@ -895,7 +895,7 @@ RUN cargo build --release --bin {name}-server
 # ── Stage 3: Runtime ───────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl libssl3 && rm -rf /var/lib/apt/lists/*
+    ca-certificates curl libssl3 nodejs npm && rm -rf /var/lib/apt/lists/*
 
 # Install Caddy reverse proxy
 RUN curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" \
@@ -906,17 +906,17 @@ WORKDIR /app
 # Copy Next.js standalone build
 COPY --from=web-builder /build/.next/standalone ./web/
 COPY --from=web-builder /build/.next/static ./web/.next/static/
-COPY --from=web-builder /build/public ./web/public/ 2>/dev/null || true
+RUN mkdir -p ./web/public
 
 # Copy Rust binary and migrations
 COPY --from=rust-builder /build/target/release/{name}-server ./backend
 COPY migrations/ ./migrations/
 
 # Caddy config: proxy /api and /ws to backend, everything else to Next.js
-RUN printf ':8080 {{\n  handle /api/* {{\n    reverse_proxy localhost:{port}\n  }}\n  handle /ws {{\n    reverse_proxy localhost:{port}\n  }}\n  handle {{\n    reverse_proxy localhost:3000\n  }}\n}}\n' > /etc/Caddyfile
+RUN printf ':8080 {{\n  handle /api/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /ws {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle {{\n    reverse_proxy 127.0.0.1:3000\n  }}\n}}\n' > /etc/Caddyfile
 
 # Start script
-RUN printf '#!/bin/sh\nset -e\ncaddy start --config /etc/Caddyfile &\ncd /app/web && PORT=3000 node server.js &\ncd /app && ./backend &\nwait -n\n' > /app/start.sh && chmod +x /app/start.sh
+RUN printf '#!/bin/sh\nset -e\ncaddy start --config /etc/Caddyfile &\ncd /app/web && HOSTNAME=0.0.0.0 PORT=3000 node server.js &\ncd /app && ./backend &\nwait\n' > /app/start.sh && chmod +x /app/start.sh
 
 EXPOSE 8080
 CMD ["/app/start.sh"]
