@@ -1,8 +1,8 @@
 "use client"
 
 import { Loader2 } from "lucide-react"
-import { TooltipProvider } from "@/components/ui/tooltip"
-import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
+import { TooltipProvider } from "../../components/ui/tooltip"
+import { SidebarProvider, SidebarInset, SidebarTrigger } from "../../components/ui/sidebar"
 
 export interface DashboardShellProps {
   children: React.ReactNode

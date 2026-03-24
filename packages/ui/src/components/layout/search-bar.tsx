@@ -9,7 +9,7 @@ import {
   CommandEmpty,
   CommandGroup,
   CommandItem,
-} from "@/components/ui/command"
+} from "../../components/ui/command"
 import { Loader2, type LucideIcon } from "lucide-react"
 
 export interface SearchResult {

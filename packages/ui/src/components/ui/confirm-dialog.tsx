@@ -10,7 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+} from "./alert-dialog";
 
 interface ConfirmDialogProps {
   /** The trigger element (e.g. a delete button) */

@@ -37,13 +37,4 @@ export const VideoExtension = Node.create({
     ];
   },
 
-  addCommands() {
-    return {
-      insertVideo:
-        (attrs: { src: string; fileName?: string }) =>
-        ({ commands }) => {
-          return commands.insertContent({ type: this.name, attrs });
-        },
-    };
-  },
 });

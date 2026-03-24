@@ -40,13 +40,4 @@ export const AudioExtension = Node.create({
     ];
   },
 
-  addCommands() {
-    return {
-      insertAudio:
-        (attrs: { src: string; fileName?: string }) =>
-        ({ commands }) => {
-          return commands.insertContent({ type: this.name, attrs });
-        },
-    };
-  },
 });

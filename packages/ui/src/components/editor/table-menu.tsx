@@ -4,25 +4,8 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Plus, Minus, Trash2, Columns3, Rows3 } from "lucide-react";
 
 interface TableMenuProps {
-    editor: {
-        isActive: (name: string) => boolean;
-        chain: () => {
-            focus: () => {
-                addColumnAfter: () => { run: () => void };
-                addRowAfter: () => { run: () => void };
-                deleteColumn: () => { run: () => void };
-                deleteRow: () => { run: () => void };
-                deleteTable: () => { run: () => void };
-                toggleHeaderRow: () => { run: () => void };
-                toggleHeaderColumn: () => { run: () => void };
-            };
-        };
-        on: (event: string, cb: () => void) => void;
-        off: (event: string, cb: () => void) => void;
-        view: {
-            dom: HTMLElement;
-        };
-    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    editor: any;
     scrollContainer: HTMLElement | null;
 }
 

@@ -1,8 +1,8 @@
 "use client";
 
 import { Minus, Square, X } from "lucide-react";
-import { useWindowControls } from "@/hooks/use-window-controls";
-import { cn } from "@/lib/utils";
+import { useWindowControls } from "../../hooks/use-window-controls";
+import { cn } from "../../lib/utils";
 
 interface TitleBarProps {
   /** App title displayed in the title bar */

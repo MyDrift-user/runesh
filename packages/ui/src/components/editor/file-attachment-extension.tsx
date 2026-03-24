@@ -104,13 +104,4 @@ export const FileAttachmentExtension = Node.create({
     ];
   },
 
-  addCommands() {
-    return {
-      insertFileAttachment:
-        (attrs: { src: string; fileName: string; fileSize: number; fileType: string }) =>
-        ({ commands }) => {
-          return commands.insertContent({ type: this.name, attrs });
-        },
-    };
-  },
 });

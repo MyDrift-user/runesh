@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
-import { api } from "@/lib/api-client";
+import { api } from "../../lib/api-client";
 
 export interface AuthUser {
   id: string;
@@ -47,7 +47,7 @@ export function AuthProvider({
 }: AuthProviderProps) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const refreshTimer = useRef<ReturnType<typeof setInterval>>();
+  const refreshTimer = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const fetchUser = useCallback(async () => {
     try {

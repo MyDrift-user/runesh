@@ -283,26 +283,36 @@ pub(crate) struct ProjectConfig {
 }
 
 impl ProjectConfig {
-    pub fn cargo_dep(&self, crate_name: &str) -> String {
+    fn repo_url(&self) -> &str {
         match &self.source {
-            RuneshSource::Git(repo) => format!("{crate_name} = {{ git = \"{repo}\" }}"),
-            RuneshSource::Local(path) => format!("{crate_name} = {{ path = \"{path}/crates/{crate_name}\" }}"),
+            RuneshSource::Git(repo) => repo,
+            RuneshSource::Local(_) => crate::DEFAULT_REPO,
         }
+    }
+
+    pub fn cargo_dep(&self, crate_name: &str) -> String {
+        // Always use git deps - works in Docker, CI, and locally.
+        // For local RUNESH iteration, use .cargo/config.toml path overrides.
+        format!("{crate_name} = {{ git = \"{}\" }}", self.repo_url())
     }
 
     pub fn cargo_dep_with_features(&self, crate_name: &str, features: &[&str]) -> String {
         let feats = features.iter().map(|f| format!("\"{f}\"")).collect::<Vec<_>>().join(", ");
-        match &self.source {
-            RuneshSource::Git(repo) => format!("{crate_name} = {{ git = \"{repo}\", features = [{feats}] }}"),
-            RuneshSource::Local(path) => format!("{crate_name} = {{ path = \"{path}/crates/{crate_name}\", features = [{feats}] }}"),
-        }
+        format!("{crate_name} = {{ git = \"{}\", features = [{feats}] }}", self.repo_url())
     }
 
+    /// npm dependency for @mydrift-user/runesh-ui.
+    /// `subdir_depth` is how many levels deep the package.json is from the project root
+    /// (e.g. 1 for `web/package.json`, 1 for `extension/package.json`).
     pub fn npm_ui_dep(&self) -> String {
-        match &self.source {
-            RuneshSource::Git(_) => "\"@runesh/ui\": \"*\"".into(),
-            RuneshSource::Local(path) => format!("\"@runesh/ui\": \"file:{path}/packages/ui\""),
-        }
+        self.npm_ui_dep_from_depth(1)
+    }
+
+    pub fn npm_ui_dep_from_depth(&self, _depth: usize) -> String {
+        // Always use registry version in package.json.
+        // For local dev, `bun link @mydrift-user/runesh-ui` overrides this with the local copy.
+        // For Docker/CI, bun installs from GitHub Packages registry.
+        "\"@mydrift-user/runesh-ui\": \"*\"".into()
     }
 
     pub fn has_any_frontend(&self) -> bool {
@@ -393,19 +403,47 @@ fn make_relative(from: &Path, to: &Path) -> Result<String, String> {
 }
 
 fn setup_npmrc(root: &Path, config: &ProjectConfig) -> Result<(), String> {
-    if let RuneshSource::Git(_) = &config.source {
-        let npmrc = format!("{scope}:registry=https://npm.pkg.github.com\n", scope = crate::DEFAULT_NPM_SCOPE);
-        let frontends: Vec<&str> = [
-            if config.has_web { Some("web") } else { None },
-            if config.has_desktop_frontend { Some("desktop") } else { None },
-            if config.has_extension { Some("extension") } else { None },
-        ].into_iter().flatten().collect();
+    // Always write .npmrc for GitHub Packages registry
+    let npmrc = format!("{scope}:registry=https://npm.pkg.github.com\n", scope = crate::DEFAULT_NPM_SCOPE);
+    let frontends: Vec<&str> = [
+        if config.has_web { Some("web") } else { None },
+        if config.has_desktop_frontend { Some("desktop") } else { None },
+        if config.has_extension { Some("extension") } else { None },
+    ].into_iter().flatten().collect();
 
-        for dir in frontends {
-            fs::write(root.join(dir).join(".npmrc"), &npmrc)
-                .map_err(|e| format!("write {dir}/.npmrc: {e}"))?;
+    for dir in &frontends {
+        fs::write(root.join(dir).join(".npmrc"), &npmrc)
+            .map_err(|e| format!("write {dir}/.npmrc: {e}"))?;
+    }
+
+    // For local dev: create .cargo/config.toml with path overrides + bun link
+    if let RuneshSource::Local(path) = &config.source {
+        if config.has_any_rust() {
+            let cargo_config = format!(
+                "# Local RUNESH path overrides (remove for CI/Docker builds)\n\
+                 [patch.'{repo}']\n\
+                 runesh-core = {{ path = \"{path}/crates/runesh-core\" }}\n\
+                 runesh-auth = {{ path = \"{path}/crates/runesh-auth\" }}\n",
+                repo = crate::DEFAULT_REPO,
+                path = path,
+            );
+            let cargo_dir = root.join(".cargo");
+            fs::create_dir_all(&cargo_dir)
+                .map_err(|e| format!("mkdir .cargo: {e}"))?;
+            fs::write(cargo_dir.join("config.toml"), cargo_config)
+                .map_err(|e| format!("write .cargo/config.toml: {e}"))?;
+        }
+
+        // Link @mydrift-user/runesh-ui for local dev
+        for dir in &frontends {
+            println!("  {} Linking @mydrift-user/runesh-ui in {dir}/...", console::style("->").green());
+            let _ = std::process::Command::new("bun")
+                .args(["link", "@mydrift-user/runesh-ui"])
+                .current_dir(root.join(dir))
+                .status();
         }
     }
+
     Ok(())
 }
 
@@ -523,6 +561,7 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
     if c.with_docker {
         w("Dockerfile", &templates::dockerfile(c))?;
         w("compose.yaml", &templates::compose_yaml(c))?;
+        w(".dockerignore", templates::DOCKERIGNORE)?;
     }
 
     // ── Tauri ───────────────────────────────────────────────────────────

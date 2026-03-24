@@ -292,7 +292,7 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
   "private": true,
   "scripts": {{
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint"
   }},
@@ -352,6 +352,7 @@ pub const NEXT_CONFIG: &str = r#"import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  transpilePackages: ["@mydrift-user/runesh-ui"],
 };
 
 export default nextConfig;
@@ -365,7 +366,9 @@ pub const POSTCSS_CONFIG: &str = r#"const config = {
 export default config;
 "#;
 
-pub const GLOBALS_CSS_IMPORT: &str = r#"@import "@runesh/ui/styles/globals.css";
+pub const GLOBALS_CSS_IMPORT: &str = r#"@import "tailwindcss";
+@import "tw-animate-css";
+@import "@mydrift-user/runesh-ui/src/styles/globals.css";
 "#;
 
 pub fn layout_tsx(c: &ProjectConfig, is_desktop: bool) -> String {
@@ -376,7 +379,7 @@ pub fn layout_tsx(c: &ProjectConfig, is_desktop: bool) -> String {
     let mut inner_after = String::new();
 
     if is_desktop {
-        extra_imports.push_str("import { TitleBar } from \"@runesh/ui/components/layout/title-bar\";\n");
+        extra_imports.push_str("import { TitleBar } from \"@mydrift-user/runesh-ui/src/components/layout/title-bar\";\n");
         inner_before.push_str(&format!("              <TitleBar title=\"{}\" />\n", title));
     }
 
@@ -390,10 +393,10 @@ pub fn layout_tsx(c: &ProjectConfig, is_desktop: bool) -> String {
 
 import "./globals.css";
 import {{ Toaster }} from "sonner";
-import {{ ThemeProvider }} from "@runesh/ui/components/providers/theme-provider";
-import {{ QueryProvider }} from "@runesh/ui/components/providers/query-provider";
-import {{ AuthProvider }} from "@runesh/ui/components/providers/auth-provider";
-import {{ CHIRON_GOROUND_URL, FONT_FAMILY_SANS }} from "@runesh/ui/fonts";
+import {{ ThemeProvider }} from "@mydrift-user/runesh-ui/src/components/providers/theme-provider";
+import {{ QueryProvider }} from "@mydrift-user/runesh-ui/src/components/providers/query-provider";
+import {{ AuthProvider }} from "@mydrift-user/runesh-ui/src/components/providers/auth-provider";
+import {{ CHIRON_GOROUND_URL, FONT_FAMILY_SANS }} from "@mydrift-user/runesh-ui/src/fonts";
 {extra_imports}
 export default function RootLayout({{ children }}: {{ children: React.ReactNode }}) {{
   return (
@@ -419,7 +422,7 @@ export default function RootLayout({{ children }}: {{ children: React.ReactNode 
 }
 
 pub fn home_page(c: &ProjectConfig) -> String {
-    format!(r#"import {{ PageHeader }} from "@runesh/ui/components/layout/page-header";
+    format!(r#"import {{ PageHeader }} from "@mydrift-user/runesh-ui/src/components/layout/page-header";
 
 export default function Home() {{
   return (
@@ -431,7 +434,7 @@ export default function Home() {{
 "#, name = c.name)
 }
 
-pub const UTILS_TS: &str = r#"export { cn } from "@runesh/ui/lib/utils";
+pub const UTILS_TS: &str = r#"export { cn } from "@mydrift-user/runesh-ui/src/lib/utils";
 "#;
 
 // ── Dashboard shell template ────────────────────────────────────────────────
@@ -441,10 +444,10 @@ pub fn app_shell(c: &ProjectConfig) -> String {
 
 import {{ usePathname }} from "next/navigation";
 import {{ Home, Settings, FileText, Table2 }} from "lucide-react";
-import {{ AppSidebar, type NavItem }} from "@runesh/ui/components/layout/app-sidebar";
-import {{ DashboardShell }} from "@runesh/ui/components/layout/dashboard-shell";
-import {{ SearchBar, type SearchResult }} from "@runesh/ui/components/layout/search-bar";
-import {{ useAuth }} from "@runesh/ui/components/providers/auth-provider";
+import {{ AppSidebar, type NavItem }} from "@mydrift-user/runesh-ui/src/components/layout/app-sidebar";
+import {{ DashboardShell }} from "@mydrift-user/runesh-ui/src/components/layout/dashboard-shell";
+import {{ SearchBar, type SearchResult }} from "@mydrift-user/runesh-ui/src/components/layout/search-bar";
+import {{ useAuth }} from "@mydrift-user/runesh-ui/src/components/providers/auth-provider";
 
 const navItems: NavItem[] = [
   {{ title: "Dashboard", href: "/", icon: Home }},
@@ -509,11 +512,11 @@ pub fn data_table_page(_c: &ProjectConfig) -> String {
     r#""use client";
 
 import { useState } from "react";
-import { PageHeader } from "@runesh/ui/components/layout/page-header";
-import { DataTable, type DataTableColumn } from "@runesh/ui/components/ui/data-table";
-import { ConfirmDialog } from "@runesh/ui/components/ui/confirm-dialog";
-import { formatRelativeTime, formatFileSize } from "@runesh/ui/lib/format";
-import { Button } from "@runesh/ui/components/ui/button"; // needs shadcn button installed
+import { PageHeader } from "@mydrift-user/runesh-ui/src/components/layout/page-header";
+import { DataTable, type DataTableColumn } from "@mydrift-user/runesh-ui/src/components/ui/data-table";
+import { ConfirmDialog } from "@mydrift-user/runesh-ui/src/components/ui/confirm-dialog";
+import { formatRelativeTime, formatFileSize } from "@mydrift-user/runesh-ui/src/lib/format";
+import { Button } from "@mydrift-user/runesh-ui/src/components/ui/button"; // needs shadcn button installed
 import { Trash2 } from "lucide-react";
 
 // Example data type
@@ -601,7 +604,7 @@ pub fn editor_page(c: &ProjectConfig) -> String {
     format!(r#""use client";
 
 import {{ useState }} from "react";
-import {{ PageHeader }} from "@runesh/ui/components/layout/page-header";
+import {{ PageHeader }} from "@mydrift-user/runesh-ui/src/components/layout/page-header";
 import {{ RichEditor }} from "@/components/editor";
 
 export default function EditorPage() {{
@@ -635,14 +638,14 @@ import {
   handleCommandNavigation,
 } from "novel";
 import { useDebouncedCallback } from "use-debounce";
-import { defaultExtensions } from "@runesh/ui/editor/extensions";
-import { slashCommand, suggestionItems } from "@runesh/ui/editor/slash-command";
-import { EditorBubbleMenu } from "@runesh/ui/editor/bubble-menu";
-import { TableMenu } from "@runesh/ui/editor/table-menu";
-import { SearchHighlightExtension } from "@runesh/ui/editor/search-highlight-extension";
-import { CollapsibleHeadingExtension } from "@runesh/ui/editor/collapsible-heading-extension";
-import { FileHandlerExtension, type UploadFn } from "@runesh/ui/editor/file-handler";
-import { uploadFile } from "@runesh/ui/lib/api-client";
+import { defaultExtensions } from "@mydrift-user/runesh-ui/src/components/editor/extensions";
+import { slashCommand, suggestionItems } from "@mydrift-user/runesh-ui/src/components/editor/slash-command";
+import { EditorBubbleMenu } from "@mydrift-user/runesh-ui/src/components/editor/bubble-menu";
+import { TableMenu } from "@mydrift-user/runesh-ui/src/components/editor/table-menu";
+import { SearchHighlightExtension } from "@mydrift-user/runesh-ui/src/components/editor/search-highlight-extension";
+import { CollapsibleHeadingExtension } from "@mydrift-user/runesh-ui/src/components/editor/collapsible-heading-extension";
+import { FileHandlerExtension, type UploadFn } from "@mydrift-user/runesh-ui/src/components/editor/file-handler";
+import { uploadFile } from "@mydrift-user/runesh-ui/src/lib/api-client";
 
 // Upload handler -- sends files to your API and returns the URL
 const onUpload: UploadFn = async (file: File) => {
@@ -767,7 +770,8 @@ export function RichEditor({ initialContent, onChange }: RichEditorProps) {
 "#;
 
 pub fn dot_env(c: &ProjectConfig) -> String {
-    let mut env = format!(r#"DATABASE_URL=postgres://{db}:{db}@localhost:5432/{db}
+    let mut env = format!(r#"# ── Server ─────────────────────────────────────────────────────────────────
+DATABASE_URL=postgres://{db}:{db}@localhost:5432/{db}
 JWT_SECRET=change-this-to-a-random-64-char-string-in-production!!
 PORT={port}
 RUST_LOG=info
@@ -777,19 +781,39 @@ RUST_LOG=info
         env.push_str("SWAGGER_ENABLED=true\n");
     }
 
+    if c.with_docker {
+        env.push_str(&format!(r#"
+# ── Docker ─────────────────────────────────────────────────────────────────
+POSTGRES_PASSWORD=changeme
+APP_PORT=8080
+# NPM_TOKEN=ghp_xxx  # GitHub token for @mydrift-user/runesh-ui package (if private)
+"#));
+    }
+
+    if c.with_auth {
+        env.push_str(r#"
+# ── OIDC (uncomment to enable SSO) ────────────────────────────────────────
+# OIDC_ISSUER=https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0
+# OIDC_CLIENT_ID=your-client-id
+# OIDC_CLIENT_SECRET=your-client-secret
+# OIDC_REDIRECT_URI=http://localhost:8080/api/auth/callback
+# OIDC_SCOPE=openid profile email offline_access
+"#);
+    }
+
     env
 }
 
 pub const GITIGNORE: &str = r#"# Rust
 target/
 
+# Cargo local overrides (generated by runesh init --local)
+.cargo/
+
 # Node
 node_modules/
 .next/
 out/
-
-# Bun
-bun.lock
 
 # Environment
 .env
@@ -834,20 +858,37 @@ pub fn dockerfile(c: &ProjectConfig) -> String {
     format!(r#"# ── Stage 1: Build Next.js frontend ─────────────────────────────────────────
 FROM oven/bun:latest AS web-builder
 WORKDIR /build
-COPY web/package.json web/bun.lock* ./
-RUN bun install --frozen-lockfile
+
+# Copy package files and .npmrc (for GitHub Packages registry)
+COPY web/package.json web/bun.lock* web/.npmrc* ./
+# If @mydrift-user/runesh-ui is on a private GitHub Packages registry, pass a token:
+#   docker build --build-arg NPM_TOKEN=ghp_xxx .
+ARG NPM_TOKEN
+RUN if [ -n "$NPM_TOKEN" ]; then \
+      echo "//npm.pkg.github.com/:_authToken=${{NPM_TOKEN}}" >> .npmrc; \
+    fi
+RUN bun install
+
+# Copy source and build
 COPY web/ .
+COPY web/next.config.ts ./next.config.ts
 RUN bun run build
 
 # ── Stage 2: Build Rust backend ────────────────────────────────────────────
 FROM rust:1-bookworm AS rust-builder
 WORKDIR /build
-RUN cargo install cargo-chef
-COPY Cargo.toml Cargo.lock ./
+
+# Copy workspace files (Cargo.toml uses git deps, no local paths needed)
+COPY Cargo.toml Cargo.lock* ./
 COPY crates/ crates/
-RUN cargo chef prepare --recipe-path recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+
+# Build dependencies first (layer cache)
+RUN cargo build --release --bin {name}-server 2>/dev/null || true
+
+# Copy everything and do the real build
 COPY . .
+# Exclude local .cargo overrides from Docker build
+RUN rm -rf .cargo
 ENV SQLX_OFFLINE=true
 RUN cargo build --release --bin {name}-server
 
@@ -855,18 +896,26 @@ RUN cargo build --release --bin {name}-server
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl libssl3 && rm -rf /var/lib/apt/lists/*
+
+# Install Caddy reverse proxy
 RUN curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" \
     -o /usr/local/bin/caddy && chmod +x /usr/local/bin/caddy
 
 WORKDIR /app
+
+# Copy Next.js standalone build
 COPY --from=web-builder /build/.next/standalone ./web/
 COPY --from=web-builder /build/.next/static ./web/.next/static/
-COPY --from=web-builder /build/public ./web/public/
+COPY --from=web-builder /build/public ./web/public/ 2>/dev/null || true
+
+# Copy Rust binary and migrations
 COPY --from=rust-builder /build/target/release/{name}-server ./backend
 COPY migrations/ ./migrations/
 
+# Caddy config: proxy /api and /ws to backend, everything else to Next.js
 RUN printf ':8080 {{\n  handle /api/* {{\n    reverse_proxy localhost:{port}\n  }}\n  handle /ws {{\n    reverse_proxy localhost:{port}\n  }}\n  handle {{\n    reverse_proxy localhost:3000\n  }}\n}}\n' > /etc/Caddyfile
 
+# Start script
 RUN printf '#!/bin/sh\nset -e\ncaddy start --config /etc/Caddyfile &\ncd /app/web && PORT=3000 node server.js &\ncd /app && ./backend &\nwait -n\n' > /app/start.sh && chmod +x /app/start.sh
 
 EXPOSE 8080
@@ -894,7 +943,10 @@ pub fn compose_yaml(c: &ProjectConfig) -> String {
       - internal
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        NPM_TOKEN: ${{NPM_TOKEN:-}}
     restart: unless-stopped
     ports:
       - "${{APP_PORT:-8080}}:8080"
@@ -902,6 +954,13 @@ pub fn compose_yaml(c: &ProjectConfig) -> String {
       DATABASE_URL: postgres://{db}:${{POSTGRES_PASSWORD:-changeme}}@db:5432/{db}
       JWT_SECRET: ${{JWT_SECRET}}
       PORT: "{port}"
+      SWAGGER_ENABLED: ${{SWAGGER_ENABLED:-false}}
+      RUST_LOG: ${{RUST_LOG:-info}}
+      # OIDC (uncomment to enable)
+      # OIDC_ISSUER: ${{OIDC_ISSUER}}
+      # OIDC_CLIENT_ID: ${{OIDC_CLIENT_ID}}
+      # OIDC_CLIENT_SECRET: ${{OIDC_CLIENT_SECRET}}
+      # OIDC_REDIRECT_URI: ${{OIDC_REDIRECT_URI:-http://localhost:8080/api/auth/callback}}
     depends_on:
       db:
         condition: service_healthy
@@ -1129,7 +1188,7 @@ pub fn desktop_package_json(c: &ProjectConfig) -> String {
   "private": true,
   "scripts": {{
     "dev": "next dev -p 3100",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start"
   }},
   "dependencies": {{
@@ -1166,13 +1225,14 @@ const nextConfig: NextConfig = {
   output: "export",
   images: { unoptimized: true },
   trailingSlash: true,
+  transpilePackages: ["@mydrift-user/runesh-ui"],
 };
 
 export default nextConfig;
 "#;
 
 pub fn desktop_home_page(c: &ProjectConfig) -> String {
-    format!(r#"import {{ PageHeader }} from "@runesh/ui/components/layout/page-header";
+    format!(r#"import {{ PageHeader }} from "@mydrift-user/runesh-ui/src/components/layout/page-header";
 
 export default function Home() {{
   return (
@@ -1392,7 +1452,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 "#;
 
 pub fn extension_popup_app(c: &ProjectConfig) -> String {
-    format!(r#"import {{ useChromeStorage }} from "@runesh/ui/hooks/use-chrome-storage";
+    format!(r#"import {{ useChromeStorage }} from "@mydrift-user/runesh-ui/src/hooks/use-chrome-storage";
 
 export function App() {{
   const [count, setCount] = useChromeStorage("popup_count", 0);
@@ -1443,4 +1503,14 @@ body {
 pub const EXTENSION_BACKGROUND: &str = r#"export default defineBackground(() => {
   console.log("Background service worker started");
 });
+"#;
+
+pub const DOCKERIGNORE: &str = r#"target/
+node_modules/
+.next/
+.git/
+.cargo/
+.env
+.env.local
+*.md
 "#;
