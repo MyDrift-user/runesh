@@ -98,7 +98,12 @@ pub fn server_main(c: &ProjectConfig) -> String {
 "#);
         extra_middleware.push_str(r#"        .layer(middleware::from_fn(auth_middleware))
         .layer(axum::Extension(JwtSecret(cli.jwt_secret.clone())))
-        .layer(axum::Extension(AuthExemptPaths::default()))
+        .layer(axum::Extension(AuthExemptPaths(vec![
+            "/auth/".into(),
+            "/api/v1/health".into(),
+            "/swagger-ui".into(),
+            "/api/openapi.json".into(),
+        ])))
 "#);
     }
     if c.with_openapi {
