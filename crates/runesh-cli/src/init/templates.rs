@@ -496,8 +496,6 @@ export function AppShell({{ children }}: {{ children: React.ReactNode }}) {{
     <DashboardShell
       sidebar={{sidebar}}
       searchBar={{<SearchBar onSearch={{onSearch}} placeholder="Search..." />}}
-      isLoading={{isLoading}}
-      isAuthenticated={{isAuthenticated}}
       shortcutHint={{
         <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex">
           <span className="text-xs">Ctrl</span>K

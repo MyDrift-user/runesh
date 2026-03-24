@@ -1,6 +1,5 @@
 "use client"
 
-import { Loader2 } from "lucide-react"
 import { TooltipProvider } from "../../components/ui/tooltip"
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "../../components/ui/sidebar"
 
@@ -10,10 +9,6 @@ export interface DashboardShellProps {
   sidebar: React.ReactNode
   /** Optional search bar component (rendered globally, e.g. command palette) */
   searchBar?: React.ReactNode
-  /** Whether auth is still loading */
-  isLoading?: boolean
-  /** Whether the user is authenticated */
-  isAuthenticated?: boolean
   /** Keyboard shortcut hint shown in the toolbar (e.g. "Ctrl K") */
   shortcutHint?: React.ReactNode
   /** Additional content to render in the toolbar header */
@@ -26,20 +21,10 @@ export function DashboardShell({
   children,
   sidebar,
   searchBar,
-  isLoading = false,
-  isAuthenticated = true,
   shortcutHint,
   toolbarExtra,
   contentClassName = "p-4 md:p-6",
 }: DashboardShellProps) {
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-
   return (
     <TooltipProvider>
       <SidebarProvider>
