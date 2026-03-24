@@ -40,10 +40,6 @@ export function DashboardShell({
     )
   }
 
-  if (!isAuthenticated) {
-    return null
-  }
-
   return (
     <TooltipProvider>
       <SidebarProvider>
