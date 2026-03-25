@@ -41,8 +41,8 @@ export const FileAttachmentExtension = Node.create({
       "div", mergeAttributes(rest, { "data-file-attachment": "", class: "editor-file-wrapper" }),
       ["div", { class: "editor-file-icon" }],
       ["div", { class: "editor-file-info" },
-        ["p", { class: "editor-file-name" }, fileName || "File"],
-        ["p", { class: "editor-file-size" }, sizeStr],
+        ["span", { class: "editor-file-name" }, fileName || "File"],
+        ["span", { class: "editor-file-size" }, sizeStr],
       ],
       ["a", { href: src, download: fileName, class: "editor-file-download", title: "Download" }],
     ];

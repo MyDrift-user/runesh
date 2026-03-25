@@ -380,8 +380,11 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
 }
 .editor-video {
   width: 100%;
+  max-height: 70vh;
   display: block;
   background: #000;
+  aspect-ratio: 16/9;
+  object-fit: contain;
 }
 .editor-video-footer {
   padding: 0.375rem 0.75rem;
@@ -471,6 +474,7 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
   min-width: 0;
 }
 .editor-file-info .editor-file-name {
+  display: block;
   font-size: 0.875rem;
   font-weight: 500;
   margin: 0;
@@ -479,6 +483,7 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
   white-space: nowrap;
 }
 .editor-file-info .editor-file-size {
+  display: block;
   font-size: 0.75rem;
   color: var(--muted-foreground);
   margin: 0.125rem 0 0 0;

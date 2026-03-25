@@ -706,7 +706,7 @@ export default function EditorPage() {{
 
 pub const EDITOR_COMPONENT: &str = r#""use client";
 
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import {
   EditorRoot,
   EditorContent,
@@ -727,7 +727,6 @@ import { SearchHighlightExtension } from "@mydrift-user/runesh-ui/src/components
 import { CollapsibleHeadingExtension } from "@mydrift-user/runesh-ui/src/components/editor/collapsible-heading-extension";
 import { FileHandlerExtension, type UploadFn } from "@mydrift-user/runesh-ui/src/components/editor/file-handler";
 
-// Upload handler -- sends files to your API and returns the URL
 const onUpload: UploadFn = async (file: File) => {
   const formData = new FormData();
   formData.append("file", file);
@@ -755,32 +754,67 @@ export function RichEditor({ initialContent, onChange }: RichEditorProps) {
   );
   const [editorInstance, setEditorInstance] = useState<EditorInstance | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Listen for file uploads from slash commands
   useEffect(() => {
-    if (!editorInstance) return;
-    const handler = async (e: Event) => {
-      const file = (e as CustomEvent).detail?.file as File;
-      if (!file) return;
-      const url = await onUpload(file);
-      if (!url) return;
+    (window as any).__editorFileInputs = {
+      image: imageInputRef,
+      video: videoInputRef,
+      audio: audioInputRef,
+      file: fileInputRef,
+    };
+    return () => { delete (window as any).__editorFileInputs; };
+  }, []);
 
-      if (file.type.startsWith("image/")) {
-        editorInstance.chain().focus().insertContent({ type: "image", attrs: { src: url } }).run();
+  const handleFileSelected = useCallback(async (file: File, forceAsFile = false) => {
+    if (!editorInstance) return;
+
+    const uploadId = Math.random().toString(36).slice(2);
+
+    editorInstance.chain().focus().insertContent({
+      type: "uploadPlaceholder",
+      attrs: { id: uploadId, fileName: file.name, fileType: file.type, progress: 0 },
+    }).run();
+
+    try {
+      const url = await onUpload(file);
+      if (!url) { removePlaceholder(editorInstance, uploadId); return; }
+
+      let nodeType: string;
+      let attrs: Record<string, any>;
+
+      if (forceAsFile) {
+        nodeType = "fileAttachment";
+        attrs = { src: url, fileName: file.name, fileSize: file.size, fileType: file.type };
+      } else if (file.type.startsWith("image/")) {
+        nodeType = "image"; attrs = { src: url };
       } else if (file.type.startsWith("video/")) {
-        editorInstance.chain().focus().insertContent({ type: "video", attrs: { src: url, fileName: file.name } }).run();
+        nodeType = "video"; attrs = { src: url, fileName: file.name };
       } else if (file.type.startsWith("audio/")) {
-        editorInstance.chain().focus().insertContent({ type: "audio", attrs: { src: url, fileName: file.name } }).run();
+        nodeType = "audio"; attrs = { src: url, fileName: file.name };
       } else {
-        editorInstance.chain().focus().insertContent({
-          type: "fileAttachment",
-          attrs: { src: url, fileName: file.name, fileSize: file.size, fileType: file.type },
-        }).run();
+        nodeType = "fileAttachment";
+        attrs = { src: url, fileName: file.name, fileSize: file.size, fileType: file.type };
       }
+
+      replacePlaceholder(editorInstance, uploadId, nodeType, attrs);
+    } catch {
+      removePlaceholder(editorInstance, uploadId);
+    }
+  }, [editorInstance]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      const file = detail?.file as File;
+      if (file) handleFileSelected(file, detail?.forceAsFile === true);
     };
     document.addEventListener("editor-file-upload", handler);
     return () => document.removeEventListener("editor-file-upload", handler);
-  }, [editorInstance]);
+  }, [handleFileSelected]);
 
   const parsedContent = useMemo(() => {
     if (!initialContent) return undefined;
@@ -795,7 +829,6 @@ export function RichEditor({ initialContent, onChange }: RichEditorProps) {
     onChange?.(editor.getJSON());
   }, 500);
 
-  // Click on empty area below content focuses editor at end
   const handleWrapperClick = (e: React.MouseEvent) => {
     if (!editorInstance) return;
     const target = e.target as HTMLElement;
@@ -804,59 +837,84 @@ export function RichEditor({ initialContent, onChange }: RichEditorProps) {
     }
   };
 
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const forceAsFile = e.target === fileInputRef.current;
+    handleFileSelected(file, forceAsFile);
+    e.target.value = "";
+  };
+
   return (
-    <div ref={scrollRef} className="relative min-h-[500px] border rounded-lg overflow-y-auto cursor-text" onClick={handleWrapperClick}>
-      {editorInstance && (
-        <TableMenu editor={editorInstance} scrollContainer={scrollRef.current} />
-      )}
-      <EditorRoot>
-        <EditorContent
-          extensions={extensions}
-          initialContent={parsedContent}
-          onUpdate={({ editor }) => {
-            setEditorInstance(editor);
-            debouncedUpdate(editor);
-          }}
-          onCreate={({ editor }) => setEditorInstance(editor)}
-          editorProps={{
-            handleDOMEvents: {
-              keydown: (_view, event) => handleCommandNavigation(event),
-            },
-            attributes: {
-              class:
-                "prose prose-neutral dark:prose-invert prose-headings:font-bold focus:outline-none max-w-3xl mx-auto px-8 sm:px-12 py-8 pb-32",
-            },
-          }}
-          className="min-h-[500px]"
-        >
-          <EditorCommand className="z-50 h-auto max-h-[330px] w-72 overflow-y-auto rounded-lg border border-muted bg-background px-1 py-2 shadow-xl">
-            <EditorCommandEmpty className="px-2 text-muted-foreground text-sm">
-              No results
-            </EditorCommandEmpty>
-            <EditorCommandList>
-              {suggestionItems.map((item) => (
-                <EditorCommandItem
-                  value={item.title}
-                  onCommand={(val) => item.command?.(val)}
-                  className="flex w-full items-center space-x-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent aria-selected:bg-accent cursor-pointer"
-                  key={item.title}
-                >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-md border border-muted bg-background">
-                    {item.icon}
-                  </div>
-                  <div>
-                    <p className="font-medium">{item.title}</p>
-                    <p className="text-xs text-muted-foreground">{item.description}</p>
-                  </div>
-                </EditorCommandItem>
-              ))}
-            </EditorCommandList>
-          </EditorCommand>
-          <EditorBubbleMenu />
-        </EditorContent>
-      </EditorRoot>
-    </div>
+    <>
+      <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={onFileChange} />
+      <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={onFileChange} />
+      <input ref={audioInputRef} type="file" accept="audio/*" className="hidden" onChange={onFileChange} />
+      <input ref={fileInputRef} type="file" className="hidden" onChange={onFileChange} />
+
+      <div ref={scrollRef} className="relative min-h-[500px] border rounded-lg overflow-y-auto cursor-text" onClick={handleWrapperClick}>
+        {editorInstance && (
+          <TableMenu editor={editorInstance} scrollContainer={scrollRef.current} />
+        )}
+        <EditorRoot>
+          <EditorContent
+            extensions={extensions}
+            initialContent={parsedContent}
+            onUpdate={({ editor }) => { setEditorInstance(editor); debouncedUpdate(editor); }}
+            onCreate={({ editor }) => setEditorInstance(editor)}
+            editorProps={{
+              handleDOMEvents: { keydown: (_view, event) => handleCommandNavigation(event) },
+              attributes: {
+                class: "prose prose-neutral dark:prose-invert prose-headings:font-bold focus:outline-none max-w-3xl mx-auto px-8 sm:px-12 py-8 pb-32",
+              },
+            }}
+            className="min-h-[500px]"
+          >
+            <EditorCommand className="z-50 h-auto max-h-[330px] w-72 overflow-y-auto rounded-lg border border-muted bg-background px-1 py-2 shadow-xl">
+              <EditorCommandEmpty className="px-2 text-muted-foreground text-sm">No results</EditorCommandEmpty>
+              <EditorCommandList>
+                {suggestionItems.map((item) => (
+                  <EditorCommandItem
+                    value={item.title}
+                    onCommand={(val) => item.command?.(val)}
+                    className="flex w-full items-center space-x-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent aria-selected:bg-accent cursor-pointer"
+                    key={item.title}
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-md border border-muted bg-background">
+                      {item.icon}
+                    </div>
+                    <div>
+                      <p className="font-medium">{item.title}</p>
+                      <p className="text-xs text-muted-foreground">{item.description}</p>
+                    </div>
+                  </EditorCommandItem>
+                ))}
+              </EditorCommandList>
+            </EditorCommand>
+            <EditorBubbleMenu />
+          </EditorContent>
+        </EditorRoot>
+      </div>
+    </>
   );
+}
+
+function removePlaceholder(editor: any, id: string) {
+  editor.state.doc.descendants((node: any, pos: number) => {
+    if (node.type.name === "uploadPlaceholder" && node.attrs.id === id) {
+      editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
+      return false;
+    }
+  });
+}
+
+function replacePlaceholder(editor: any, id: string, nodeType: string, attrs: Record<string, any>) {
+  editor.state.doc.descendants((node: any, pos: number) => {
+    if (node.type.name === "uploadPlaceholder" && node.attrs.id === id) {
+      editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).insertContentAt(pos, { type: nodeType, attrs }).run();
+      return false;
+    }
+  });
 }
 "#;
 
