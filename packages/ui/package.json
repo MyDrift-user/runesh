@@ -5,12 +5,7 @@
     "registry": "https://npm.pkg.github.com"
   },
   "type": "module",
-  "exports": {
-    "./src/*": "./src/*",
-    "./src/*.ts": "./src/*.ts",
-    "./src/*.tsx": "./src/*.tsx",
-    "./src/*.css": "./src/*.css"
-  },
+  "sideEffects": ["**/*.css"],
   "dependencies": {
     "@tiptap/core": "^2.27.2",
     "@tiptap/extension-image": "^2.27.2",
