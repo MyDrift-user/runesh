@@ -373,6 +373,7 @@ export default config;
 
 pub const GLOBALS_CSS_IMPORT: &str = r#"@import "tailwindcss";
 @import "tw-animate-css";
+@import "shadcn/tailwind.css";
 @import "@mydrift-user/runesh-ui/src/styles/globals.css";
 "#;
 
