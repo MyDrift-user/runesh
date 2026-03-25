@@ -71,6 +71,9 @@ runesh-core.workspace = true
         deps.push_str("utoipa = { version = \"5\", features = [\"chrono\", \"uuid\", \"axum_extras\"] }\n");
         deps.push_str("utoipa-axum = \"0.2\"\n");
     }
+    if c.with_upload || c.with_editor {
+        deps.push_str("mime_guess = \"2\"\n");
+    }
 
     deps
 }
@@ -125,9 +128,44 @@ pub fn server_main(c: &ProjectConfig) -> String {
 "#);
     }
 
+    let mut extra_routes = String::new();
+    let mut extra_handlers = String::new();
+
+    if c.with_upload || c.with_editor {
+        extra_imports.push_str("use axum::extract::Multipart;\n");
+        extra_routes.push_str("        .route(\"/api/uploads\", post(upload_file))\n        .route(\"/api/uploads/{filename}\", get(serve_upload))\n");
+        extra_handlers.push_str(r#"
+async fn upload_file(mut multipart: Multipart) -> Result<Json<serde_json::Value>, runesh_core::AppError> {
+    while let Some(field) = multipart.next_field().await.map_err(|e| runesh_core::AppError::BadRequest(e.to_string()))? {
+        let uploaded = runesh_core::upload::save_upload(field, std::path::Path::new("./uploads"), 50 * 1024 * 1024, None).await?;
+        return Ok(Json(serde_json::json!({
+            "url": format!("/api/uploads/{}", uploaded.storage_key),
+            "filename": uploaded.filename,
+            "size": uploaded.size,
+        })));
+    }
+    Err(runesh_core::AppError::BadRequest("No file provided".into()))
+}
+
+async fn serve_upload(axum::extract::Path(filename): axum::extract::Path<String>) -> Result<axum::response::Response, runesh_core::AppError> {
+    let safe_name = std::path::Path::new(&filename)
+        .file_name().and_then(|n| n.to_str())
+        .ok_or_else(|| runesh_core::AppError::BadRequest("Invalid filename".into()))?;
+    let path = std::path::Path::new("./uploads").join(safe_name);
+    if !path.exists() { return Err(runesh_core::AppError::NotFound("File not found".into())); }
+    let data = tokio::fs::read(&path).await.map_err(|e| runesh_core::AppError::Internal(e.to_string()))?;
+    let ct = mime_guess::from_path(&path).first_or_octet_stream().to_string();
+    Ok(axum::response::Response::builder()
+        .header("Content-Type", ct)
+        .header("X-Content-Type-Options", "nosniff")
+        .body(axum::body::Body::from(data)).unwrap())
+}
+"#);
+    }
+
     format!(r#"use std::net::SocketAddr;
 
-use axum::{{routing::get, Router, Json, middleware}};
+use axum::{{routing::{{get, post}}, Router, Json, middleware}};
 use clap::Parser;
 use sqlx::PgPool;
 use tracing_subscriber::EnvFilter;
@@ -189,9 +227,11 @@ async fn main() {{
 
     let cors_origins: Vec<&str> = cli.cors_origins.split(',').map(|s| s.trim()).collect();
 
+    tokio::fs::create_dir_all("./uploads").await.ok();
+
     let app = Router::new()
         .route("/api/v1/health", get(health))
-{extra_middleware}        .layer(runesh_core::middleware::cors::cors_layer(&cors_origins))
+{extra_routes}{extra_middleware}        .layer(runesh_core::middleware::cors::cors_layer(&cors_origins))
         .layer(middleware::from_fn(runesh_core::middleware::security_headers::security_headers_middleware))
         .layer(middleware::from_fn(runesh_core::middleware::logging::logging_middleware))
         .layer(middleware::from_fn(runesh_core::middleware::request_id::request_id_middleware))
@@ -212,13 +252,16 @@ async fn main() {{
 {health_annotation}async fn health(axum::extract::State(pool): axum::extract::State<PgPool>) -> Json<serde_json::Value> {{
     runesh_core::middleware::health::health_handler(axum::extract::State(pool)).await
 }}
+{extra_handlers}
 "#,
         name = c.name,
         port = c.port,
         extra_imports = extra_imports,
         extra_cli_fields = extra_cli_fields,
+        extra_routes = extra_routes,
         extra_middleware = extra_middleware,
         extra_setup = extra_setup,
+        extra_handlers = extra_handlers,
         health_annotation = if c.with_openapi {
             "#[utoipa::path(get, path = \"/api/v1/health\", tag = \"System\", responses((status = 200, description = \"Health check\")))]\n"
         } else { "" },
