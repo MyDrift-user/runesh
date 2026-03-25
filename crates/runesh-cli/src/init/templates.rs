@@ -726,14 +726,15 @@ import { TableMenu } from "@mydrift-user/runesh-ui/src/components/editor/table-m
 import { SearchHighlightExtension } from "@mydrift-user/runesh-ui/src/components/editor/search-highlight-extension";
 import { CollapsibleHeadingExtension } from "@mydrift-user/runesh-ui/src/components/editor/collapsible-heading-extension";
 import { FileHandlerExtension, type UploadFn } from "@mydrift-user/runesh-ui/src/components/editor/file-handler";
-import { uploadFile } from "@mydrift-user/runesh-ui/src/lib/api-client";
 
 // Upload handler -- sends files to your API and returns the URL
 const onUpload: UploadFn = async (file: File) => {
   const formData = new FormData();
   formData.append("file", file);
-  const result = await uploadFile("/api/uploads", formData) as { url?: string };
-  return result?.url || "";
+  const res = await fetch("/api/uploads", { method: "POST", body: formData });
+  if (!res.ok) throw new Error("Upload failed");
+  const data = await res.json();
+  return data?.url || "";
 };
 
 interface RichEditorProps {
