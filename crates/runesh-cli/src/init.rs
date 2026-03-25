@@ -593,9 +593,11 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         // Copy RUNESH layout components (they use @/ imports for shadcn)
         if c.with_dashboard {
             w("web/src/components/app-shell.tsx", &templates::app_shell(c))?;
+            copy_runesh_component(&root.join("web"), "components/layout/app-sidebar.tsx", &c.source)?;
             copy_runesh_component(&root.join("web"), "components/layout/dashboard-shell.tsx", &c.source)?;
             copy_runesh_component(&root.join("web"), "components/layout/page-header.tsx", &c.source)?;
             copy_runesh_component(&root.join("web"), "components/layout/search-bar.tsx", &c.source)?;
+            copy_runesh_component(&root.join("web"), "components/layout/title-bar.tsx", &c.source)?;
             copy_runesh_component(&root.join("web"), "components/ui/data-table.tsx", &c.source)?;
             copy_runesh_component(&root.join("web"), "components/ui/confirm-dialog.tsx", &c.source)?;
         }
