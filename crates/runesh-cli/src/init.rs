@@ -583,7 +583,19 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         w("web/tsconfig.json", templates::TSCONFIG)?;
         w("web/next.config.ts", templates::NEXT_CONFIG)?;
         w("web/postcss.config.mjs", templates::POSTCSS_CONFIG)?;
-        w("web/src/app/globals.css", templates::GLOBALS_CSS_IMPORT)?;
+        // Copy globals.css from RUNESH (includes theme + editor styles)
+        {
+            let css_src = match &c.source {
+                RuneshSource::Local(path) => std::path::PathBuf::from(path).join("packages/ui/src/styles/globals.css"),
+                RuneshSource::Git(_) => std::path::PathBuf::new(),
+            };
+            let css_dest = root.join("web/src/app/globals.css");
+            if css_src.exists() {
+                fs::copy(&css_src, &css_dest).map_err(|e| format!("copy globals.css: {e}"))?;
+            } else {
+                w("web/src/app/globals.css", templates::GLOBALS_CSS_IMPORT)?;
+            }
+        }
         w("web/src/app/layout.tsx", &templates::layout_tsx(c, false))?;
         w("web/src/app/page.tsx", &templates::home_page(c))?;
         w("web/src/lib/utils.ts", templates::UTILS_TS)?;

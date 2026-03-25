@@ -1,13 +1,15 @@
-/* Shared theme for @mydrift-user/runesh-ui */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -15,7 +17,6 @@
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-background: var(--sidebar-background);
   --color-sidebar: var(--sidebar);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
@@ -38,13 +39,13 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
 }
 
 :root {
@@ -67,13 +68,12 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.809 0.105 251.813);
-  --chart-2: oklch(0.623 0.214 259.815);
-  --chart-3: oklch(0.546 0.245 262.881);
-  --chart-4: oklch(0.488 0.243 264.376);
-  --chart-5: oklch(0.424 0.199 265.638);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
   --sidebar: oklch(0.985 0 0);
-  --sidebar-background: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -102,11 +102,11 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.809 0.105 251.813);
-  --chart-2: oklch(0.623 0.214 259.815);
-  --chart-3: oklch(0.546 0.245 262.881);
-  --chart-4: oklch(0.488 0.243 264.376);
-  --chart-5: oklch(0.424 0.199 265.638);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -121,95 +121,115 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
-  html {
-    @apply font-sans;
-  }
 }
 
-/* Hide scrollbar utility */
-.scrollbar-none::-webkit-scrollbar,
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.scrollbar-none,
-.no-scrollbar {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-/* ── Wiki editor styles ─────────────────────────────────────────────────── */
-
-/* Search highlighting in editor */
+/* ── Wiki search: decoration highlight on matched text in the editor ── */
 .wiki-search-highlight {
-  background-color: oklch(0.85 0.15 85);
+  background-color: oklch(0.85 0.18 90 / 55%);
   border-radius: 2px;
 }
-.dark .wiki-search-highlight {
-  background-color: oklch(0.45 0.15 85);
-}
 
-/* Title highlight when search term is in title */
+/* ── Wiki search: flash the page-title input when its text is the match ── */
 .wiki-title-highlight {
-  background-color: oklch(0.92 0.08 85) !important;
+  background-color: oklch(0.85 0.18 90 / 35%);
   border-radius: 4px;
 }
-.dark .wiki-title-highlight {
-  background-color: oklch(0.3 0.08 85) !important;
+
+/* ── Drag handle (tiptap-extension-global-drag-handle) ────────────────────── */
+.drag-handle {
+  position: fixed;
+  border-radius: 0.25rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' fill='rgba(0,0,0,0.4)'%3E%3Ccircle cx='3' cy='2' r='1'/%3E%3Ccircle cx='7' cy='2' r='1'/%3E%3Ccircle cx='3' cy='5' r='1'/%3E%3Ccircle cx='7' cy='5' r='1'/%3E%3Ccircle cx='3' cy='8' r='1'/%3E%3Ccircle cx='7' cy='8' r='1'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: calc(0.5em + 2px) calc(0.5em + 2px);
+  width: 1.25rem;
+  height: 1.5rem;
+  z-index: 50;
+  cursor: grab;
+  transition: background-color 0.15s;
+}
+.dark .drag-handle {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' fill='rgba(255,255,255,0.4)'%3E%3Ccircle cx='3' cy='2' r='1'/%3E%3Ccircle cx='7' cy='2' r='1'/%3E%3Ccircle cx='3' cy='5' r='1'/%3E%3Ccircle cx='7' cy='5' r='1'/%3E%3Ccircle cx='3' cy='8' r='1'/%3E%3Ccircle cx='7' cy='8' r='1'/%3E%3C/svg%3E");
+}
+.drag-handle:hover {
+  background-color: hsl(var(--accent, 210 40% 96%));
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.drag-handle.hide {
+  opacity: 0;
+  pointer-events: none;
 }
 
-/* Collapsible heading toggle button */
+/* ── Collapsible headings ─────────────────────────────────────────────────── */
 .wiki-collapse-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-right: 4px;
-  margin-left: -20px;
-  cursor: pointer;
+  width: 1em;
+  height: 1em;
+  background: none;
   border: none;
-  background: transparent;
-  color: var(--muted-foreground);
+  padding: 0;
+  margin: 0 0.2em 0 -1.2em; /* pull left of heading text */
+  cursor: pointer;
+  color: var(--muted-foreground, #888);
   opacity: 0;
   transition: opacity 0.15s;
+  user-select: none;
   vertical-align: middle;
-  border-radius: 2px;
-}
-.wiki-collapse-toggle:hover {
-  background: var(--accent);
-  color: var(--foreground);
-}
-/* Show toggle on heading hover */
-h1:hover .wiki-collapse-toggle,
-h2:hover .wiki-collapse-toggle,
-h3:hover .wiki-collapse-toggle,
-h4:hover .wiki-collapse-toggle,
-h5:hover .wiki-collapse-toggle,
-h6:hover .wiki-collapse-toggle,
-.wiki-collapse-toggle.is-collapsed {
-  opacity: 1;
+  flex-shrink: 0;
+  line-height: 1;
 }
 
-/* Hidden blocks under collapsed headings */
+/* Show the toggle when hovering the heading */
+.ProseMirror h1:hover > .wiki-collapse-toggle,
+.ProseMirror h2:hover > .wiki-collapse-toggle,
+.ProseMirror h3:hover > .wiki-collapse-toggle,
+.ProseMirror h4:hover > .wiki-collapse-toggle,
+.ProseMirror h5:hover > .wiki-collapse-toggle,
+.ProseMirror h6:hover > .wiki-collapse-toggle {
+  opacity: 0.5;
+}
+.wiki-collapse-toggle:hover {
+  opacity: 1 !important;
+}
+/* Always show toggle when heading section is already collapsed */
+.wiki-collapse-toggle.is-collapsed {
+  opacity: 0.7;
+}
+
+/* Hide the content blocks that are collapsed */
 .wiki-collapsed-block {
   display: none !important;
 }
 
-/* ── ProseMirror / Novel editor styles ────────────────────────────────── */
 
+
+/* ── Novel / ProseMirror editor styles ────────────────────────────────────── */
+
+/* Force dark color-scheme in dark mode — gives us native dark scrollbars everywhere */
 .dark {
   color-scheme: dark;
 }
 
+.ProseMirror {
+  @apply py-8;
+}
+
 /* Checkboxes */
-ul[data-type="taskList"] li > label {
+ul[data-type="taskList"] li>label {
   margin-right: 0.2rem;
   user-select: none;
 }
-ul[data-type="taskList"] li > label input[type="checkbox"] {
+
+ul[data-type="taskList"] li>label input[type="checkbox"] {
   -webkit-appearance: none;
   appearance: none;
   background-color: transparent;
@@ -225,14 +245,17 @@ ul[data-type="taskList"] li > label input[type="checkbox"] {
   display: grid;
   place-content: center;
 }
-ul[data-type="taskList"] li > label input[type="checkbox"]:hover {
+
+ul[data-type="taskList"] li>label input[type="checkbox"]:hover {
   border-color: color-mix(in srgb, var(--foreground) 70%, transparent);
 }
-ul[data-type="taskList"] li > label input[type="checkbox"]:checked {
+
+ul[data-type="taskList"] li>label input[type="checkbox"]:checked {
   background-color: var(--primary);
   border-color: var(--primary);
 }
-ul[data-type="taskList"] li > label input[type="checkbox"]::before {
+
+ul[data-type="taskList"] li>label input[type="checkbox"]::before {
   content: "";
   width: 0.6em;
   height: 0.6em;
@@ -242,10 +265,12 @@ ul[data-type="taskList"] li > label input[type="checkbox"]::before {
   transform-origin: center;
   clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
 }
-ul[data-type="taskList"] li > label input[type="checkbox"]:checked::before {
+
+ul[data-type="taskList"] li>label input[type="checkbox"]:checked::before {
   transform: scale(1);
 }
-ul[data-type="taskList"] li[data-checked="true"] > div > p {
+
+ul[data-type="taskList"] li[data-checked="true"]>div>p {
   color: var(--muted-foreground);
   text-decoration: line-through;
   text-decoration-thickness: 2px;
@@ -263,6 +288,7 @@ ul[data-type="taskList"] li[data-checked="true"] > div > p {
 .ProseMirror .ProseMirror-gapcursor {
   position: relative;
 }
+
 .ProseMirror .ProseMirror-gapcursor::after {
   border-top: 1px solid var(--foreground);
 }
@@ -271,18 +297,20 @@ ul[data-type="taskList"] li[data-checked="true"] > div > p {
   max-width: 400px !important;
 }
 
-/* Tables */
+/* Tables — Outline-style */
 .ProseMirror .tableWrapper {
   margin: 1rem 0;
   overflow: hidden;
   border-radius: 8px;
   border: 1px solid var(--border);
 }
+
 .ProseMirror table {
   border-collapse: collapse;
   width: 100%;
   margin: 0;
 }
+
 .ProseMirror td,
 .ProseMirror th {
   border: 1px solid var(--border);
@@ -290,14 +318,18 @@ ul[data-type="taskList"] li[data-checked="true"] > div > p {
   box-sizing: border-box;
   position: relative;
 }
+
+/* Remove prose p-tag margins inside table cells */
 .ProseMirror td p,
 .ProseMirror th p {
   margin: 0;
 }
+
 .ProseMirror td.selectedCell,
 .ProseMirror th.selectedCell {
   background-color: color-mix(in srgb, var(--primary) 12%, transparent);
 }
+
 .ProseMirror .column-resize-handle {
   position: absolute;
   right: -2px;
@@ -307,6 +339,8 @@ ul[data-type="taskList"] li[data-checked="true"] > div > p {
   background-color: var(--primary);
   pointer-events: none;
 }
+
 .ProseMirror.resize-cursor {
   cursor: col-resize;
 }
+
