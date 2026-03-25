@@ -631,8 +631,13 @@ pub fn editor_page(c: &ProjectConfig) -> String {
     format!(r#""use client";
 
 import {{ useState }} from "react";
+import dynamic from "next/dynamic";
 import {{ PageHeader }} from "@/components/layout/page-header";
-import {{ RichEditor }} from "@/components/editor";
+
+const RichEditor = dynamic(() => import("@/components/editor").then(m => ({{ default: m.RichEditor }})), {{
+  ssr: false,
+  loading: () => <div className="min-h-[500px] border rounded-lg animate-pulse bg-muted/20" />,
+}});
 
 export default function EditorPage() {{
   const [content, setContent] = useState<string | null>(null);
@@ -642,7 +647,7 @@ export default function EditorPage() {{
       <PageHeader title="Editor" description="Rich text editor with slash commands, tables, and more." />
       <RichEditor
         initialContent={{content}}
-        onChange={{(json) => setContent(JSON.stringify(json))}}
+        onChange={{(json: any) => setContent(JSON.stringify(json))}}
       />
     </div>
   );
