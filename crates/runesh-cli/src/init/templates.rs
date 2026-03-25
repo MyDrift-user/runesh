@@ -745,8 +745,17 @@ export function RichEditor({ initialContent, onChange }: RichEditorProps) {
     onChange?.(editor.getJSON());
   }, 500);
 
+  // Click on empty area below content focuses editor at end
+  const handleWrapperClick = (e: React.MouseEvent) => {
+    if (!editorInstance) return;
+    const target = e.target as HTMLElement;
+    if (target === scrollRef.current || target.closest('.ProseMirror') === null) {
+      editorInstance.chain().focus().setTextSelection(editorInstance.state.doc.content.size).run();
+    }
+  };
+
   return (
-    <div ref={scrollRef} className="relative min-h-[500px] border rounded-lg overflow-y-auto">
+    <div ref={scrollRef} className="relative min-h-[500px] border rounded-lg overflow-y-auto cursor-text" onClick={handleWrapperClick}>
       {editorInstance && (
         <TableMenu editor={editorInstance} scrollContainer={scrollRef.current} />
       )}
