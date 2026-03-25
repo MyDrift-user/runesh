@@ -376,6 +376,8 @@ pub const GLOBALS_CSS_IMPORT: &str = r#"@import "tailwindcss";
 @import "shadcn/tailwind.css";
 @import "@mydrift-user/runesh-ui/src/styles/globals.css";
 
+@plugin "@tailwindcss/typography";
+
 /* Scan shared UI package so Tailwind generates its utility classes */
 @source "../../node_modules/@mydrift-user/runesh-ui/src";
 "#;
