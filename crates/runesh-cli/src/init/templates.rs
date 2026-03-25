@@ -1003,7 +1003,7 @@ COPY --from=rust-builder /build/target/release/{name}-server ./backend
 COPY migrations/ ./migrations/
 
 # Caddy config: proxy /api and /ws to backend, everything else to Next.js
-RUN printf ':8080 {{\n  handle /api/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /ws {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle {{\n    reverse_proxy 127.0.0.1:3000\n  }}\n}}\n' > /etc/Caddyfile
+RUN printf ':8080 {{\n  request_body {{\n    max_size 10GB\n  }}\n  handle /api/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /ws {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle {{\n    reverse_proxy 127.0.0.1:3000\n  }}\n}}\n' > /etc/Caddyfile
 
 # Start script
 RUN printf '#!/bin/sh\nset -e\ncaddy start --config /etc/Caddyfile &\ncd /app/web && HOSTNAME=0.0.0.0 PORT=3000 node server.js &\ncd /app && ./backend &\nwait\n' > /app/start.sh && chmod +x /app/start.sh
