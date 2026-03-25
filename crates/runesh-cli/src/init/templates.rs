@@ -1510,8 +1510,8 @@ pub const EXTENSION_BACKGROUND: &str = r#"export default defineBackground(() => 
 "#;
 
 pub const DOCKERIGNORE: &str = r#"target/
-node_modules/
-.next/
+**/node_modules/
+**/.next/
 .git/
 .cargo/
 .env
