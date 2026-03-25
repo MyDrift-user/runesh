@@ -459,6 +459,33 @@ fn run_bun_installs(root: &Path, config: &ProjectConfig) {
     }
 }
 
+/// Copy a component from the RUNESH package source into the consumer project.
+/// The component uses @/ imports that resolve in the consumer's build context.
+fn copy_runesh_component(web_root: &Path, relative_path: &str, source: &RuneshSource) -> Result<(), String> {
+    let src_path = match source {
+        RuneshSource::Local(path) => {
+            PathBuf::from(path).join("packages/ui/src").join(relative_path)
+        }
+        RuneshSource::Git(_) => {
+            // For git source, try to find the linked package in node_modules
+            web_root.join("node_modules/@mydrift-user/runesh-ui/src").join(relative_path)
+        }
+    };
+
+    let dest_path = web_root.join("src").join(relative_path);
+    if let Some(parent) = dest_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
+    }
+
+    if src_path.exists() {
+        fs::copy(&src_path, &dest_path)
+            .map_err(|e| format!("copy {relative_path}: {e}"))?;
+    } else {
+        println!("  {} Could not find {} - skipping", console::style("!").yellow(), relative_path);
+    }
+    Ok(())
+}
+
 fn run_bun_install(dir: &Path, label: &str) {
     println!("  {} Installing {label} dependencies...", style("->").green());
     match Command::new("bun").arg("install").current_dir(dir).status() {
@@ -472,7 +499,29 @@ fn run_bun_install(dir: &Path, label: &str) {
         println!("  {} Initializing shadcn/ui in {label}/...", style("->").green());
         match Command::new("bunx").args(["shadcn@latest", "init", "-y", "-d"]).current_dir(dir).status() {
             Ok(s) if s.success() => {}
-            _ => println!("  {} shadcn init skipped in {label}/", style("!").yellow()),
+            _ => {
+                println!("  {} shadcn init skipped in {label}/", style("!").yellow());
+                return;
+            }
+        }
+
+        // Install all shadcn base components needed by RUNESH shared components
+        let shadcn_components = [
+            "sidebar", "button", "input", "separator", "sheet", "skeleton",
+            "tooltip", "select", "table", "command", "alert-dialog",
+        ];
+        println!("  {} Adding shadcn components in {label}/...", style("->").green());
+        match Command::new("bunx")
+            .arg("shadcn@latest")
+            .arg("add")
+            .args(&shadcn_components)
+            .arg("-y")
+            .arg("-o")
+            .current_dir(dir)
+            .status()
+        {
+            Ok(s) if s.success() => {}
+            _ => println!("  {} shadcn add skipped - run 'bunx shadcn add {}' manually", style("!").yellow(), shadcn_components.join(" ")),
         }
     }
 }
@@ -538,10 +587,17 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         w("web/src/app/layout.tsx", &templates::layout_tsx(c, false))?;
         w("web/src/app/page.tsx", &templates::home_page(c))?;
         w("web/src/lib/utils.ts", templates::UTILS_TS)?;
+        // use-mobile hook (needed by shadcn sidebar)
+        w("web/src/hooks/use-mobile.ts", templates::USE_MOBILE)?;
 
-        // Dashboard shell (sidebar + toolbar + search)
+        // Copy RUNESH layout components (they use @/ imports for shadcn)
         if c.with_dashboard {
             w("web/src/components/app-shell.tsx", &templates::app_shell(c))?;
+            copy_runesh_component(&root.join("web"), "components/layout/dashboard-shell.tsx", &c.source)?;
+            copy_runesh_component(&root.join("web"), "components/layout/page-header.tsx", &c.source)?;
+            copy_runesh_component(&root.join("web"), "components/layout/search-bar.tsx", &c.source)?;
+            copy_runesh_component(&root.join("web"), "components/ui/data-table.tsx", &c.source)?;
+            copy_runesh_component(&root.join("web"), "components/ui/confirm-dialog.tsx", &c.source)?;
         }
 
         // Novel WYSIWYG editor

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useAuth } from "../components/providers/auth-provider";
+import { useAuth } from "@mydrift-user/runesh-ui/src/components/providers/auth-provider";
 
 export function usePermissions() {
   const { user } = useAuth();

@@ -2,17 +2,17 @@
 
 import * as React from "react";
 import { ChevronUpIcon, ChevronDownIcon, ChevronsUpDownIcon, SearchIcon } from "lucide-react";
-import { cn } from "../../lib/utils";
-import { Input } from "./input";
-import { Button } from "./button";
-import { Skeleton } from "./skeleton";
+import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "./select";
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -20,7 +20,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "./table";
+} from "@/components/ui/table";
 
 export interface DataTableColumn<T> {
   key: string;

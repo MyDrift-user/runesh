@@ -377,9 +377,27 @@ pub const GLOBALS_CSS_IMPORT: &str = r#"@import "tailwindcss";
 @import "@mydrift-user/runesh-ui/src/styles/globals.css";
 
 @plugin "@tailwindcss/typography";
+"#;
 
-/* Scan shared UI package so Tailwind generates its utility classes */
-@source "../../node_modules/@mydrift-user/runesh-ui/src";
+pub const USE_MOBILE: &str = r#"import * as React from "react"
+
+const MOBILE_BREAKPOINT = 768
+
+export function useIsMobile() {
+  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
+
+  React.useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+    const onChange = () => {
+      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    }
+    mql.addEventListener("change", onChange)
+    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    return () => mql.removeEventListener("change", onChange)
+  }, [])
+
+  return !!isMobile
+}
 "#;
 
 pub fn layout_tsx(c: &ProjectConfig, is_desktop: bool) -> String {
@@ -390,7 +408,7 @@ pub fn layout_tsx(c: &ProjectConfig, is_desktop: bool) -> String {
     let mut inner_after = String::new();
 
     if is_desktop {
-        extra_imports.push_str("import { TitleBar } from \"@mydrift-user/runesh-ui/src/components/layout/title-bar\";\n");
+        extra_imports.push_str("import { TitleBar } from \"@/components/layout/title-bar\";\n");
         inner_before.push_str(&format!("              <TitleBar title=\"{}\" />\n", title));
     }
 
@@ -433,7 +451,7 @@ export default function RootLayout({{ children }}: {{ children: React.ReactNode 
 }
 
 pub fn home_page(c: &ProjectConfig) -> String {
-    format!(r#"import {{ PageHeader }} from "@mydrift-user/runesh-ui/src/components/layout/page-header";
+    format!(r#"import {{ PageHeader }} from "@/components/layout/page-header";
 
 export default function Home() {{
   return (
@@ -455,9 +473,9 @@ pub fn app_shell(c: &ProjectConfig) -> String {
 
 import {{ usePathname }} from "next/navigation";
 import {{ Home, Settings, FileText, Table2 }} from "lucide-react";
-import {{ AppSidebar, type NavItem }} from "@mydrift-user/runesh-ui/src/components/layout/app-sidebar";
-import {{ DashboardShell }} from "@mydrift-user/runesh-ui/src/components/layout/dashboard-shell";
-import {{ SearchBar, type SearchResult }} from "@mydrift-user/runesh-ui/src/components/layout/search-bar";
+import {{ AppSidebar, type NavItem }} from "@/components/layout/app-sidebar";
+import {{ DashboardShell }} from "@/components/layout/dashboard-shell";
+import {{ SearchBar, type SearchResult }} from "@/components/layout/search-bar";
 import {{ useAuth }} from "@mydrift-user/runesh-ui/src/components/providers/auth-provider";
 
 const navItems: NavItem[] = [
@@ -521,11 +539,11 @@ pub fn data_table_page(_c: &ProjectConfig) -> String {
     r#""use client";
 
 import { useState } from "react";
-import { PageHeader } from "@mydrift-user/runesh-ui/src/components/layout/page-header";
-import { DataTable, type DataTableColumn } from "@mydrift-user/runesh-ui/src/components/ui/data-table";
-import { ConfirmDialog } from "@mydrift-user/runesh-ui/src/components/ui/confirm-dialog";
+import { PageHeader } from "@/components/layout/page-header";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatRelativeTime, formatFileSize } from "@mydrift-user/runesh-ui/src/lib/format";
-import { Button } from "@mydrift-user/runesh-ui/src/components/ui/button"; // needs shadcn button installed
+import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
 
 // Example data type
@@ -613,7 +631,7 @@ pub fn editor_page(c: &ProjectConfig) -> String {
     format!(r#""use client";
 
 import {{ useState }} from "react";
-import {{ PageHeader }} from "@mydrift-user/runesh-ui/src/components/layout/page-header";
+import {{ PageHeader }} from "@/components/layout/page-header";
 import {{ RichEditor }} from "@/components/editor";
 
 export default function EditorPage() {{
@@ -1241,7 +1259,7 @@ export default nextConfig;
 "#;
 
 pub fn desktop_home_page(c: &ProjectConfig) -> String {
-    format!(r#"import {{ PageHeader }} from "@mydrift-user/runesh-ui/src/components/layout/page-header";
+    format!(r#"import {{ PageHeader }} from "@/components/layout/page-header";
 
 export default function Home() {{
   return (
