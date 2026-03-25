@@ -1,8 +1,6 @@
 "use client";
 
 import { Node, mergeAttributes } from "@tiptap/core";
-import { ReactNodeViewRenderer } from "@tiptap/react";
-import { UploadPlaceholder } from "./upload-placeholder";
 
 export const UploadPlaceholderExtension = Node.create({
   name: "uploadPlaceholder",
@@ -23,10 +21,12 @@ export const UploadPlaceholderExtension = Node.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ["div", mergeAttributes({ "data-upload-placeholder": "" }, HTMLAttributes)];
-  },
-
-  addNodeView() {
-    return ReactNodeViewRenderer(UploadPlaceholder);
+    const { fileName, fileType } = HTMLAttributes;
+    return [
+      "div",
+      mergeAttributes({ "data-upload-placeholder": "", class: "editor-upload-placeholder" }),
+      ["div", { class: "editor-upload-spinner" }],
+      ["span", { class: "editor-upload-text" }, fileName || "Uploading..."],
+    ];
   },
 });

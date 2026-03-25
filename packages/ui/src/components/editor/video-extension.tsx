@@ -1,8 +1,6 @@
 "use client";
 
 import { Node, mergeAttributes } from "@tiptap/core";
-import { ReactNodeViewRenderer } from "@tiptap/react";
-import { VideoView } from "./video-view";
 
 export const VideoExtension = Node.create({
   name: "video",
@@ -21,10 +19,11 @@ export const VideoExtension = Node.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ["div", mergeAttributes({ "data-video": "" }, HTMLAttributes)];
-  },
-
-  addNodeView() {
-    return ReactNodeViewRenderer(VideoView);
+    const { src, fileName, ...rest } = HTMLAttributes;
+    return [
+      "div", mergeAttributes(rest, { "data-video": "", class: "editor-video-wrapper" }),
+      ["video", { src, controls: "true", preload: "metadata", class: "editor-video" }],
+      ...(fileName ? [["div", { class: "editor-video-footer" }, fileName]] : []),
+    ];
   },
 });
