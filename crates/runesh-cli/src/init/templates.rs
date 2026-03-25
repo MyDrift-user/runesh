@@ -375,6 +375,9 @@ pub const GLOBALS_CSS_IMPORT: &str = r#"@import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@mydrift-user/runesh-ui/src/styles/globals.css";
+
+/* Scan shared UI package so Tailwind generates its utility classes */
+@source "../../node_modules/@mydrift-user/runesh-ui/src";
 "#;
 
 pub fn layout_tsx(c: &ProjectConfig, is_desktop: bool) -> String {

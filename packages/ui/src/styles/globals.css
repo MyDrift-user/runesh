@@ -1,7 +1,4 @@
-/* Shared theme + Tailwind source scanning for @mydrift-user/runesh-ui */
-
-/* Tell Tailwind to scan this package's components for class names */
-@source "..";
+/* Shared theme for @mydrift-user/runesh-ui */
 
 @custom-variant dark (&:is(.dark *));
 
