@@ -134,7 +134,12 @@ pub fn server_main(c: &ProjectConfig) -> String {
 
     if c.with_upload || c.with_editor {
         extra_imports.push_str("use axum::extract::Multipart;\n");
-        extra_routes.push_str("        .route(\"/api/uploads\", post(upload_file))\n        .route(\"/api/uploads/{filename}\", get(serve_upload))\n");
+        extra_cli_fields.push_str(r#"
+    /// Max upload size in MB
+    #[arg(long, env = "MAX_UPLOAD_MB", default_value = "50")]
+    max_upload_mb: usize,
+"#);
+        extra_routes.push_str("        .route(\"/api/uploads\", post(upload_file))\n        .route(\"/api/uploads/{filename}\", get(serve_upload))\n        .layer(axum::extract::DefaultBodyLimit::max(cli.max_upload_mb * 1024 * 1024))\n");
         extra_handlers.push_str(r#"
 async fn upload_file(mut multipart: Multipart) -> Result<Json<serde_json::Value>, runesh_core::AppError> {
     while let Some(field) = multipart.next_field().await.map_err(|e| runesh_core::AppError::BadRequest(e.to_string()))? {
