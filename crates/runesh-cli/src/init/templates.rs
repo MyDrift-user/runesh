@@ -106,6 +106,7 @@ pub fn server_main(c: &ProjectConfig) -> String {
             "/api/v1/health".into(),
             "/swagger-ui".into(),
             "/api/openapi.json".into(),
+            "/api/uploads".into(),
         ])))
 "#);
     }
