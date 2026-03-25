@@ -1,9 +1,7 @@
-/* Theme variables and utilities for RUNESH projects.
-   Import AFTER tailwindcss in your consumer's globals.css:
-     @import "tailwindcss";
-     @import "tw-animate-css";
-     @import "@runesh/ui/src/styles/globals.css";
-*/
+/* Shared theme + Tailwind source scanning for @mydrift-user/runesh-ui */
+
+/* Tell Tailwind to scan this package's components for class names */
+@source "..";
 
 @custom-variant dark (&:is(.dark *));
 
