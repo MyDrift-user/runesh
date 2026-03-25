@@ -8,19 +8,14 @@ export interface UploadFn {
 }
 
 export interface FileHandlerOptions {
-  /** Upload a file and return its URL */
   onUpload: UploadFn;
-  /** Max file size in bytes (default: 50MB) */
   maxSize?: number;
 }
 
 /**
  * Extension that handles drag & drop and paste for all file types.
- * Routes files to the correct node type based on MIME:
- * - image/* -> image node
- * - video/* -> video node
- * - audio/* -> audio node
- * - everything else -> fileAttachment node
+ * Inserts a placeholder with loading indicator during upload,
+ * then replaces it with the actual media node when done.
  */
 export const FileHandlerExtension = Extension.create<FileHandlerOptions>({
   name: "fileHandler",
@@ -35,48 +30,49 @@ export const FileHandlerExtension = Extension.create<FileHandlerOptions>({
   addProseMirrorPlugins() {
     const { onUpload, maxSize } = this.options;
 
-    const handleFiles = async (
-      editor: any,
-      files: File[],
-      pos?: number,
-    ) => {
+    const handleFiles = async (editor: any, files: File[], pos?: number) => {
       for (const file of files) {
-        if (maxSize && file.size > maxSize) {
-          console.warn(`File too large: ${file.name} (${file.size} bytes)`);
-          continue;
-        }
+        if (maxSize && file.size > maxSize) continue;
 
-        const url = await onUpload(file);
-        if (!url) continue;
-
-        let nodeType: string;
-        let attrs: Record<string, any>;
-
-        if (file.type.startsWith("image/")) {
-          nodeType = "image";
-          attrs = { src: url };
-        } else if (file.type.startsWith("video/")) {
-          nodeType = "video";
-          attrs = { src: url, fileName: file.name };
-        } else if (file.type.startsWith("audio/")) {
-          nodeType = "audio";
-          attrs = { src: url, fileName: file.name };
-        } else {
-          nodeType = "fileAttachment";
-          attrs = {
-            src: url,
-            fileName: file.name,
-            fileSize: file.size,
-            fileType: file.type || "application/octet-stream",
-          };
-        }
-
+        const uploadId = Math.random().toString(36).slice(2);
         const insertPos = pos ?? editor.state.selection.anchor;
-        editor
-          .chain()
-          .focus()
-          .insertContentAt(insertPos, { type: nodeType, attrs })
-          .run();
+
+        // Insert placeholder
+        editor.chain().focus().insertContentAt(insertPos, {
+          type: "uploadPlaceholder",
+          attrs: { id: uploadId, fileName: file.name, fileType: file.type, progress: 0 },
+        }).run();
+
+        // Upload
+        try {
+          const url = await onUpload(file);
+          if (!url) {
+            removePlaceholder(editor, uploadId);
+            continue;
+          }
+
+          let nodeType: string;
+          let attrs: Record<string, any>;
+
+          if (file.type.startsWith("image/")) {
+            nodeType = "image";
+            attrs = { src: url };
+          } else if (file.type.startsWith("video/")) {
+            nodeType = "video";
+            attrs = { src: url, fileName: file.name };
+          } else if (file.type.startsWith("audio/")) {
+            nodeType = "audio";
+            attrs = { src: url, fileName: file.name };
+          } else {
+            nodeType = "fileAttachment";
+            attrs = { src: url, fileName: file.name, fileSize: file.size, fileType: file.type };
+          }
+
+          // Replace placeholder with actual node
+          replacePlaceholder(editor, uploadId, nodeType, attrs);
+        } catch {
+          removePlaceholder(editor, uploadId);
+        }
       }
     };
 
@@ -87,20 +83,14 @@ export const FileHandlerExtension = Extension.create<FileHandlerOptions>({
           handleDrop: (view, event) => {
             if (!event.dataTransfer?.files?.length) return false;
             event.preventDefault();
-
             const files = Array.from(event.dataTransfer.files);
-            const pos = view.posAtCoords({
-              left: event.clientX,
-              top: event.clientY,
-            })?.pos;
-
+            const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
             handleFiles(this.editor, files, pos);
             return true;
           },
           handlePaste: (view, event) => {
             const files = Array.from(event.clipboardData?.files || []);
             if (!files.length) return false;
-
             event.preventDefault();
             handleFiles(this.editor, files);
             return true;
@@ -110,3 +100,27 @@ export const FileHandlerExtension = Extension.create<FileHandlerOptions>({
     ];
   },
 });
+
+function removePlaceholder(editor: any, id: string) {
+  const { doc } = editor.state;
+  doc.descendants((node: any, pos: number) => {
+    if (node.type.name === "uploadPlaceholder" && node.attrs.id === id) {
+      editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
+      return false;
+    }
+  });
+}
+
+function replacePlaceholder(editor: any, id: string, nodeType: string, attrs: Record<string, any>) {
+  const { doc } = editor.state;
+  doc.descendants((node: any, pos: number) => {
+    if (node.type.name === "uploadPlaceholder" && node.attrs.id === id) {
+      editor.chain()
+        .focus()
+        .deleteRange({ from: pos, to: pos + node.nodeSize })
+        .insertContentAt(pos, { type: nodeType, attrs })
+        .run();
+      return false;
+    }
+  });
+}

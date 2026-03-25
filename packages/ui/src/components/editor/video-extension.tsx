@@ -1,11 +1,9 @@
 "use client";
 
 import { Node, mergeAttributes } from "@tiptap/core";
+import { ReactNodeViewRenderer } from "@tiptap/react";
+import { VideoView } from "./video-view";
 
-/**
- * Video node extension for Tiptap.
- * Renders an inline `<video>` player with controls.
- */
 export const VideoExtension = Node.create({
   name: "video",
   group: "block",
@@ -19,22 +17,14 @@ export const VideoExtension = Node.create({
   },
 
   parseHTML() {
-    return [{ tag: "video[src]" }];
+    return [{ tag: "div[data-video]" }];
   },
 
   renderHTML({ HTMLAttributes }) {
-    return [
-      "div",
-      { class: "video-wrapper my-4" },
-      [
-        "video",
-        mergeAttributes(HTMLAttributes, {
-          controls: "true",
-          class: "w-full rounded-lg",
-          preload: "metadata",
-        }),
-      ],
-    ];
+    return ["div", mergeAttributes({ "data-video": "" }, HTMLAttributes)];
   },
 
+  addNodeView() {
+    return ReactNodeViewRenderer(VideoView);
+  },
 });
