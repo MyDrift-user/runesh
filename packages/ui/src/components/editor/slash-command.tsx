@@ -168,18 +168,11 @@ export const suggestionItems = createSuggestionItems([
         icon: <ImageIcon size={18} />,
         command: ({ editor, range }) => {
             editor.chain().focus().deleteRange(range).run();
-            const input = document.createElement("input");
-            input.type = "file";
-            input.accept = "image/*";
-            input.onchange = () => {
-                const file = input.files?.[0];
-                if (file) {
-                    // Triggers the FileHandlerExtension's onUpload if configured
-                    const event = new CustomEvent("editor-file-upload", { detail: { file } });
-                    document.dispatchEvent(event);
-                }
-            };
-            input.click();
+            // Use pre-mounted input from editor component (avoids browser blocking)
+            const inputs = (window as any).__editorFileInputs;
+            if (inputs?.image?.current) {
+                inputs.image.current.click();
+            }
         },
     },
     {
@@ -189,17 +182,10 @@ export const suggestionItems = createSuggestionItems([
         icon: <Video size={18} />,
         command: ({ editor, range }) => {
             editor.chain().focus().deleteRange(range).run();
-            const input = document.createElement("input");
-            input.type = "file";
-            input.accept = "video/*";
-            input.onchange = () => {
-                const file = input.files?.[0];
-                if (file) {
-                    const event = new CustomEvent("editor-file-upload", { detail: { file } });
-                    document.dispatchEvent(event);
-                }
-            };
-            input.click();
+            const inputs = (window as any).__editorFileInputs;
+            if (inputs?.video?.current) {
+                inputs.video.current.click();
+            }
         },
     },
     {
@@ -209,17 +195,10 @@ export const suggestionItems = createSuggestionItems([
         icon: <Music size={18} />,
         command: ({ editor, range }) => {
             editor.chain().focus().deleteRange(range).run();
-            const input = document.createElement("input");
-            input.type = "file";
-            input.accept = "audio/*";
-            input.onchange = () => {
-                const file = input.files?.[0];
-                if (file) {
-                    const event = new CustomEvent("editor-file-upload", { detail: { file } });
-                    document.dispatchEvent(event);
-                }
-            };
-            input.click();
+            const inputs = (window as any).__editorFileInputs;
+            if (inputs?.audio?.current) {
+                inputs.audio.current.click();
+            }
         },
     },
     {
@@ -229,16 +208,10 @@ export const suggestionItems = createSuggestionItems([
         icon: <Paperclip size={18} />,
         command: ({ editor, range }) => {
             editor.chain().focus().deleteRange(range).run();
-            const input = document.createElement("input");
-            input.type = "file";
-            input.onchange = () => {
-                const file = input.files?.[0];
-                if (file) {
-                    const event = new CustomEvent("editor-file-upload", { detail: { file } });
-                    document.dispatchEvent(event);
-                }
-            };
-            input.click();
+            const inputs = (window as any).__editorFileInputs;
+            if (inputs?.file?.current) {
+                inputs.file.current.click();
+            }
         },
     },
 ]);
