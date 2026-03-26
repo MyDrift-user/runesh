@@ -344,6 +344,13 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
   cursor: col-resize;
 }
 
+.ProseMirror img,
+.ProseMirror [data-video],
+.ProseMirror [data-audio],
+.ProseMirror [data-file-attachment] {
+  cursor: default;
+}
+
 
 /* ── Editor media node styles ─────────────────────────────────────────────── */
 
