@@ -36,7 +36,6 @@ export const AudioExtension = Node.create({
       const wrapper = document.createElement("div");
       wrapper.setAttribute("data-audio", "");
       wrapper.className = "editor-audio-wrapper";
-      wrapper.draggable = false;
 
       const icon = document.createElement("div");
       icon.className = "editor-audio-icon";
@@ -56,7 +55,6 @@ export const AudioExtension = Node.create({
       audio.preload = "metadata";
       audio.className = "editor-audio-player";
 
-      // Prevent browser drag on the audio element so scrubbing works
       audio.addEventListener("dragstart", (e) => e.preventDefault());
 
       content.appendChild(audio);

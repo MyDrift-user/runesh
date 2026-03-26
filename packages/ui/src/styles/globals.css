@@ -210,8 +210,6 @@
   display: none !important;
 }
 
-
-
 /* ── Novel / ProseMirror editor styles ────────────────────────────────────── */
 
 /* Force dark color-scheme in dark mode — gives us native dark scrollbars everywhere */
@@ -350,12 +348,6 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
 .ProseMirror [data-file-attachment] {
   cursor: default;
 }
-.ProseMirror video,
-.ProseMirror audio {
-  -webkit-user-drag: none;
-  pointer-events: auto;
-}
-
 
 /* ── Editor media node styles ─────────────────────────────────────────────── */
 
