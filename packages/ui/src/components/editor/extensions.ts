@@ -23,7 +23,7 @@ import { VideoExtension } from "./video-extension";
 import { AudioExtension } from "./audio-extension";
 import { FileAttachmentExtension } from "./file-attachment-extension";
 import { UploadPlaceholderExtension } from "./upload-placeholder-extension";
-import { HtmlBlockExtension } from "./html-block-extension";
+import { htmlExtensions } from "./html-extensions";
 import { common, createLowlight } from "lowlight";
 
 /**
@@ -263,7 +263,7 @@ export const defaultExtensions = [
     AudioExtension,
     FileAttachmentExtension,
     UploadPlaceholderExtension,
-    HtmlBlockExtension,
+    ...htmlExtensions,
     TiptapUnderline,
     HighlightExtension,
     TextStyle,

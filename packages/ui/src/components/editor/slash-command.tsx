@@ -15,7 +15,6 @@ import {
     Video,
     Music,
     Paperclip,
-    CodeXml,
 } from "lucide-react";
 import { createSuggestionItems, Command, renderItems } from "novel";
 
@@ -213,18 +212,6 @@ export const suggestionItems = createSuggestionItems([
             if (inputs?.file?.current) {
                 inputs.file.current.click();
             }
-        },
-    },
-    {
-        title: "HTML",
-        description: "Embed custom HTML.",
-        searchTerms: ["html", "embed", "code", "custom", "raw"],
-        icon: <CodeXml size={18} />,
-        command: ({ editor, range }) => {
-            editor.chain().focus().deleteRange(range).insertContent({
-                type: "htmlBlock",
-                attrs: { html: "" },
-            }).run();
         },
     },
 ]);
