@@ -349,6 +349,66 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
   cursor: default;
 }
 
+/* ── HTML block ────────────────────────────────────────────────────────────── */
+.editor-html-block {
+  margin: 0.75rem 0;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  cursor: default;
+}
+.editor-html-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  background: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.editor-html-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.editor-html-toggle {
+  font-size: 0.75rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.editor-html-toggle:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.editor-html-code {
+  padding: 0;
+}
+.editor-html-textarea {
+  width: 100%;
+  min-height: 4rem;
+  padding: 0.75rem;
+  border: none;
+  outline: none;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  background: var(--card);
+  color: var(--foreground);
+  tab-size: 2;
+}
+.editor-html-textarea::placeholder {
+  color: var(--muted-foreground);
+}
+.editor-html-preview {
+  padding: 0.75rem;
+  background: var(--background);
+  overflow: auto;
+}
+
 /* ── Editor media node styles ─────────────────────────────────────────────── */
 
 .editor-upload-placeholder {
