@@ -24,6 +24,7 @@ import { AudioExtension } from "./audio-extension";
 import { FileAttachmentExtension } from "./file-attachment-extension";
 import { UploadPlaceholderExtension } from "./upload-placeholder-extension";
 import { htmlExtensions } from "./html-extensions";
+import { Markdown } from "tiptap-markdown";
 import { common, createLowlight } from "lowlight";
 
 /**
@@ -264,6 +265,11 @@ export const defaultExtensions = [
     FileAttachmentExtension,
     UploadPlaceholderExtension,
     ...htmlExtensions,
+    Markdown.configure({
+        html: true,
+        transformPastedText: true,
+        transformCopiedText: true,
+    }),
     TiptapUnderline,
     HighlightExtension,
     TextStyle,

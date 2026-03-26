@@ -368,11 +368,6 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
   text-decoration-color: color-mix(in srgb, green 60%, transparent);
   background: color-mix(in srgb, green 10%, transparent);
 }
-.editor-raw-html {
-  margin: 0.5rem 0;
-  cursor: default;
-  overflow: auto;
-}
 
 /* ── Editor media node styles ─────────────────────────────────────────────── */
 
