@@ -350,6 +350,11 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
 .ProseMirror [data-file-attachment] {
   cursor: default;
 }
+.ProseMirror video,
+.ProseMirror audio {
+  -webkit-user-drag: none;
+  pointer-events: auto;
+}
 
 
 /* ── Editor media node styles ─────────────────────────────────────────────── */

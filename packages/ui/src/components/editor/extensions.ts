@@ -271,7 +271,7 @@ export const defaultExtensions = [
     GlobalDragHandle.configure({
         dragHandleWidth: 20,
         scrollTreshold: 100,
-        excludedTags: ["table", "tbody", "thead", "tfoot", "tr", "td", "th"],
+        excludedTags: ["table", "tbody", "thead", "tfoot", "tr", "td", "th", "video", "audio", "iframe"],
     }),
     FixDragHandleDrop,
 ];

@@ -6,6 +6,7 @@ export const AudioExtension = Node.create({
   name: "audio",
   group: "block",
   atom: true,
+  draggable: false,
 
   addAttributes() {
     return {
@@ -21,7 +22,7 @@ export const AudioExtension = Node.create({
   renderHTML({ HTMLAttributes }) {
     const { src, fileName, ...rest } = HTMLAttributes;
     return [
-      "div", mergeAttributes(rest, { "data-audio": "", class: "editor-audio-wrapper" }),
+      "div", mergeAttributes(rest, { "data-audio": "", class: "editor-audio-wrapper", draggable: "false" }),
       ["div", { class: "editor-audio-icon" }],
       ["div", { class: "editor-audio-content" },
         ["p", { class: "editor-audio-name" }, fileName || "Audio"],
