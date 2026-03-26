@@ -556,21 +556,23 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
   to { transform: rotate(360deg); }
 }
 
-/* ── Media action bar (shown below selected media/file nodes) ──────────── */
+/* ── Media action bar (below selected media/file nodes) ────────────────── */
 .editor-media-actions {
-  display: flex;
-  justify-content: center;
-  padding: 0.25rem 0;
+  position: absolute;
+  z-index: 40;
+  pointer-events: auto;
   user-select: none;
 }
 .editor-media-actions button {
-  padding: 0.25rem 0.75rem;
+  padding: 0.25rem 0.625rem;
   border-radius: 0.375rem;
-  border: none;
-  background: transparent;
+  border: 1px solid var(--border);
+  background: var(--background);
   color: var(--muted-foreground);
   font-size: 0.75rem;
   cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+  white-space: nowrap;
 }
 .editor-media-actions button:hover {
   background: var(--accent);
