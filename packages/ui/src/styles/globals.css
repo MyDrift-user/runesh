@@ -373,23 +373,21 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
 }
 
 .editor-video-wrapper {
-  display: inline-block;
-  max-width: 100%;
   margin: 0.75rem 0;
   border-radius: 0.5rem;
   overflow: hidden;
   border: 1px solid var(--border);
-  line-height: 0;
-  vertical-align: top;
 }
 .editor-video {
   display: block;
-  max-width: 100%;
-  max-height: 70vh;
+  width: 100%;
   margin: 0;
   padding: 0;
 }
 .editor-video-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   font-size: 0.8125rem;
   line-height: 1.4;
@@ -561,23 +559,19 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
   to { transform: rotate(360deg); }
 }
 
-/* ── Media toggle button (floats above selected media/file nodes) ───────── */
+/* ── Media toggle button (inline in footer/bar of selected nodes) ───────── */
 .editor-media-toggle {
-  position: absolute;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.25rem 0.625rem;
-  border-radius: 0.375rem;
+  margin-left: auto;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.25rem;
   border: 1px solid var(--border);
-  background: var(--background);
+  background: transparent;
   color: var(--muted-foreground);
   font-size: 0.75rem;
-  line-height: 1;
+  line-height: 1.4;
   cursor: pointer;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .editor-media-toggle:hover {
   background: var(--accent);
