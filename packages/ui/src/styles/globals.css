@@ -363,43 +363,15 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
   box-shadow: 0 1px 0 var(--border);
   vertical-align: baseline;
 }
-.ProseMirror details {
-  margin: 0.75rem 0;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  overflow: hidden;
-}
-.ProseMirror details summary {
-  padding: 0.5rem 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  background: var(--muted);
-  user-select: none;
-}
-.ProseMirror details > :not(summary) {
-  padding: 0 0.75rem;
-}
 .ProseMirror ins {
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, green 60%, transparent);
   background: color-mix(in srgb, green 10%, transparent);
 }
-.ProseMirror abbr {
-  text-decoration: underline dotted;
-  cursor: help;
-}
-.ProseMirror samp {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.875em;
-  background: var(--muted);
-  padding: 0.125rem 0.25rem;
-  border-radius: 0.25rem;
-}
-.ProseMirror div[align="center"] {
-  text-align: center;
-}
-.ProseMirror div[align="right"] {
-  text-align: right;
+.editor-raw-html {
+  margin: 0.5rem 0;
+  cursor: default;
+  overflow: auto;
 }
 
 /* ── Editor media node styles ─────────────────────────────────────────────── */
