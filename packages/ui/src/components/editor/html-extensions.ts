@@ -67,16 +67,6 @@ const InsertedMark = Mark.create({
   },
 });
 
-const DeletedMark = Mark.create({
-  name: "deleted",
-  parseHTML() {
-    return [{ tag: "del" }, { tag: "s" }];
-  },
-  renderHTML({ HTMLAttributes }) {
-    return ["del", mergeAttributes(HTMLAttributes), 0];
-  },
-});
-
 const SampMark = Mark.create({
   name: "samp",
   parseHTML() {
@@ -87,23 +77,12 @@ const SampMark = Mark.create({
   },
 });
 
-const VarMark = Mark.create({
-  name: "var",
-  parseHTML() {
-    return [{ tag: "var" }];
-  },
-  renderHTML({ HTMLAttributes }) {
-    return ["var", mergeAttributes(HTMLAttributes), 0];
-  },
-});
-
 // ── Block nodes ──────────────────────────────────────────────────────────────
 
 const Details = Node.create({
   name: "details",
   group: "block",
-  content: "detailsSummary block+",
-  defining: true,
+  content: "detailsSummary block*",
   parseHTML() {
     return [{ tag: "details" }];
   },
@@ -115,7 +94,6 @@ const Details = Node.create({
 const DetailsSummary = Node.create({
   name: "detailsSummary",
   content: "inline*",
-  defining: true,
   parseHTML() {
     return [{ tag: "summary" }];
   },
@@ -124,62 +102,64 @@ const DetailsSummary = Node.create({
   },
 });
 
-const Figure = Node.create({
-  name: "figure",
+// ── Catch-all: preserves unknown block-level HTML as non-editable ────────────
+
+const RawHtmlBlock = Node.create({
+  name: "rawHtmlBlock",
   group: "block",
-  content: "(block | image) figcaption?",
-  parseHTML() {
-    return [{ tag: "figure" }];
-  },
-  renderHTML({ HTMLAttributes }) {
-    return ["figure", mergeAttributes(HTMLAttributes), 0];
-  },
-});
+  atom: true,
+  draggable: false,
 
-const Figcaption = Node.create({
-  name: "figcaption",
-  content: "inline*",
-  parseHTML() {
-    return [{ tag: "figcaption" }];
+  addAttributes() {
+    return {
+      html: { default: "" },
+      tagName: { default: "div" },
+    };
   },
-  renderHTML({ HTMLAttributes }) {
-    return ["figcaption", mergeAttributes(HTMLAttributes), 0];
-  },
-});
 
-const DefinitionList = Node.create({
-  name: "definitionList",
-  group: "block",
-  content: "(definitionTerm | definitionDescription)+",
   parseHTML() {
-    return [{ tag: "dl" }];
+    return [{
+      tag: "*",
+      priority: 0,
+      getAttrs(dom: HTMLElement) {
+        // Skip elements that other extensions handle
+        const tag = dom.tagName.toLowerCase();
+        const skip = new Set([
+          "p", "h1", "h2", "h3", "h4", "h5", "h6",
+          "ul", "ol", "li", "blockquote", "pre", "code",
+          "table", "thead", "tbody", "tfoot", "tr", "td", "th",
+          "hr", "br", "img", "a", "video", "audio", "iframe",
+          "details", "summary", "figure", "figcaption",
+          "div", "span", "input", "label", "form", "button",
+        ]);
+        if (skip.has(tag)) return false;
+        return { html: dom.outerHTML, tagName: tag };
+      },
+    }];
   },
-  renderHTML({ HTMLAttributes }) {
-    return ["dl", mergeAttributes(HTMLAttributes), 0];
-  },
-});
 
-const DefinitionTerm = Node.create({
-  name: "definitionTerm",
-  content: "inline*",
-  defining: true,
-  parseHTML() {
-    return [{ tag: "dt" }];
-  },
   renderHTML({ HTMLAttributes }) {
-    return ["dt", mergeAttributes(HTMLAttributes), 0];
+    return ["div", { "data-raw-html": "", class: "editor-raw-html" }];
   },
-});
 
-const DefinitionDescription = Node.create({
-  name: "definitionDescription",
-  content: "block+",
-  defining: true,
-  parseHTML() {
-    return [{ tag: "dd" }];
-  },
-  renderHTML({ HTMLAttributes }) {
-    return ["dd", mergeAttributes(HTMLAttributes), 0];
+  addNodeView() {
+    return ({ node }) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "editor-raw-html";
+      wrapper.setAttribute("data-raw-html", "");
+      wrapper.innerHTML = node.attrs.html || "";
+
+      return {
+        dom: wrapper,
+        stopEvent() { return true; },
+        ignoreMutation() { return true; },
+        update(updatedNode) {
+          if (updatedNode.type.name !== "rawHtmlBlock") return false;
+          wrapper.innerHTML = updatedNode.attrs.html || "";
+          return true;
+        },
+      };
+    };
   },
 });
 
@@ -192,14 +172,8 @@ export const htmlExtensions = [
   SmallMark,
   Abbreviation,
   InsertedMark,
-  DeletedMark,
   SampMark,
-  VarMark,
   Details,
   DetailsSummary,
-  Figure,
-  Figcaption,
-  DefinitionList,
-  DefinitionTerm,
-  DefinitionDescription,
+  RawHtmlBlock,
 ];
