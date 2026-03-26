@@ -395,13 +395,11 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
   padding: 0.125rem 0.25rem;
   border-radius: 0.25rem;
 }
-.editor-raw-html {
-  margin: 0.75rem 0;
-  padding: 0.75rem;
-  border: 1px dashed var(--border);
-  border-radius: 0.5rem;
-  cursor: default;
-  overflow: auto;
+.ProseMirror div[align="center"] {
+  text-align: center;
+}
+.ProseMirror div[align="right"] {
+  text-align: right;
 }
 
 /* ── Editor media node styles ─────────────────────────────────────────────── */

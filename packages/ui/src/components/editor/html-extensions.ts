@@ -77,7 +77,44 @@ const SampMark = Mark.create({
   },
 });
 
+// Inline span with style/class support
+const SpanMark = Mark.create({
+  name: "span",
+  parseHTML() {
+    return [{ tag: "span" }];
+  },
+  addAttributes() {
+    return {
+      style: { default: null },
+      class: { default: null },
+    };
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["span", mergeAttributes(HTMLAttributes), 0];
+  },
+});
+
 // ── Block nodes ──────────────────────────────────────────────────────────────
+
+// Div block — preserves align, class, style attributes
+const DivBlock = Node.create({
+  name: "div",
+  group: "block",
+  content: "block*",
+  parseHTML() {
+    return [{ tag: "div" }];
+  },
+  addAttributes() {
+    return {
+      align: { default: null },
+      style: { default: null },
+      class: { default: null },
+    };
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["div", mergeAttributes(HTMLAttributes), 0];
+  },
+});
 
 const Details = Node.create({
   name: "details",
@@ -102,67 +139,6 @@ const DetailsSummary = Node.create({
   },
 });
 
-// ── Catch-all: preserves unknown block-level HTML as non-editable ────────────
-
-const RawHtmlBlock = Node.create({
-  name: "rawHtmlBlock",
-  group: "block",
-  atom: true,
-  draggable: false,
-
-  addAttributes() {
-    return {
-      html: { default: "" },
-      tagName: { default: "div" },
-    };
-  },
-
-  parseHTML() {
-    return [{
-      tag: "*",
-      priority: 0,
-      getAttrs(dom: HTMLElement) {
-        // Skip elements that other extensions handle
-        const tag = dom.tagName.toLowerCase();
-        const skip = new Set([
-          "p", "h1", "h2", "h3", "h4", "h5", "h6",
-          "ul", "ol", "li", "blockquote", "pre", "code",
-          "table", "thead", "tbody", "tfoot", "tr", "td", "th",
-          "hr", "br", "img", "a", "video", "audio", "iframe",
-          "details", "summary", "figure", "figcaption",
-          "div", "span", "input", "label", "form", "button",
-        ]);
-        if (skip.has(tag)) return false;
-        return { html: dom.outerHTML, tagName: tag };
-      },
-    }];
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ["div", { "data-raw-html": "", class: "editor-raw-html" }];
-  },
-
-  addNodeView() {
-    return ({ node }) => {
-      const wrapper = document.createElement("div");
-      wrapper.className = "editor-raw-html";
-      wrapper.setAttribute("data-raw-html", "");
-      wrapper.innerHTML = node.attrs.html || "";
-
-      return {
-        dom: wrapper,
-        stopEvent() { return true; },
-        ignoreMutation() { return true; },
-        update(updatedNode) {
-          if (updatedNode.type.name !== "rawHtmlBlock") return false;
-          wrapper.innerHTML = updatedNode.attrs.html || "";
-          return true;
-        },
-      };
-    };
-  },
-});
-
 // ── Export ────────────────────────────────────────────────────────────────────
 
 export const htmlExtensions = [
@@ -173,7 +149,8 @@ export const htmlExtensions = [
   Abbreviation,
   InsertedMark,
   SampMark,
+  SpanMark,
+  DivBlock,
   Details,
   DetailsSummary,
-  RawHtmlBlock,
 ];
