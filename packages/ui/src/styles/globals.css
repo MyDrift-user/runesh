@@ -561,33 +561,23 @@ ul[data-type="taskList"] li[data-checked="true"]>div>p {
   to { transform: rotate(360deg); }
 }
 
-/* ── Media toggle button (injected into selected media/file nodes) ──────── */
+/* ── Media toggle button (floats above selected media/file nodes) ───────── */
 .editor-media-toggle {
   position: absolute;
-  top: 0.375rem;
-  right: 0.375rem;
-  z-index: 10;
+  z-index: 50;
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.25rem 0.5rem;
+  padding: 0.25rem 0.625rem;
   border-radius: 0.375rem;
   border: 1px solid var(--border);
   background: var(--background);
   color: var(--muted-foreground);
   font-size: 0.75rem;
+  line-height: 1;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s;
-  line-height: 1;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-}
-.editor-media-toggle span {
-  line-height: 1;
-}
-*:hover > .editor-media-toggle,
-.ProseMirror-selectednode > .editor-media-toggle {
-  opacity: 1;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  white-space: nowrap;
 }
 .editor-media-toggle:hover {
   background: var(--accent);
