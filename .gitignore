@@ -23,3 +23,5 @@ bun.lock
 .DS_Store
 Thumbs.db
 Desktop.ini
+.playwright-mcp/
+*.png
