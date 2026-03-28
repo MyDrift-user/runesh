@@ -1263,27 +1263,25 @@ pub const TAURI_CAPABILITIES: &str = r#"{
 "#;
 
 pub fn claude_md(c: &ProjectConfig) -> String {
-    let mut features = Vec::new();
-    if c.with_auth { features.push("OIDC auth (runesh-auth)"); }
-    if c.with_rate_limit { features.push("Rate limiting"); }
-    if c.with_ws { features.push("WebSocket broadcast"); }
-    if c.with_upload { features.push("File upload"); }
-    if c.with_dashboard { features.push("Dashboard shell (sidebar + toolbar + search)"); }
-    if c.with_editor { features.push("Novel WYSIWYG editor (wiki/rich text, file attachments)"); }
-    if c.with_data_table { features.push("Data table (sortable, paginated, searchable)"); }
-    if c.with_openapi { features.push("OpenAPI / Swagger UI"); }
-    if c.with_docker { features.push("Docker deployment"); }
-    if c.has_tauri { features.push("Tauri v2 desktop"); }
-    if c.has_extension { features.push("Chrome extension (WXT)"); }
+    // ── Stack ────────────────────────────────────────────────────────────
+    let mut stack = Vec::new();
+    if c.has_server { stack.push("Rust (Axum) + PostgreSQL (SQLx)".into()); }
+    if c.has_web { stack.push("Next.js 16 + React 19 + shadcn/ui v4 + Tailwind CSS v4".into()); }
+    if c.has_tauri { stack.push("Tauri v2 desktop".into()); }
+    if c.has_extension { stack.push("Chrome extension (WXT)".into()); }
+    stack.push("Package manager: bun (never npm/yarn)".into());
+    stack.push(format!("Shared code: @mydrift-user/runesh-ui + runesh-core/runesh-auth crates"));
 
-    // Build structure section dynamically
+    // ── Structure ────────────────────────────────────────────────────────
     let mut structure = Vec::new();
     if c.has_server {
         structure.push(format!("crates/{}-server/    # Axum API server", c.name));
-        structure.push("migrations/              # PostgreSQL migrations".into());
+        structure.push("migrations/              # PostgreSQL migrations (SQLx)".into());
     }
     if c.has_web {
         structure.push("web/                     # Next.js frontend".into());
+        structure.push("web/src/components/      # App components (editor, app-shell, etc.)".into());
+        structure.push("web/src/components/ui/   # shadcn/ui components (local, not shared)".into());
     }
     if c.has_desktop_frontend {
         structure.push("desktop/                 # Desktop Next.js frontend".into());
@@ -1294,51 +1292,136 @@ pub fn claude_md(c: &ProjectConfig) -> String {
     if c.has_extension {
         structure.push("extension/               # Chrome extension (WXT)".into());
     }
-    if c.has_any_rust() {
-        structure.push("Cargo.toml               # Rust workspace".into());
-    }
 
-    // Build dev commands dynamically
+    // ── Commands ─────────────────────────────────────────────────────────
     let mut dev_cmds = Vec::new();
-    if c.has_server { dev_cmds.push(format!("cargo run -p {}-server", c.name)); }
-    if c.has_web { dev_cmds.push("cd web && bun dev".into()); }
-    if c.has_desktop_frontend { dev_cmds.push("cd desktop && bun dev".into()); }
-    if c.has_tauri { dev_cmds.push("cd src-tauri && cargo tauri dev".into()); }
-    if c.has_extension { dev_cmds.push("cd extension && bun dev".into()); }
+    if c.has_server { dev_cmds.push(format!("cargo run -p {}-server  # Start backend", c.name)); }
+    if c.has_web { dev_cmds.push("cd web && bun dev            # Start frontend".into()); }
+    if c.has_desktop_frontend { dev_cmds.push("cd desktop && bun dev        # Start desktop frontend".into()); }
+    if c.has_tauri { dev_cmds.push("cd src-tauri && cargo tauri dev  # Start Tauri app".into()); }
+    if c.has_extension { dev_cmds.push("cd extension && bun dev      # Start extension dev".into()); }
+    if c.with_docker { dev_cmds.push("docker compose up -d         # Start full stack".into()); }
+    dev_cmds.push("docker compose build --no-cache app  # Rebuild Docker image".into());
 
-    let mut stack = Vec::new();
-    if c.has_server { stack.push("Backend: Rust (Axum) + PostgreSQL (SQLx)".into()); }
-    if c.has_web { stack.push("Frontend: Next.js + React + shadcn/ui + Tailwind CSS v4".into()); }
-    stack.push(format!("Shared code: RUNESH ({})", match &c.source {
-        super::RuneshSource::Git(url) => url.as_str(),
-        super::RuneshSource::Local(path) => path.as_str(),
-    }));
-    stack.push("Package manager: bun".into());
+    // ── Features ─────────────────────────────────────────────────────────
+    let mut features = Vec::new();
+    if c.with_auth { features.push("OIDC auth via runesh-auth (JWT + cookie sessions)"); }
+    if c.with_rate_limit { features.push("Rate limiting (sliding window per IP)"); }
+    if c.with_ws { features.push("WebSocket broadcast (per-room pub/sub)"); }
+    if c.with_upload { features.push("File upload with magic bytes validation"); }
+    if c.with_dashboard { features.push("Dashboard shell (sidebar, toolbar, search via Ctrl+K)"); }
+    if c.with_editor { features.push("Novel WYSIWYG editor (slash commands, tables, media uploads, markdown paste, source toggle)"); }
+    if c.with_data_table { features.push("Data table (sortable, paginated, searchable)"); }
+    if c.with_openapi { features.push("OpenAPI spec + Swagger UI at /swagger-ui/"); }
+    if c.with_docker { features.push("Docker multi-stage deployment (Caddy + Node + Rust)"); }
 
     format!(r#"# {name}
 
+Always use `bun` -- never npm or yarn.
+Never add Claude/AI as co-author or attribution in commits, PRs, or code.
+Verify frontend changes visually (Playwright MCP or browser) before considering them done.
+
 ## Stack
+
 {stack}
 
-## Features
-{features}
-
 ## Structure
+
 ```
 {name}/
 {structure}
 ```
 
-## Development
-```
+## Commands
+
+```bash
 {dev_cmds}
 ```
+
+## Features
+
+{features}
+
+## Workflow
+
+- Every feature/fix needs a GitHub issue first.
+- Every change goes through a PR -- no direct commits to `main`.
+- Before creating a PR, merge `main` into the feature branch.
+- PR title: past tense verb (`Added`, `Fixed`, `Refactored`).
+- PR body must contain `resolve #<issue-number>`.
+- Branch naming: `feature/<issue-number>_PascalCaseName`
+
+## Labels
+
+Every issue and PR must have a label: `bug`, `enhancement`, `feature`, `refactor`
+
+## Architecture Notes
+
+### Shared Package (@mydrift-user/runesh-ui)
+- Published to GitHub Packages, consumed via `transpilePackages` in `next.config.ts`
+- Tiptap/ProseMirror deps are `peerDependencies` (single instance required)
+- No `exports` field -- uses unrestricted subpath resolution
+- Imports: `@mydrift-user/runesh-ui/src/components/editor/extensions`
+
+### Backend (runesh-core / runesh-auth)
+- Git dependencies from RUNESH repo
+- Local dev: `.cargo/config.toml` patch overrides
+- Middleware stack: CORS, security headers (CSP, HSTS, X-Frame-Options), rate limiting, request ID, auth
+- Upload endpoint: magic bytes validation, UUID storage keys, configurable auth
+
+### Editor
+- Novel.js (Tiptap v2) with custom extensions
+- Video/Audio: plain JS NodeView with `stopEvent()` for interactive controls
+- File uploads: slash commands trigger hidden file inputs, upload placeholder -> media node
+- tiptap-markdown: paste markdown, source toggle shows markdown
+- Media toggle: switch between preview and file attachment
+
+### Docker
+- Multi-stage: bun builder -> rust builder -> debian-slim runtime
+- Caddy reverse proxy: `/api/*` + `/swagger-ui/*` -> backend, everything else -> Next.js
+- `HOSTNAME=0.0.0.0` for Next.js, `127.0.0.1` for Caddy reverse proxy
 "#,
         name = c.name,
         stack = stack.iter().map(|s| format!("- {s}")).collect::<Vec<_>>().join("\n"),
         features = features.iter().map(|f| format!("- {f}")).collect::<Vec<_>>().join("\n"),
         structure = structure.iter().map(|s| format!("├── {s}")).collect::<Vec<_>>().join("\n"),
         dev_cmds = dev_cmds.join("\n"),
+    )
+}
+
+pub fn serena_config(c: &ProjectConfig) -> String {
+    let mut languages = Vec::new();
+    if c.has_any_rust() { languages.push("rust"); }
+    if c.has_web || c.has_desktop_frontend || c.has_extension { languages.push("typescript"); }
+
+    let mut ignored = vec![
+        "target".to_string(),
+        "**/node_modules".to_string(),
+        "**/.next".to_string(),
+        "**/dist".to_string(),
+        "**/.output".to_string(),
+    ];
+    if c.has_tauri { ignored.push(".tauri".to_string()); }
+
+    format!(r#"project_name: "{name}"
+
+languages:
+{langs}
+
+encoding: "utf-8"
+ignore_all_files_in_gitignore: true
+read_only: false
+
+ignored_paths:
+{ignored}
+
+excluded_tools: []
+included_optional_tools: []
+initial_prompt: ""
+"#,
+        name = c.name,
+        langs = languages.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n"),
+        ignored = ignored.iter().map(|p| format!("- \"{}\"", p)).collect::<Vec<_>>().join("\n"),
     )
 }
 

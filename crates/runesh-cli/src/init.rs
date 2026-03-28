@@ -680,5 +680,9 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
 
     w("CLAUDE.md", &templates::claude_md(c))?;
 
+    // ── Serena config ────────────────────────────────────────────────────
+
+    w(".serena/project.yml", &templates::serena_config(c))?;
+
     Ok(())
 }
