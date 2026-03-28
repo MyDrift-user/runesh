@@ -99,15 +99,25 @@ pub fn server_main(c: &ProjectConfig) -> String {
     #[arg(long, env = "JWT_SECRET")]
     jwt_secret: String,
 "#);
+        extra_cli_fields.push_str(r#"
+    /// Require authentication for uploads
+    #[arg(long, env = "UPLOAD_AUTH_REQUIRED", default_value = "false")]
+    upload_auth_required: bool,
+"#);
         extra_middleware.push_str(r#"        .layer(middleware::from_fn(auth_middleware))
         .layer(axum::Extension(JwtSecret(cli.jwt_secret.clone())))
-        .layer(axum::Extension(AuthExemptPaths(vec![
-            "/auth/".into(),
-            "/api/v1/health".into(),
-            "/swagger-ui".into(),
-            "/api/openapi.json".into(),
-            "/api/uploads".into(),
-        ])))
+        .layer(axum::Extension(AuthExemptPaths({{
+            let mut paths = vec![
+                "/auth/".into(),
+                "/api/v1/health".into(),
+                "/swagger-ui".into(),
+                "/api/openapi.json".into(),
+            ];
+            if !cli.upload_auth_required {{
+                paths.push("/api/uploads".into());
+            }}
+            paths
+        }})))
 "#);
     }
     if c.with_openapi {
@@ -199,8 +209,8 @@ struct Cli {{
     log_level: String,
 
     /// CORS allowed origins (comma-separated, or * for all)
-    #[arg(long, env = "CORS_ORIGINS", default_value = "*")]
-    cors_origins: String,
+    #[arg(long, env = "CORS_ORIGINS")]
+    cors_origins: Option<String>,
 
     /// Run database migrations on startup
     #[arg(long, env = "RUN_MIGRATIONS", default_value = "true")]
@@ -231,7 +241,11 @@ async fn main() {{
         tracing::info!("Migrations applied");
     }}
 
-    let cors_origins: Vec<&str> = cli.cors_origins.split(',').map(|s| s.trim()).collect();
+    let cors_origins_str = cli.cors_origins.unwrap_or_else(|| {{
+        tracing::warn!("CORS_ORIGINS not set, defaulting to wildcard '*' -- set CORS_ORIGINS for production");
+        "*".to_string()
+    }});
+    let cors_origins: Vec<&str> = cors_origins_str.split(',').map(|s| s.trim()).collect();
 
     tokio::fs::create_dir_all("./uploads").await.ok();
 
@@ -1062,7 +1076,7 @@ COPY --from=rust-builder /build/target/release/{name}-server ./backend
 COPY migrations/ ./migrations/
 
 # Caddy config: proxy /api and /ws to backend, everything else to Next.js
-RUN printf ':8080 {{\n  request_body {{\n    max_size 10GB\n  }}\n  handle /api/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /ws {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle {{\n    reverse_proxy 127.0.0.1:3000\n  }}\n}}\n' > /etc/Caddyfile
+RUN printf ':8080 {{\n  request_body {{\n    max_size 10GB\n  }}\n  handle /api/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /swagger-ui/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /ws {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle {{\n    reverse_proxy 127.0.0.1:3000\n  }}\n}}\n' > /etc/Caddyfile
 
 # Start script
 RUN printf '#!/bin/sh\nset -e\ncaddy start --config /etc/Caddyfile &\ncd /app/web && HOSTNAME=0.0.0.0 PORT=3000 node server.js &\ncd /app && ./backend &\nwait\n' > /app/start.sh && chmod +x /app/start.sh

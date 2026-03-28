@@ -134,6 +134,7 @@ pub mod security_headers {
     /// - `Referrer-Policy: strict-origin-when-cross-origin`
     /// - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
     /// - `X-XSS-Protection: 0` (disable legacy XSS filter to prevent false positives)
+    /// - `Content-Security-Policy` (restricts resource loading origins)
     ///
     /// Usage:
     /// ```ignore
@@ -162,6 +163,10 @@ pub mod security_headers {
             "camera=(), microphone=(), geolocation=()".parse().unwrap(),
         );
         headers.insert("x-xss-protection", "0".parse().unwrap());
+        headers.insert(
+            "content-security-policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' ws: wss:; frame-src 'self'".parse().unwrap(),
+        );
 
         response
     }
