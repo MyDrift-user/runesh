@@ -613,6 +613,5 @@ RUNESH/
 │   └── runesh-tun/                      # Cross-platform TUN device
 ├── templates/                           # Dockerfile + compose.yaml
 ├── Cargo.toml                           # Rust workspace
-├── package.json                         # pnpm workspace
-└── pnpm-workspace.yaml
+├── package.json                         # bun workspace
 ```

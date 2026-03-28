@@ -26,8 +26,7 @@ RUNESH/
 ├── docs/
 │   └── USAGE.md                         # Detailed integration guide with examples
 ├── Cargo.toml                           # Rust workspace
-├── package.json                         # pnpm workspace root
-└── pnpm-workspace.yaml
+├── package.json                         # bun workspace root
 ```
 
 ## Source Projects
