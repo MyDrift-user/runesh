@@ -31,8 +31,15 @@ impl RateLimiter {
         let now = Instant::now();
         let mut map = self.requests.lock().unwrap_or_else(|e| e.into_inner());
 
+        // Prune expired timestamps for this key
+        if let Some(timestamps) = map.get_mut(key) {
+            timestamps.retain(|t| now.duration_since(*t) < self.window);
+            if timestamps.is_empty() {
+                map.remove(key);
+            }
+        }
+
         let timestamps = map.entry(key.to_string()).or_default();
-        timestamps.retain(|t| now.duration_since(*t) < self.window);
 
         if timestamps.len() >= self.max_requests {
             return false;

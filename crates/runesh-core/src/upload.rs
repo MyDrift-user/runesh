@@ -78,7 +78,7 @@ pub struct UploadedFile {
 /// if serving files back to browsers.
 #[cfg(feature = "axum")]
 pub async fn save_upload(
-    field: axum::extract::multipart::Field<'_>,
+    mut field: axum::extract::multipart::Field<'_>,
     storage_dir: &std::path::Path,
     max_size: u64,
     allowed_extensions: Option<&[&str]>,
@@ -122,31 +122,55 @@ pub async fn save_upload(
         .await
         .map_err(|e| AppError::Internal(format!("Failed to create storage dir: {e}")))?;
 
-    // Read with size limit enforcement
-    let data = field
-        .bytes()
+    // Stream chunks to disk with a running byte counter, rejecting early if exceeded
+    let mut file = tokio::fs::File::create(&storage_path)
         .await
-        .map_err(|e| AppError::BadRequest(format!("Failed to read upload: {e}")))?;
+        .map_err(|e| AppError::Internal(format!("Failed to create file: {e}")))?;
 
-    if data.len() as u64 > max_size {
-        return Err(AppError::BadRequest(format!(
-            "File too large: {} bytes (max {})",
-            data.len(),
-            max_size
-        )));
+    let mut total_size: u64 = 0;
+    let mut magic_buf: Vec<u8> = Vec::new();
+    let needs_magic_check = !ext.is_empty();
+    // We need at most 8 bytes for magic byte validation (PNG header is longest at 8)
+    const MAGIC_BYTES_NEEDED: usize = 8;
+
+    while let Some(chunk) = field
+        .chunk()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("Failed to read upload: {e}")))?
+    {
+        total_size += chunk.len() as u64;
+        if total_size > max_size {
+            // Clean up the partial file
+            drop(file);
+            let _ = tokio::fs::remove_file(&storage_path).await;
+            return Err(AppError::BadRequest(format!(
+                "File too large: exceeds max {} bytes",
+                max_size
+            )));
+        }
+
+        // Collect enough bytes for magic byte validation
+        if needs_magic_check && magic_buf.len() < MAGIC_BYTES_NEEDED {
+            let needed = MAGIC_BYTES_NEEDED - magic_buf.len();
+            magic_buf.extend_from_slice(&chunk[..chunk.len().min(needed)]);
+        }
+
+        use tokio::io::AsyncWriteExt;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to write file: {e}")))?;
     }
 
     // Validate magic bytes match the claimed extension
-    if !ext.is_empty() {
-        validate_magic_bytes(&data, ext)?;
+    if needs_magic_check {
+        if let Err(e) = validate_magic_bytes(&magic_buf, ext) {
+            let _ = tokio::fs::remove_file(&storage_path).await;
+            return Err(e);
+        }
     }
 
-    tokio::fs::write(&storage_path, &data)
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to write file: {e}")))?;
-
     Ok(UploadedFile {
-        size: data.len() as u64,
+        size: total_size,
         filename,
         content_type,
         storage_path,

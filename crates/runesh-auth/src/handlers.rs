@@ -108,7 +108,12 @@ async fn login_start<S: AuthStore>(
         }))).into_response(),
     };
 
-    let (session_id, auth_url) = state.sessions.start(provider, None).await;
+    let (session_id, auth_url) = match state.sessions.start(provider, None).await {
+        Ok(v) => v,
+        Err(_) => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
+            "error": "Too many pending login sessions, try again later"
+        }))).into_response(),
+    };
 
     Json(serde_json::json!({
         "session_id": session_id,

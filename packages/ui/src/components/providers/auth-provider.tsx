@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
-import { api } from "@mydrift-user/runesh-ui/src/lib/api-client";
+import { api } from "../../lib/api-client";
 
 export interface AuthUser {
   id: string;

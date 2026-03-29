@@ -1,5 +1,9 @@
 /**
- * Token storage for JWT-based authentication.
+ * Token storage for **Bearer token (JWT)** authentication only.
+ *
+ * This module is NOT used by the default cookie-based auth flow
+ * (see `api-client.ts` + `auth-provider.tsx`). It exists for consumer
+ * projects that use Bearer token auth instead of cookie-based sessions.
  *
  * Stores access token, refresh token, expiry, and user info in localStorage.
  * Configure the key prefix to avoid collisions between projects:

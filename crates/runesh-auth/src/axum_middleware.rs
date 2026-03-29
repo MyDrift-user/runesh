@@ -96,7 +96,7 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     }
 
     // Non-API paths pass through
-    if !path.starts_with("/api/") && !path.starts_with("/api/") {
+    if !path.starts_with("/api/") {
         return soft_auth(req, next).await;
     }
 

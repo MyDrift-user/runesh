@@ -28,6 +28,8 @@ pub struct OidcProvider {
     pub token_endpoint: String,
     pub userinfo_endpoint: String,
     pub jwks_uri: Option<String>,
+    /// Shared HTTP client (with timeout) for token exchange and userinfo calls.
+    pub http: reqwest::Client,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,7 +54,10 @@ pub struct OidcParams {
 impl OidcProvider {
     /// Perform OIDC discovery and build a fully-configured provider.
     pub async fn discover(params: OidcParams) -> Result<Self, AuthError> {
-        let http = reqwest::Client::new();
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| AuthError::Discovery(format!("failed to build HTTP client: {e}")))?;
         let discovery_url = format!("{}/.well-known/openid-configuration", params.issuer);
 
         let config: OpenIdConfiguration = http
@@ -80,6 +85,7 @@ impl OidcProvider {
             } else {
                 Some(config.jwks_uri)
             },
+            http,
         })
     }
 
@@ -111,7 +117,7 @@ impl OidcProvider {
         code: &str,
         code_verifier: &str,
     ) -> Result<(TokenResponse, OidcUserInfo), AuthError> {
-        let http = reqwest::Client::new();
+        let http = &self.http;
         let redirect = &self.redirect_uri;
 
         let mut params: Vec<(&str, &str)> = vec![
@@ -322,11 +328,12 @@ impl OidcSessionStore {
 
     /// Start a new OIDC session. Returns `(session_id, authorization_url)`.
     /// Automatically cleans up expired sessions if near capacity.
+    /// Returns an error if the session store is at capacity after cleanup.
     pub async fn start(
         &self,
         provider: &OidcProvider,
         extra_scopes: Option<&str>,
-    ) -> (String, String) {
+    ) -> Result<(String, String), AuthError> {
         // Cleanup if approaching capacity
         {
             let sessions = self.sessions.read().await;
@@ -340,7 +347,7 @@ impl OidcSessionStore {
             let sessions = self.sessions.read().await;
             if sessions.len() >= self.max_sessions {
                 tracing::warn!("OIDC session store at capacity, rejecting new session");
-                return (String::new(), String::new());
+                return Err(AuthError::Internal("OIDC session store at capacity".into()));
             }
         }
         let session_id = Uuid::new_v4().to_string();
@@ -385,7 +392,7 @@ impl OidcSessionStore {
             .await
             .insert(session_id.clone(), session);
 
-        (session_id, auth_url)
+        Ok((session_id, auth_url))
     }
 
     /// Look up a session by its `state` parameter (from the callback).

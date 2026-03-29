@@ -12,6 +12,7 @@ import {
     Color,
 } from "novel";
 import { Node, Extension } from "@tiptap/core";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
@@ -46,8 +47,6 @@ import { common, createLowlight } from "lowlight";
 const FixDragHandleDrop = Extension.create({
     name: "fixDragHandleDrop",
     addProseMirrorPlugins() {
-        const { Plugin, PluginKey } = require("@tiptap/pm/state");
-
         return [
             new Plugin({
                 key: new PluginKey("fixDragHandleDrop"),
@@ -125,7 +124,6 @@ function tableIsEmpty(table: { descendants: (cb: (node: { isText: boolean }) => 
 const TrailingNode = Node.create({
     name: "trailingNode",
     addProseMirrorPlugins() {
-        const { Plugin, PluginKey } = require("@tiptap/pm/state");
         const pluginKey = new PluginKey("trailingNode");
 
         return [

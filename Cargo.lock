@@ -3779,6 +3779,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "hex",
+ "hmac",
  "jsonwebtoken",
  "rand 0.9.2",
  "reqwest 0.12.28",

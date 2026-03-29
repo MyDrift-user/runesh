@@ -141,7 +141,10 @@ impl Default for SessionConfig {
 /// This prevents subdomain cookie injection attacks because an attacker
 /// cannot forge a valid HMAC without the server secret.
 pub fn generate_csrf_token(secret: &str, access_token: &str) -> String {
+    use hmac::{Hmac, Mac};
     use sha2::{Digest, Sha256};
+
+    type HmacSha256 = Hmac<Sha256>;
 
     // Random component
     let mut random_bytes = [0u8; 16];
@@ -153,19 +156,22 @@ pub fn generate_csrf_token(secret: &str, access_token: &str) -> String {
     token_hasher.update(access_token.as_bytes());
     let token_hash = hex::encode(token_hasher.finalize());
 
-    // HMAC = SHA256(secret + random + token_hash)
-    let mut hmac_hasher = Sha256::new();
-    hmac_hasher.update(secret.as_bytes());
-    hmac_hasher.update(random.as_bytes());
-    hmac_hasher.update(token_hash.as_bytes());
-    let hmac = hex::encode(hmac_hasher.finalize());
+    // HMAC-SHA256(secret, random + token_hash)
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .expect("HMAC accepts any key length");
+    mac.update(random.as_bytes());
+    mac.update(token_hash.as_bytes());
+    let hmac_result = hex::encode(mac.finalize().into_bytes());
 
-    format!("{random}.{hmac}")
+    format!("{random}.{hmac_result}")
 }
 
 /// Verify an HMAC-signed CSRF token.
 pub fn verify_csrf_token(csrf_token: &str, secret: &str, access_token: &str) -> bool {
+    use hmac::{Hmac, Mac};
     use sha2::{Digest, Sha256};
+
+    type HmacSha256 = Hmac<Sha256>;
 
     let parts: Vec<&str> = csrf_token.splitn(2, '.').collect();
     if parts.len() != 2 {
@@ -178,11 +184,11 @@ pub fn verify_csrf_token(csrf_token: &str, secret: &str, access_token: &str) -> 
     token_hasher.update(access_token.as_bytes());
     let token_hash = hex::encode(token_hasher.finalize());
 
-    let mut hmac_hasher = Sha256::new();
-    hmac_hasher.update(secret.as_bytes());
-    hmac_hasher.update(random.as_bytes());
-    hmac_hasher.update(token_hash.as_bytes());
-    let expected_hmac = hex::encode(hmac_hasher.finalize());
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .expect("HMAC accepts any key length");
+    mac.update(random.as_bytes());
+    mac.update(token_hash.as_bytes());
+    let expected_hmac = hex::encode(mac.finalize().into_bytes());
 
     // Constant-time comparison
     if expected_hmac.len() != provided_hmac.len() {

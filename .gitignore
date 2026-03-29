@@ -24,4 +24,9 @@ bun.lock
 Thumbs.db
 Desktop.ini
 .playwright-mcp/
-*.png
+# Playwright/test screenshots (not documentation assets)
+test-results/**/*.png
+tests/**/*.png
+e2e/**/*.png
+**/playwright-report/**/*.png
+.playwright-mcp/**/*.png

@@ -20,7 +20,9 @@ RUNESH/
 │           └── styles/                  # globals.css (OKLCH theme, dark mode, editor styles)
 ├── crates/
 │   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait
+│   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
 │   ├── runesh-core/                     # AppError, RateLimiter, WS broadcast, file upload, DB pool
+│   ├── runesh-tauri/                    # Tauri helpers (tray, process mgmt, config, elevation)
 │   └── runesh-tun/                      # Cross-platform TUN device (Windows wintun + Linux)
 ├── templates/                           # Dockerfile + compose.yaml for new projects
 ├── docs/
@@ -44,6 +46,8 @@ RUNESH/
 | WebSocket broadcast | HARUMI + RUMMZ | Per-room pub/sub with tokio broadcast channels |
 | File upload | HARUMI + MoodleNG | Multipart handler + XHR progress tracking |
 | TUN device | HARUMI-NET | Cross-platform virtual network interface |
+| CLI scaffolding | All projects | Project init with templates, compose, env files |
+| Tauri helpers | HARUMI-NET | System tray, process management, config, Windows elevation |
 | Docker template | RUMMZ | Multi-stage: Node + Rust + Caddy |
 | Theme/CSS | RUMMZ | OKLCH color system with dark mode |
 

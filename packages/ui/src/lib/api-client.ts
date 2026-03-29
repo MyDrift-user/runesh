@@ -14,13 +14,14 @@ export function setApiBase(base: string) {
   apiBaseSet = true;
 }
 
-/** Read the CSRF token from the __Host-csrf cookie only (no fallback). */
+/** Read the CSRF token from the __Host-csrf cookie (production) or csrf cookie (dev). */
 function getCsrfToken(): string | null {
   if (typeof document === "undefined") return null;
-  const match = document.cookie
-    .split(";")
-    .map((c) => c.trim())
-    .find((c) => c.startsWith("__Host-csrf="));
+  const cookies = document.cookie.split(";").map((c) => c.trim());
+  // Try production cookie first, then dev-mode cookie
+  const match =
+    cookies.find((c) => c.startsWith("__Host-csrf=")) ??
+    cookies.find((c) => c.startsWith("csrf="));
   return match?.split("=")[1] ?? null;
 }
 
