@@ -268,8 +268,10 @@ pub mod health {
 
         let redis_check = match redis_pool.get().await {
             Ok(mut conn) => {
-                use deadpool_redis::redis::AsyncCommands;
-                match conn.set_ex::<_, _, String>("_health", "1", 10).await {
+                match deadpool_redis::redis::cmd("PING")
+                    .query_async::<String>(&mut *conn)
+                    .await
+                {
                     Ok(_) => "ok".to_string(),
                     Err(e) => format!("error: {e}"),
                 }

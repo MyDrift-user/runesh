@@ -108,8 +108,10 @@ local limit = tonumber(ARGV[3])
 redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
 local count = redis.call('ZCARD', key)
 if count < limit then
-    redis.call('ZADD', key, now, now .. '-' .. math.random(1000000))
+    local seq = redis.call('INCR', key .. ':seq')
+    redis.call('ZADD', key, now, now .. '-' .. seq)
     redis.call('EXPIRE', key, math.ceil(window / 1000))
+    redis.call('EXPIRE', key .. ':seq', math.ceil(window / 1000))
     return 1
 end
 return 0

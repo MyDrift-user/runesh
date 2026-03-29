@@ -315,6 +315,8 @@ pub struct OidcSession {
 /// Sessions auto-expire after 10 minutes. Capped at 10,000 to prevent DoS.
 pub struct OidcSessionStore {
     sessions: RwLock<HashMap<String, OidcSession>>,
+    /// Secondary index: state -> session_id for O(1) lookup by state.
+    state_index: RwLock<HashMap<String, String>>,
     max_sessions: usize,
 }
 
@@ -322,6 +324,7 @@ impl OidcSessionStore {
     pub fn new() -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
+            state_index: RwLock::new(HashMap::new()),
             max_sessions: 10_000,
         }
     }
@@ -381,12 +384,16 @@ impl OidcSessionStore {
 
         let session = OidcSession {
             id: session_id.clone(),
-            state,
+            state: state.clone(),
             code_verifier,
             redirect_uri: None,
             created_at: chrono::Utc::now(),
         };
 
+        self.state_index
+            .write()
+            .await
+            .insert(state, session_id.clone());
         self.sessions
             .write()
             .await
@@ -396,23 +403,41 @@ impl OidcSessionStore {
     }
 
     /// Look up a session by its `state` parameter (from the callback).
+    /// Uses a secondary index for O(1) lookup instead of scanning all sessions.
     pub async fn get_by_state(&self, state: &str) -> Option<OidcSession> {
+        let session_id = {
+            let index = self.state_index.read().await;
+            index.get(state).cloned()?
+        };
         let sessions = self.sessions.read().await;
-        sessions.values().find(|s| s.state == state).cloned()
+        sessions.get(&session_id).cloned()
     }
 
     /// Remove a session after successful callback.
     pub async fn remove(&self, session_id: &str) {
-        self.sessions.write().await.remove(session_id);
+        let mut sessions = self.sessions.write().await;
+        if let Some(session) = sessions.remove(session_id) {
+            drop(sessions);
+            self.state_index.write().await.remove(&session.state);
+        }
     }
 
     /// Remove sessions older than 10 minutes.
     pub async fn cleanup(&self) {
         let cutoff = chrono::Utc::now() - chrono::Duration::minutes(10);
-        self.sessions
-            .write()
-            .await
-            .retain(|_, s| s.created_at > cutoff);
+        let mut sessions = self.sessions.write().await;
+        let expired_states: Vec<String> = sessions
+            .values()
+            .filter(|s| s.created_at <= cutoff)
+            .map(|s| s.state.clone())
+            .collect();
+        sessions.retain(|_, s| s.created_at > cutoff);
+        drop(sessions);
+
+        let mut state_index = self.state_index.write().await;
+        for state in expired_states {
+            state_index.remove(&state);
+        }
     }
 }
 

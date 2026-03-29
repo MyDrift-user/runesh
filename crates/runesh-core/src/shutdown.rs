@@ -52,7 +52,7 @@ impl ShutdownRegistry {
         self.hooks.lock().await.push((name, boxed));
     }
 
-    /// Run all registered hooks sequentially.
+    /// Run all registered hooks sequentially, with a 10-second timeout per hook.
     async fn run_hooks(self) {
         let hooks = self.hooks.lock().await.drain(..).collect::<Vec<_>>();
         let count = hooks.len();
@@ -61,8 +61,14 @@ impl ShutdownRegistry {
         }
         for (name, hook) in hooks {
             tracing::info!(hook = %name, "running shutdown hook");
-            (hook)().await;
-            tracing::info!(hook = %name, "shutdown hook completed");
+            match tokio::time::timeout(Duration::from_secs(10), (hook)()).await {
+                Ok(()) => {
+                    tracing::info!(hook = %name, "shutdown hook completed");
+                }
+                Err(_) => {
+                    tracing::warn!(hook = %name, "shutdown hook timed out after 10s, skipping");
+                }
+            }
         }
     }
 }

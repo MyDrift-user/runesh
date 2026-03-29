@@ -176,16 +176,76 @@ mod redis_broadcast {
                         "Redis subscription task failed"
                     );
                 }
-                // Clean up the channel entry when the subscriber exits
-                channels_ref.write().await.remove(&room_owned);
+                // Clean up the channel entry when the subscriber exits,
+                // but re-check receiver_count under write lock to avoid
+                // racing with a new subscriber that joined between the
+                // check in subscribe_loop and this removal.
+                let mut channels = channels_ref.write().await;
+                if let Some(tx) = channels.get(&room_owned) {
+                    if tx.receiver_count() == 0 {
+                        channels.remove(&room_owned);
+                    }
+                }
             });
 
             tx
         }
 
-        /// Long-running Redis SUBSCRIBE loop. Uses a dedicated connection (not pooled)
-        /// because SUBSCRIBE blocks the connection.
+        /// Long-running Redis SUBSCRIBE loop with exponential backoff reconnection.
+        /// Uses a dedicated connection (not pooled) because SUBSCRIBE blocks the connection.
+        /// Only exits when there are no local receivers remaining.
         async fn subscribe_loop(
+            redis_url: &str,
+            channel: &str,
+            tx: &broadcast::Sender<String>,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let mut backoff = std::time::Duration::from_secs(1);
+            let max_backoff = std::time::Duration::from_secs(30);
+
+            loop {
+                // If no one is listening, exit immediately
+                if tx.receiver_count() == 0 {
+                    tracing::debug!(
+                        channel = %channel,
+                        "No local receivers, stopping Redis subscription"
+                    );
+                    return Ok(());
+                }
+
+                let result = Self::subscribe_inner(redis_url, channel, tx).await;
+
+                match result {
+                    Ok(()) => {
+                        // Normal exit (no receivers left)
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        // If no one is listening anymore, don't bother reconnecting
+                        if tx.receiver_count() == 0 {
+                            tracing::debug!(
+                                channel = %channel,
+                                "No local receivers after error, stopping Redis subscription"
+                            );
+                            return Ok(());
+                        }
+
+                        tracing::warn!(
+                            channel = %channel,
+                            error = %e,
+                            backoff_secs = backoff.as_secs(),
+                            "Redis subscription error, reconnecting after backoff"
+                        );
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(max_backoff);
+                    }
+                }
+            }
+        }
+
+        /// Inner subscribe loop for a single Redis connection attempt.
+        /// Returns `Ok(())` when receivers drop to zero (clean exit).
+        /// Returns `Err` on any Redis error (caller should retry).
+        async fn subscribe_inner(
             redis_url: &str,
             channel: &str,
             tx: &broadcast::Sender<String>,
@@ -218,17 +278,15 @@ mod redis_broadcast {
                                 channel = %channel,
                                 "No local receivers, stopping Redis subscription"
                             );
-                            break;
+                            return Ok(());
                         }
                     }
                     None => {
-                        tracing::warn!(channel = %channel, "Redis subscription stream ended");
-                        break;
+                        // Stream ended — connection lost, signal caller to retry
+                        return Err("Redis subscription stream ended".into());
                     }
                 }
             }
-
-            Ok(())
         }
 
         /// Subscribe to a room. Returns a local broadcast receiver.
@@ -361,6 +419,7 @@ pub async fn ws_broadcast_loop_with_limits(
     let mut msg_count: u32 = 0;
     let mut rate_window_start = Instant::now();
     let idle_timeout = tokio::time::Duration::from_secs(limits.idle_timeout_secs);
+    let mut idle_deadline = tokio::time::Instant::now() + idle_timeout;
 
     loop {
         tokio::select! {
@@ -380,6 +439,9 @@ pub async fn ws_broadcast_loop_with_limits(
             msg = ws_rx.next() => {
                 match msg {
                     Some(Ok(axum::extract::ws::Message::Text(text))) => {
+                        // Reset idle deadline on client activity
+                        idle_deadline = tokio::time::Instant::now() + idle_timeout;
+
                         // Message size limit
                         if text.len() > limits.max_message_size {
                             tracing::warn!(room = %room, size = text.len(), "WebSocket message too large, dropping");
@@ -404,7 +466,7 @@ pub async fn ws_broadcast_loop_with_limits(
                     _ => {}
                 }
             }
-            _ = tokio::time::sleep(idle_timeout) => {
+            _ = tokio::time::sleep_until(idle_deadline) => {
                 tracing::debug!(room = %room, "WebSocket idle timeout, closing");
                 break;
             }

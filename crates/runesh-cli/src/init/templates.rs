@@ -1058,11 +1058,12 @@ RUN cargo build --release --bin {name}-server
 # ── Stage 3: Runtime ───────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl libssl3 nodejs npm tini && rm -rf /var/lib/apt/lists/*
-
-# Install Caddy reverse proxy
-RUN curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" \
-    -o /usr/local/bin/caddy && chmod +x /usr/local/bin/caddy
+    ca-certificates curl libssl3 nodejs tini \
+    debian-keyring debian-archive-keyring apt-transport-https \
+    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list \
+    && apt-get update && apt-get install -y caddy \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -1079,10 +1080,13 @@ COPY migrations/ ./migrations/
 RUN mkdir -p /app/uploads && chown -R 1000:1000 /app/uploads
 
 # Caddy config: proxy /api and /ws to backend, everything else to Next.js
-RUN printf ':8080 {{\n  request_body {{\n    max_size 10GB\n  }}\n  handle /api/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /swagger-ui/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /ws {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle {{\n    reverse_proxy 127.0.0.1:3000\n  }}\n}}\n' > /etc/Caddyfile
+RUN printf ':8080 {{\n  request_body {{\n    max_size 10GB\n  }}\n  handle /api/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /swagger-ui/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /ws {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle {{\n    reverse_proxy 127.0.0.1:3000\n  }}\n}}\n' > /etc/Caddyfile && chmod 644 /etc/Caddyfile
 
 # Start script
-RUN printf '#!/bin/sh\nset -e\ncaddy start --config /etc/Caddyfile &\ncd /app/web && HOSTNAME=0.0.0.0 PORT=3000 node server.js &\ncd /app && ./backend &\nwait\n' > /app/start.sh && chmod +x /app/start.sh
+RUN printf '#!/bin/sh\nset -e\ncd /app/web && HOSTNAME=0.0.0.0 PORT=3000 node server.js &\ncd /app && ./backend &\nexec caddy run --config /etc/Caddyfile\n' > /app/start.sh && chmod +x /app/start.sh
+
+# XDG config dirs for caddy (needs to write adapted config)
+RUN mkdir -p /app/.config/caddy /app/.local/share/caddy
 
 # Non-root user for security
 RUN useradd -r -s /bin/false appuser && chown -R appuser:appuser /app
@@ -1117,6 +1121,17 @@ pub fn compose_yaml(c: &ProjectConfig) -> String {
     networks:
       - internal
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
   app:
     build:
       context: .
@@ -1127,6 +1142,7 @@ pub fn compose_yaml(c: &ProjectConfig) -> String {
       - "${{APP_PORT:-8080}}:8080"
     environment:
       DATABASE_URL: postgres://{db}:${{POSTGRES_PASSWORD:-changeme}}@db:5432/{db}
+      REDIS_URL: redis://redis:6379
       JWT_SECRET: ${{JWT_SECRET}}
       PORT: "{port}"
       SWAGGER_ENABLED: ${{SWAGGER_ENABLED:-false}}
@@ -1138,6 +1154,8 @@ pub fn compose_yaml(c: &ProjectConfig) -> String {
       # OIDC_REDIRECT_URI: ${{OIDC_REDIRECT_URI:-http://localhost:8080/api/auth/callback}}
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/livez"]

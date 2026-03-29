@@ -34,10 +34,11 @@ FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl libssl3 nodejs tini \
+    debian-keyring debian-archive-keyring apt-transport-https \
+    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list \
+    && apt-get update && apt-get install -y caddy \
     && rm -rf /var/lib/apt/lists/*
-
-RUN curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o /usr/local/bin/caddy \
-    && chmod +x /usr/local/bin/caddy
 
 WORKDIR /app
 
@@ -50,9 +51,12 @@ COPY migrations/ ./migrations/
 # Create upload directory with proper permissions before switching user
 RUN mkdir -p /app/uploads && chown -R 1000:1000 /app/uploads
 
-RUN printf ':8080 {\n  request_body {\n    max_size 10GB\n  }\n  handle /api/* {\n    reverse_proxy 127.0.0.1:3001\n  }\n  handle /swagger-ui/* {\n    reverse_proxy 127.0.0.1:3001\n  }\n  handle /ws {\n    reverse_proxy 127.0.0.1:3001\n  }\n  handle {\n    reverse_proxy 127.0.0.1:3000\n  }\n}\n' > /etc/Caddyfile
+RUN printf ':8080 {\n  request_body {\n    max_size 10GB\n  }\n  handle /api/* {\n    reverse_proxy 127.0.0.1:3001\n  }\n  handle /swagger-ui/* {\n    reverse_proxy 127.0.0.1:3001\n  }\n  handle /ws {\n    reverse_proxy 127.0.0.1:3001\n  }\n  handle {\n    reverse_proxy 127.0.0.1:3000\n  }\n}\n' > /etc/Caddyfile && chmod 644 /etc/Caddyfile
 
-RUN printf '#!/bin/sh\nset -e\ncaddy start --config /etc/Caddyfile &\ncd /app/web && HOSTNAME=0.0.0.0 PORT=3000 node server.js &\ncd /app && ./backend &\nwait\n' > /app/start.sh && chmod +x /app/start.sh
+RUN printf '#!/bin/sh\nset -e\ncd /app/web && HOSTNAME=0.0.0.0 PORT=3000 node server.js &\ncd /app && ./backend &\nexec caddy run --config /etc/Caddyfile\n' > /app/start.sh && chmod +x /app/start.sh
+
+# XDG config dirs for caddy (needs to write adapted config)
+RUN mkdir -p /app/.config/caddy /app/.local/share/caddy
 
 # Non-root user for security
 RUN useradd -r -s /bin/false appuser && chown -R appuser:appuser /app
