@@ -30,7 +30,7 @@ async-trait = "0.1"
 
 # Optional: Axum middleware support
 axum = { version = "0.8", optional = true }
-axum-extra = { version = "0.10", features = ["cookie"], optional = true }
+axum-extra = { version = "0.12", features = ["cookie"], optional = true }
 tower = { version = "0.5", optional = true }
 
 # Optional: Redis session store

@@ -13,4 +13,4 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 bytes = "1"
 thiserror = "2"
-deadpool-redis = "0.18"
+deadpool-redis = "0.23"

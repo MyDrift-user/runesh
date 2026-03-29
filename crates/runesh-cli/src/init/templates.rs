@@ -371,10 +371,10 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.577.0",
-    "next": "16.1.6",
+    "next": "16.2.1",
     "next-themes": "^0.4.6",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
     "shadcn": "^4.0.5",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
@@ -386,7 +386,7 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.1.6",
+    "eslint-config-next": "16.2.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }}
@@ -1105,7 +1105,7 @@ CMD ["/app/start.sh"]
 pub fn compose_yaml(c: &ProjectConfig) -> String {
     format!(r#"services:
   db:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: {db}
@@ -1122,7 +1122,7 @@ pub fn compose_yaml(c: &ProjectConfig) -> String {
       - internal
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -1486,10 +1486,10 @@ pub fn desktop_package_json(c: &ProjectConfig) -> String {
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.577.0",
-    "next": "16.1.6",
+    "next": "16.2.1",
     "next-themes": "^0.4.6",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
     "shadcn": "^4.0.5",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
@@ -1648,8 +1648,8 @@ pub fn extension_package_json(c: &ProjectConfig) -> String {
   }},
   "dependencies": {{
     {ui_dep},
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
     "clsx": "^2.1.1",
     "class-variance-authority": "^0.7.1",
     "tailwind-merge": "^3.5.0",

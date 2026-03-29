@@ -9,7 +9,7 @@ default = ["axum", "sqlx"]
 axum = ["dep:axum", "dep:tower", "dep:tower-http", "dep:futures-util"]
 sqlx = ["dep:sqlx"]
 redis = ["dep:deadpool-redis", "dep:futures-util"]
-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus", "dep:once_cell", "axum"]
+metrics = ["dep:metrics", "dep:metrics-exporter-prometheus", "axum"]
 openapi = ["dep:utoipa", "dep:utoipa-axum", "dep:utoipa-swagger-ui", "axum"]
 
 [dependencies]
@@ -39,8 +39,6 @@ deadpool-redis = { workspace = true, optional = true }
 
 # Optional: Prometheus metrics
 metrics = { version = "0.24", optional = true }
-metrics-exporter-prometheus = { version = "0.16", optional = true }
-once_cell = { version = "1", optional = true }
-
+metrics-exporter-prometheus = { version = "0.18", optional = true }
 # Optional: SQLx integration
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono"], optional = true }

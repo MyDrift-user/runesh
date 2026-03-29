@@ -21,9 +21,9 @@
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
 
-static PROM_HANDLE: OnceCell<PrometheusHandle> = OnceCell::new();
+static PROM_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
 
 /// Install the Prometheus metrics recorder.
 ///
