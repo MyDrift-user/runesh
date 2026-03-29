@@ -11,6 +11,8 @@ pub mod handlers;
 
 pub use error::AuthError;
 pub use oidc::{OidcProvider, OidcSession, OidcSessionStore, OidcUserInfo};
+#[cfg(feature = "redis")]
+pub use oidc::RedisOidcSessionStore;
 pub use token::{Claims, TokenConfig};
 pub use store::AuthStore;
 pub use session::SessionConfig;

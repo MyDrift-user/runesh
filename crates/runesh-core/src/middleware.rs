@@ -51,6 +51,10 @@ pub mod logging {
     use std::time::Instant;
 
     /// Middleware that logs each request with method, path, status, and latency.
+    ///
+    /// When the `metrics` feature is enabled, also records:
+    /// - `http_requests_total` counter (labels: method, path, status)
+    /// - `http_request_duration_seconds` histogram (labels: method, path)
     pub async fn logging_middleware(req: Request<Body>, next: Next) -> Response {
         let method = req.method().to_string();
         let path = req.uri().path().to_string();
@@ -58,8 +62,27 @@ pub mod logging {
 
         let response = next.run(req).await;
 
-        let latency = start.elapsed().as_millis();
+        let duration = start.elapsed();
+        let latency = duration.as_millis();
         let status = response.status().as_u16();
+
+        // Record Prometheus metrics when the feature is enabled
+        #[cfg(feature = "metrics")]
+        {
+            let labels = [
+                ("method", method.clone()),
+                ("path", path.clone()),
+                ("status", status.to_string()),
+            ];
+            metrics::counter!("http_requests_total", &labels).increment(1);
+
+            let hist_labels = [
+                ("method", method.clone()),
+                ("path", path.clone()),
+            ];
+            metrics::histogram!("http_request_duration_seconds", &hist_labels)
+                .record(duration.as_secs_f64());
+        }
 
         if status >= 500 {
             tracing::error!(method = %method, path = %path, status, latency_ms = latency, "request");
@@ -174,10 +197,27 @@ pub mod security_headers {
 
 #[cfg(feature = "axum")]
 pub mod health {
-    use axum::{extract::State, Json};
+    use axum::{extract::State, http::StatusCode, Json};
     use serde_json::{json, Value};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    /// Build version, set at compile time via CARGO_PKG_VERSION.
+    const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+    /// Shared flag indicating the application has finished startup.
+    /// Clone an `Arc<AtomicBool>` and set it to `true` once initialization is complete.
+    pub type StartupFlag = Arc<AtomicBool>;
+
+    /// Create a new startup flag (initially `false`).
+    pub fn new_startup_flag() -> StartupFlag {
+        Arc::new(AtomicBool::new(false))
+    }
 
     /// Health check handler. Mount at `/health` or `/healthz`.
+    ///
+    /// Returns 200 when all checks pass, 503 when any check fails.
+    /// Response includes version and per-check status.
     ///
     /// ```ignore
     /// let app = Router::new()
@@ -187,20 +227,132 @@ pub mod health {
     #[cfg(feature = "sqlx")]
     pub async fn health_handler(
         State(pool): State<sqlx::PgPool>,
-    ) -> Json<Value> {
-        let db_ok = sqlx::query("SELECT 1")
-            .execute(&pool)
-            .await
-            .is_ok();
+    ) -> (StatusCode, Json<Value>) {
+        let db_check = match sqlx::query("SELECT 1").execute(&pool).await {
+            Ok(_) => "ok".to_string(),
+            Err(e) => format!("error: {e}"),
+        };
 
-        Json(json!({
-            "status": if db_ok { "ok" } else { "degraded" },
-            "db": if db_ok { "ok" } else { "error" },
-        }))
+        let db_ok = db_check == "ok";
+        let status = if db_ok { "ok" } else { "degraded" };
+        let code = if db_ok {
+            StatusCode::OK
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        };
+
+        (
+            code,
+            Json(json!({
+                "status": status,
+                "version": VERSION,
+                "checks": {
+                    "database": db_check,
+                    "redis": "not configured",
+                },
+            })),
+        )
     }
 
-    /// Simple liveness check (no DB dependency).
+    /// Health check handler with both database and Redis.
+    ///
+    /// Returns 200 when all checks pass, 503 when any check fails.
+    #[cfg(all(feature = "sqlx", feature = "redis"))]
+    pub async fn health_handler_with_redis(
+        State((pool, redis_pool)): State<(sqlx::PgPool, deadpool_redis::Pool)>,
+    ) -> (StatusCode, Json<Value>) {
+        let db_check = match sqlx::query("SELECT 1").execute(&pool).await {
+            Ok(_) => "ok".to_string(),
+            Err(e) => format!("error: {e}"),
+        };
+
+        let redis_check = match redis_pool.get().await {
+            Ok(mut conn) => {
+                use deadpool_redis::redis::AsyncCommands;
+                match conn.set_ex::<_, _, String>("_health", "1", 10).await {
+                    Ok(_) => "ok".to_string(),
+                    Err(e) => format!("error: {e}"),
+                }
+            }
+            Err(e) => format!("error: {e}"),
+        };
+
+        let all_ok = db_check == "ok" && redis_check == "ok";
+        let status = if all_ok { "ok" } else { "degraded" };
+        let code = if all_ok {
+            StatusCode::OK
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        };
+
+        (
+            code,
+            Json(json!({
+                "status": status,
+                "version": VERSION,
+                "checks": {
+                    "database": db_check,
+                    "redis": redis_check,
+                },
+            })),
+        )
+    }
+
+    /// Readiness handler. Returns 200 only if ALL dependency checks pass.
+    ///
+    /// Mount at `/ready` or `/readyz`. Kubernetes uses this to decide whether
+    /// to send traffic to the pod.
+    #[cfg(feature = "sqlx")]
+    pub async fn readiness_handler(
+        State(pool): State<sqlx::PgPool>,
+    ) -> (StatusCode, Json<Value>) {
+        let db_check = match sqlx::query("SELECT 1").execute(&pool).await {
+            Ok(_) => "ok".to_string(),
+            Err(e) => format!("error: {e}"),
+        };
+
+        let all_ok = db_check == "ok";
+        let code = if all_ok {
+            StatusCode::OK
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        };
+
+        (
+            code,
+            Json(json!({
+                "status": if all_ok { "ready" } else { "not ready" },
+                "version": VERSION,
+                "checks": {
+                    "database": db_check,
+                },
+            })),
+        )
+    }
+
+    /// Simple liveness check (no DB dependency). Mount at `/livez`.
+    ///
+    /// Always returns 200. Kubernetes uses this to decide whether to restart
+    /// the container — only fails if the process itself is unhealthy.
     pub async fn liveness_handler() -> Json<Value> {
         Json(json!({ "status": "ok" }))
+    }
+
+    /// Startup probe handler. Mount at `/startupz`.
+    ///
+    /// Returns 200 once the application has finished initialization.
+    /// Returns 503 while still starting up. Kubernetes uses this to avoid
+    /// killing slow-starting containers.
+    pub async fn startup_handler(
+        State(flag): State<StartupFlag>,
+    ) -> (StatusCode, Json<Value>) {
+        if flag.load(Ordering::Relaxed) {
+            (StatusCode::OK, Json(json!({ "status": "started", "version": VERSION })))
+        } else {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "status": "starting", "version": VERSION })),
+            )
+        }
     }
 }

@@ -1,19 +1,19 @@
-//! In-memory sliding window rate limiter.
+//! Sliding window rate limiter with in-memory and Redis backends.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Sliding window rate limiter per key (typically IP address).
+/// In-memory sliding window rate limiter per key (typically IP address).
 #[derive(Clone)]
-pub struct RateLimiter {
+pub struct InMemoryRateLimiter {
     requests: Arc<Mutex<HashMap<String, Vec<Instant>>>>,
     max_requests: usize,
     window: Duration,
 }
 
-impl RateLimiter {
-    /// Create a new rate limiter.
+impl InMemoryRateLimiter {
+    /// Create a new in-memory rate limiter.
     ///
     /// - `max_requests`: maximum requests allowed per key within the window.
     /// - `window_secs`: window duration in seconds.
@@ -60,6 +60,120 @@ impl RateLimiter {
     }
 }
 
+/// Redis-backed distributed sliding window rate limiter.
+///
+/// Uses a Lua script with sorted sets for atomic sliding window counting.
+/// Suitable for multi-pod deployments where all instances share the same
+/// rate limit state via Redis.
+#[cfg(feature = "redis")]
+#[derive(Clone)]
+pub struct RedisRateLimiter {
+    pool: deadpool_redis::Pool,
+    max_requests: usize,
+    window_ms: u64,
+    key_prefix: String,
+}
+
+#[cfg(feature = "redis")]
+impl RedisRateLimiter {
+    /// Create a new Redis-backed rate limiter.
+    ///
+    /// - `pool`: a deadpool-redis connection pool.
+    /// - `max_requests`: maximum requests allowed per key within the window.
+    /// - `window_secs`: window duration in seconds.
+    /// - `key_prefix`: Redis key prefix (e.g. `"rl:"`) to namespace rate limit keys.
+    pub fn new(pool: deadpool_redis::Pool, max_requests: usize, window_secs: u64, key_prefix: &str) -> Self {
+        Self {
+            pool,
+            max_requests,
+            window_ms: window_secs * 1000,
+            key_prefix: key_prefix.to_string(),
+        }
+    }
+
+    /// Check whether the given key is within the rate limit.
+    /// Returns `true` if allowed, `false` if rate limited.
+    ///
+    /// Uses a Lua script for atomic sliding window with sorted sets:
+    /// 1. ZREMRANGEBYSCORE to prune entries outside the window
+    /// 2. ZCARD to count current entries
+    /// 3. ZADD + EXPIRE if under limit
+    pub async fn check(&self, key: &str) -> bool {
+        let lua_script = r#"
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local window = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+
+redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
+local count = redis.call('ZCARD', key)
+if count < limit then
+    redis.call('ZADD', key, now, now .. '-' .. math.random(1000000))
+    redis.call('EXPIRE', key, math.ceil(window / 1000))
+    return 1
+end
+return 0
+"#;
+
+        let redis_key = format!("{}{}", self.key_prefix, key);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let mut conn = match self.pool.get().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to get Redis connection for rate limiting, allowing request");
+                return true; // Fail open: allow request if Redis is down
+            }
+        };
+
+        let result: Result<i64, _> = deadpool_redis::redis::cmd("EVAL")
+            .arg(lua_script)
+            .arg(1) // number of keys
+            .arg(&redis_key)
+            .arg(now_ms)
+            .arg(self.window_ms)
+            .arg(self.max_requests as u64)
+            .query_async(&mut *conn)
+            .await;
+
+        match result {
+            Ok(1) => true,
+            Ok(_) => false,
+            Err(e) => {
+                tracing::error!(error = %e, "Redis rate limit script failed, allowing request");
+                true // Fail open
+            }
+        }
+    }
+}
+
+/// Unified rate limiter backend supporting both in-memory and Redis.
+#[derive(Clone)]
+pub enum RateLimiterBackend {
+    /// Single-instance in-memory rate limiter.
+    InMemory(InMemoryRateLimiter),
+    /// Distributed Redis-backed rate limiter.
+    #[cfg(feature = "redis")]
+    Redis(RedisRateLimiter),
+}
+
+impl RateLimiterBackend {
+    /// Check whether the given key is within the rate limit.
+    pub async fn check(&self, key: &str) -> bool {
+        match self {
+            Self::InMemory(limiter) => limiter.check(key),
+            #[cfg(feature = "redis")]
+            Self::Redis(limiter) => limiter.check(key).await,
+        }
+    }
+}
+
+/// Backwards-compatible type alias.
+pub type RateLimiter = InMemoryRateLimiter;
+
 /// Extract the client IP from request headers.
 ///
 /// SECURITY: Only trusts proxy headers (X-Forwarded-For, X-Real-IP) when
@@ -97,31 +211,31 @@ pub fn extract_client_ip(req: &axum::extract::Request, trust_proxy: bool) -> Str
     "unknown".to_string()
 }
 
-/// Axum rate limiting middleware factory.
+/// Axum rate limiting middleware factory using the unified backend.
 ///
 /// Usage:
 /// ```ignore
 /// use axum::middleware;
-/// use runesh_core::rate_limit::{rate_limit_layer, RateLimiter};
+/// use runesh_core::rate_limit::{rate_limit_layer, RateLimiterBackend, InMemoryRateLimiter};
 ///
-/// let limiter = RateLimiter::new(100, 60); // 100 req/min
+/// let backend = RateLimiterBackend::InMemory(InMemoryRateLimiter::new(100, 60));
 /// let app = Router::new()
 ///     .route("/api/v1/things", get(handler))
 ///     .layer(middleware::from_fn(move |req, next| {
-///         let limiter = limiter.clone();
-///         rate_limit_layer(limiter, req, next)
+///         let backend = backend.clone();
+///         rate_limit_layer(backend, true, req, next)
 ///     }));
 /// ```
 #[cfg(feature = "axum")]
 pub async fn rate_limit_layer(
-    limiter: RateLimiter,
+    limiter: RateLimiterBackend,
     trust_proxy: bool,
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Result<axum::response::Response, axum::http::StatusCode> {
     let ip = extract_client_ip(&request, trust_proxy);
 
-    if !limiter.check(&ip) {
+    if !limiter.check(&ip).await {
         tracing::warn!(ip = %ip, "Rate limit exceeded");
         return Err(axum::http::StatusCode::TOO_MANY_REQUESTS);
     }

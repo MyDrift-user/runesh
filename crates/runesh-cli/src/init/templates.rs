@@ -1058,7 +1058,7 @@ RUN cargo build --release --bin {name}-server
 # ── Stage 3: Runtime ───────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl libssl3 nodejs npm && rm -rf /var/lib/apt/lists/*
+    ca-certificates curl libssl3 nodejs npm tini && rm -rf /var/lib/apt/lists/*
 
 # Install Caddy reverse proxy
 RUN curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" \
@@ -1075,13 +1075,25 @@ RUN mkdir -p ./web/public
 COPY --from=rust-builder /build/target/release/{name}-server ./backend
 COPY migrations/ ./migrations/
 
+# Create upload directory with proper permissions before switching user
+RUN mkdir -p /app/uploads && chown -R 1000:1000 /app/uploads
+
 # Caddy config: proxy /api and /ws to backend, everything else to Next.js
 RUN printf ':8080 {{\n  request_body {{\n    max_size 10GB\n  }}\n  handle /api/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /swagger-ui/* {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle /ws {{\n    reverse_proxy 127.0.0.1:{port}\n  }}\n  handle {{\n    reverse_proxy 127.0.0.1:3000\n  }}\n}}\n' > /etc/Caddyfile
 
 # Start script
 RUN printf '#!/bin/sh\nset -e\ncaddy start --config /etc/Caddyfile &\ncd /app/web && HOSTNAME=0.0.0.0 PORT=3000 node server.js &\ncd /app && ./backend &\nwait\n' > /app/start.sh && chmod +x /app/start.sh
 
+# Non-root user for security
+RUN useradd -r -s /bin/false appuser && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8080/api/livez || exit 1
+
+ENTRYPOINT ["tini", "--"]
 CMD ["/app/start.sh"]
 "#, name = c.name, port = c.port)
 }
@@ -1127,6 +1139,17 @@ pub fn compose_yaml(c: &ProjectConfig) -> String {
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/livez"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
     networks:
       - internal
 

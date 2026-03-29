@@ -7,6 +7,7 @@ description = "Shared OIDC authentication with extensible provider hooks"
 [features]
 default = ["axum"]
 axum = ["dep:axum", "dep:axum-extra", "dep:tower"]
+redis = ["dep:runesh-core", "dep:deadpool-redis"]
 
 [dependencies]
 tokio = { workspace = true }
@@ -31,3 +32,7 @@ async-trait = "0.1"
 axum = { version = "0.8", optional = true }
 axum-extra = { version = "0.10", features = ["cookie"], optional = true }
 tower = { version = "0.5", optional = true }
+
+# Optional: Redis session store
+runesh-core = { path = "../runesh-core", default-features = false, features = ["redis"], optional = true }
+deadpool-redis = { workspace = true, optional = true }

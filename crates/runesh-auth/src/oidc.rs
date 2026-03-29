@@ -421,3 +421,223 @@ impl Default for OidcSessionStore {
         Self::new()
     }
 }
+
+// ── Redis-backed OIDC session store ────────────────────────────────────────
+
+#[cfg(feature = "redis")]
+mod redis_session {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    /// Serializable version of OidcSession for Redis storage.
+    #[derive(Debug, Serialize, Deserialize)]
+    struct StoredSession {
+        id: String,
+        state: String,
+        code_verifier: String,
+        redirect_uri: Option<String>,
+        created_at: chrono::DateTime<chrono::Utc>,
+    }
+
+    impl From<&OidcSession> for StoredSession {
+        fn from(s: &OidcSession) -> Self {
+            Self {
+                id: s.id.clone(),
+                state: s.state.clone(),
+                code_verifier: s.code_verifier.clone(),
+                redirect_uri: s.redirect_uri.clone(),
+                created_at: s.created_at,
+            }
+        }
+    }
+
+    impl From<StoredSession> for OidcSession {
+        fn from(s: StoredSession) -> Self {
+            Self {
+                id: s.id,
+                state: s.state,
+                code_verifier: s.code_verifier,
+                redirect_uri: s.redirect_uri,
+                created_at: s.created_at,
+            }
+        }
+    }
+
+    /// Redis-backed OIDC session store for horizontal scaling.
+    ///
+    /// Sessions are stored in Redis with a 600-second TTL, so no manual cleanup
+    /// is needed. The `state` parameter is stored as a secondary index key
+    /// (`oidc:state:{state}` -> session_id) to support lookup by state.
+    ///
+    /// ```ignore
+    /// let pool = runesh_core::redis::create_redis_pool(None).unwrap();
+    /// let store = RedisOidcSessionStore::new(pool);
+    /// ```
+    #[derive(Clone)]
+    pub struct RedisOidcSessionStore {
+        pool: deadpool_redis::Pool,
+        /// TTL for sessions in seconds (default: 600 = 10 minutes).
+        ttl_secs: u64,
+    }
+
+    impl RedisOidcSessionStore {
+        pub fn new(pool: deadpool_redis::Pool) -> Self {
+            Self {
+                pool,
+                ttl_secs: 600,
+            }
+        }
+
+        pub fn with_ttl(pool: deadpool_redis::Pool, ttl_secs: u64) -> Self {
+            Self { pool, ttl_secs }
+        }
+
+        fn session_key(id: &str) -> String {
+            format!("oidc:session:{id}")
+        }
+
+        fn state_key(state: &str) -> String {
+            format!("oidc:state:{state}")
+        }
+
+        /// Start a new OIDC session. Returns `(session_id, authorization_url)`.
+        ///
+        /// Stores the session in Redis with TTL. No capacity check needed —
+        /// Redis TTL handles expiry automatically.
+        pub async fn start(
+            &self,
+            provider: &OidcProvider,
+            extra_scopes: Option<&str>,
+        ) -> Result<(String, String), AuthError> {
+            let session_id = Uuid::new_v4().to_string();
+            let state = Uuid::new_v4().to_string();
+
+            // PKCE
+            let mut verifier_bytes = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::rng(), &mut verifier_bytes);
+            let code_verifier =
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
+
+            let mut hasher = Sha256::new();
+            hasher.update(code_verifier.as_bytes());
+            let code_challenge =
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hasher.finalize());
+
+            let scopes = match extra_scopes {
+                Some(extra) => format!("{} {}", provider.scopes, extra),
+                None => provider.scopes.clone(),
+            };
+
+            let auth_url = format!(
+                "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
+                provider.authorization_endpoint,
+                urlencoding::encode(&provider.client_id),
+                urlencoding::encode(&provider.redirect_uri),
+                urlencoding::encode(&scopes),
+                urlencoding::encode(&state),
+                urlencoding::encode(&code_challenge),
+            );
+
+            let session = OidcSession {
+                id: session_id.clone(),
+                state: state.clone(),
+                code_verifier,
+                redirect_uri: None,
+                created_at: chrono::Utc::now(),
+            };
+
+            let stored: StoredSession = (&session).into();
+            let json = serde_json::to_string(&stored)
+                .map_err(|e| AuthError::Internal(format!("Failed to serialize session: {e}")))?;
+
+            let mut conn = self.pool.get().await.map_err(|e| {
+                AuthError::Internal(format!("Failed to get Redis connection: {e}"))
+            })?;
+
+            // Store session by ID with TTL
+            deadpool_redis::redis::cmd("SET")
+                .arg(Self::session_key(&session_id))
+                .arg(&json)
+                .arg("EX")
+                .arg(self.ttl_secs)
+                .query_async::<()>(&mut *conn)
+                .await
+                .map_err(|e| AuthError::Internal(format!("Redis SET failed: {e}")))?;
+
+            // Store state -> session_id index with same TTL
+            deadpool_redis::redis::cmd("SET")
+                .arg(Self::state_key(&state))
+                .arg(&session_id)
+                .arg("EX")
+                .arg(self.ttl_secs)
+                .query_async::<()>(&mut *conn)
+                .await
+                .map_err(|e| AuthError::Internal(format!("Redis SET (state index) failed: {e}")))?;
+
+            Ok((session_id, auth_url))
+        }
+
+        /// Look up a session by its `state` parameter (from the callback).
+        pub async fn get_by_state(&self, state: &str) -> Option<OidcSession> {
+            let mut conn = self.pool.get().await.ok()?;
+
+            // Look up session_id from state index
+            let session_id: Option<String> = deadpool_redis::redis::cmd("GET")
+                .arg(Self::state_key(state))
+                .query_async(&mut *conn)
+                .await
+                .ok()?;
+
+            let session_id = session_id?;
+
+            // Fetch the session data
+            let json: Option<String> = deadpool_redis::redis::cmd("GET")
+                .arg(Self::session_key(&session_id))
+                .query_async(&mut *conn)
+                .await
+                .ok()?;
+
+            let json = json?;
+            let stored: StoredSession = serde_json::from_str(&json).ok()?;
+            Some(stored.into())
+        }
+
+        /// Remove a session after successful callback (get + delete).
+        pub async fn remove(&self, session_id: &str) {
+            let Ok(mut conn) = self.pool.get().await else {
+                return;
+            };
+
+            // Fetch session first to get the state for index cleanup
+            let json: Option<String> = deadpool_redis::redis::cmd("GET")
+                .arg(Self::session_key(session_id))
+                .query_async(&mut *conn)
+                .await
+                .unwrap_or(None);
+
+            if let Some(json) = json {
+                if let Ok(stored) = serde_json::from_str::<StoredSession>(&json) {
+                    // Delete state index
+                    let _: Result<(), _> = deadpool_redis::redis::cmd("DEL")
+                        .arg(Self::state_key(&stored.state))
+                        .query_async(&mut *conn)
+                        .await;
+                }
+            }
+
+            // Delete session
+            let _: Result<(), _> = deadpool_redis::redis::cmd("DEL")
+                .arg(Self::session_key(session_id))
+                .query_async(&mut *conn)
+                .await;
+        }
+
+        /// No-op — Redis TTL handles expiry automatically.
+        pub async fn cleanup(&self) {
+            // Redis TTL handles expiry; nothing to do.
+        }
+    }
+}
+
+#[cfg(feature = "redis")]
+pub use redis_session::RedisOidcSessionStore;
