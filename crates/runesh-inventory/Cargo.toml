@@ -1,0 +1,30 @@
+[package]
+name = "runesh-inventory"
+version.workspace = true
+edition.workspace = true
+description = "Cross-platform hardware and software inventory collection for enterprise remote management"
+
+[features]
+default = ["axum"]
+axum = ["dep:axum"]
+delta = []
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+sysinfo = "0.35"
+uuid = { version = "1", features = ["v4"] }
+
+# Optional: Axum REST handlers
+axum = { version = "0.8", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+wmi = "0.14"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
