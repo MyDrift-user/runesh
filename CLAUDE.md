@@ -64,7 +64,7 @@ RUNESH/
 
 ## Quick Reference
 
-See [docs/USAGE.md](docs/USAGE.md) for full integration guide.
+See [docs/USAGE.md](docs/USAGE.md) for integration guide. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full IT suite roadmap (~23 crates).
 
 ### Frontend
 ```json

@@ -1,63 +1,69 @@
 # RUNESH
 
-Shared code connector for Rust + Next.js + shadcn/ui projects.
+Shared code connector for Rust + Next.js + shadcn/ui projects — and the foundation for a Rust-native IT management platform.
 
-Instead of copy-pasting the same sidebar, editor, auth flow, error handling, and deployment config across projects, RUNESH provides a single source of truth. Improvements here propagate to all consumer projects.
+Instead of copy-pasting the same auth, networking, remote access, and deployment config across projects, RUNESH provides a single source of truth. Improvements here propagate to all consumer projects.
 
 ## Install the CLI
 
 ```bash
-# Install globally (run once, use everywhere)
 cargo install --path crates/runesh-cli
 
-# Or set RUNESH_PATH so it finds shared code from any directory
-export RUNESH_PATH="C:/Users/user/Documents/GitHub/RUNESH"  # add to your shell profile
+# Optional: set RUNESH_PATH so it finds shared code from any directory
+export RUNESH_PATH="$HOME/Documents/GitHub/RUNESH"
 ```
 
-## Create a new project
+## Create a New Project
 
 ```bash
-# Option 1: Create a new repo, cd in, then init
-mkdir my-app && cd my-app && git init
-runesh init
+# Create a new repo with RUNESH integration (interactive)
+runesh new my-project
 
-# Option 2: Create in a subdirectory from anywhere
+# Fully automated with specific crates
+runesh new my-project -y --local -c "core,auth,inventory" -d "My cool project"
+
+# With GitHub repo creation
+runesh new my-project --github --private --org my-org
+
+# Scaffold inside an existing directory
 runesh init my-app
-
-# Option 3: Explicit RUNESH path (if not a sibling or in RUNESH_PATH)
-runesh init --runesh-path /path/to/RUNESH
 ```
 
-The interactive wizard asks for:
-- **Project type**: Web only, Web + Desktop (shared), or Web + Desktop (separate)
-- **Features**: OIDC auth, rate limiting, WebSocket, file upload, Docker
-- **Database name** and **backend port**
+The `new` command creates a full Cargo workspace with selected RUNESH crates, CLAUDE.md with dev conventions, .gitignore, git init, and optional GitHub repo via `gh` CLI.
 
-It generates the full project structure, links `@runesh/ui`, runs `bun install`, and initializes shadcn/ui.
+The `init` command scaffolds a full-stack app (Rust/Axum + Next.js + optional Tauri desktop + Chrome extension) with interactive feature selection.
 
-## What's included
+## Crates
 
-### Frontend (`@runesh/ui`)
-
-| Category | Components |
-|----------|-----------|
-| **Layout** | `AppSidebar`, `DashboardShell`, `SearchBar`, `PageHeader`, `TitleBar` (Tauri frameless) |
-| **Editor** | Novel WYSIWYG with `TableMenu`, `BubbleMenu`, `SlashCommand`, collapsible headings, search highlighting |
-| **Data** | `DataTable` (sortable, paginated, server-side support), `ConfirmDialog` |
-| **Providers** | `AuthProvider`, `ThemeProvider`, `QueryProvider` |
-| **Auth** | `api` client (auto token refresh, 401 retry, file upload with progress), `token-store`, PKCE utilities |
-| **Hooks** | `useIsMobile`, `useWebSocket` (auto-reconnect, auth), `usePermissions`, `useWindowControls` (Tauri), `useTauri` (detection) |
-| **Utils** | `cn()`, `formatFileSize()`, `formatRelativeTime()`, `formatDateLabel()`, pagination types, `createInvoke()` (typed Tauri IPC) |
-| **Styles** | `globals.css` (OKLCH theme, dark mode), font config (Chiron GoRound TC) |
-
-### Backend Rust Crates
+### Core Infrastructure
 
 | Crate | What it provides |
 |-------|-----------------|
-| **runesh-core** | `AppError` (7 variants with HTTP mapping), `Pagination` extractor + `PaginatedResponse`, `RateLimiter`, `BroadcastRegistry` (WebSocket), `save_upload`, `create_pool`, `shutdown_signal`, request ID + logging + CORS middleware, health check handler, cross-platform service installer |
-| **runesh-auth** | OIDC discovery + PKCE, JWT access/refresh tokens, Axum middleware, `AuthStore` trait |
-| **runesh-tauri** | Tauri v2 utilities: TOML config management, system tray setup, process finder/launcher, Windows UAC elevation |
-| **runesh-tun** | Cross-platform TUN device (Windows wintun + Linux /dev/net/tun) |
+| **runesh-core** | `AppError`, `Pagination`, `RateLimiter`, `BroadcastRegistry` (WebSocket), `save_upload`, DB pool, request ID + logging + CORS + security headers middleware, Prometheus metrics, health checks, graceful shutdown, cross-platform service installer |
+| **runesh-auth** | OIDC discovery + PKCE, JWT access/refresh tokens, session management, `AuthStore` trait, Axum middleware + handlers |
+| **runesh-cli** | `runesh new` (project repo creator) + `runesh init` (full-stack app scaffolder) |
+
+### Remote Management
+
+| Crate | What it provides |
+|-------|-----------------|
+| **runesh-inventory** | Cross-platform hardware/software inventory — CPU, RAM, disk, GPU, BIOS, battery, network, installed software, processes. Uses `sysinfo` + WMI (Windows) / `/proc`+`/sys` (Linux) / `system_profiler` (macOS). Feature-gated Axum REST handlers. |
+| **runesh-remote** | Remote file explorer + PTY terminal over WebSocket. Path traversal prevention, sandbox security, chunked uploads, audit logging. PTY via `portable-pty` (ConPTY on Windows, Unix PTY on Linux/macOS). |
+| **runesh-desktop** | Remote desktop sharing — screen capture (DXGI/CoreGraphics/X11), frame encoding (JPEG/PNG/Zstd), input injection (SendInput/CGEvent/XTest), multi-cursor support with software overlay rendering + X11 MPX, clipboard sync, multi-monitor. |
+
+### Filesystem & Networking
+
+| Crate | What it provides |
+|-------|-----------------|
+| **runesh-vfs** | Virtual filesystem — files appear natively in OS file explorer (like OneDrive). Windows Cloud Filter API for placeholder files with cloud icons; Linux/macOS FUSE. 4 write modes: ReadOnly, WriteThrough, WriteLocal, WriteOverlay. Copy-on-write overlay for multi-tenant (schools: teacher originals + student personal overlay spaces). LRU cache. |
+| **runesh-tun** | Cross-platform TUN device abstraction (Windows wintun + Linux /dev/net/tun) for virtual networking. |
+
+### Desktop & UI
+
+| Crate / Package | What it provides |
+|----------------|-----------------|
+| **runesh-tauri** | Tauri v2 helpers — TOML config management, system tray, process control, Windows UAC elevation |
+| **@runesh/ui** | React/Next.js components — `AppSidebar`, `DashboardShell`, Novel WYSIWYG editor, `DataTable`, `AuthProvider`, `ThemeProvider`, API client with auto token refresh, PKCE utilities, WebSocket hooks, OKLCH theme with dark mode |
 
 ### Templates
 
@@ -65,10 +71,32 @@ It generates the full project structure, links `@runesh/ui`, runs `bun install`,
 |------|---------|
 | `templates/Dockerfile` | Multi-stage: Node frontend + Rust backend + Caddy proxy |
 | `templates/compose.yaml` | PostgreSQL + app with health checks |
-| `templates/.env.example` | All environment variables for a new project |
-| `templates/tauri/` | Tauri v2 desktop app scaffold (Cargo.toml, lib.rs, tauri.conf.json, capabilities) |
+| `templates/.env.example` | Environment variables template |
+| `templates/tauri/` | Tauri v2 desktop app scaffold |
 
-## Quick start
+## Quick Start
+
+### Backend
+
+```toml
+# Pick the crates you need
+runesh-core = { path = "../RUNESH/crates/runesh-core" }
+runesh-auth = { path = "../RUNESH/crates/runesh-auth" }
+runesh-inventory = { path = "../RUNESH/crates/runesh-inventory" }
+runesh-remote = { path = "../RUNESH/crates/runesh-remote" }
+runesh-desktop = { path = "../RUNESH/crates/runesh-desktop" }
+runesh-vfs = { path = "../RUNESH/crates/runesh-vfs" }
+```
+
+```rust
+use runesh_core::{AppError, Pagination, PaginatedResponse, shutdown_signal};
+use runesh_core::middleware::{cors, health, logging, request_id};
+use runesh_auth::{OidcProvider, AuthStore};
+use runesh_inventory::{collect_inventory, CollectorConfig};
+use runesh_remote::{RemoteState, handlers as remote_handlers};
+use runesh_desktop::{DesktopState, handlers as desktop_handlers};
+use runesh_vfs::{VfsConfig, WriteMode, OverlayProvider, MountRegistry};
+```
 
 ### Frontend
 
@@ -79,46 +107,26 @@ It generates the full project structure, links `@runesh/ui`, runs `bun install`,
 ```tsx
 import { AppSidebar } from "@runesh/ui/components/layout/app-sidebar"
 import { DashboardShell } from "@runesh/ui/components/layout/dashboard-shell"
-import { AuthProvider, useAuth } from "@runesh/ui/components/providers/auth-provider"
-import { api } from "@runesh/ui/lib/api-client"
 import { DataTable } from "@runesh/ui/components/ui/data-table"
-import { useWebSocket } from "@runesh/ui/hooks/use-websocket"
+import { api } from "@runesh/ui/lib/api-client"
 ```
 
-### Backend
+## Consumer Projects
 
-```toml
-runesh-core = { path = "../RUNESH/crates/runesh-core" }
-runesh-auth = { path = "../RUNESH/crates/runesh-auth" }
-```
+| Project | Description | Stack |
+|---------|-------------|-------|
+| **RUMMZ** | Media management | Rust/Axum + Next.js |
+| **HARUMI** | Business suite | Rust/Actix + Next.js |
+| **HARUMI-NET** | WireGuard overlay network | Rust/Axum + Next.js + Tauri |
+| **HARUMI-DEPLOY** | PXE network boot + OS deployment | Rust/Axum + Next.js |
+| **MoodleNG** | Learning management | Rust/Axum + Next.js |
 
-```rust
-use runesh_core::{AppError, Pagination, PaginatedResponse, shutdown_signal};
-use runesh_core::middleware::{cors, health, logging, request_id};
-use runesh_auth::{OidcProvider, AuthStore};
-```
+## Roadmap
 
-### Tauri Desktop
-
-```toml
-# In your Tauri app's Cargo.toml
-runesh-tauri = { path = "../RUNESH/crates/runesh-tauri" }
-```
-
-```tsx
-// Frontend: frameless window with custom title bar
-import { TitleBar } from "@runesh/ui/components/layout/title-bar"
-import { useTauri } from "@runesh/ui/hooks/use-tauri"
-import { createInvoke } from "@runesh/ui/lib/tauri-invoke"
-```
-
-## Consumer projects
-
-- **RUMMZ** - Media management (Axum + Next.js)
-- **HARUMI** - Business suite (Actix + Next.js)
-- **HARUMI-NET** - WireGuard overlay network (Axum + Next.js + Tauri)
-- **MoodleNG** - Learning management (Axum + Next.js)
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the full IT suite roadmap — 22+ crates covering agent, mesh networking, monitoring, EDR, service desk, backup, patch management, and PXE deployment.
 
 ## Documentation
 
-See [docs/USAGE.md](docs/USAGE.md) for detailed integration guide with examples.
+- [docs/USAGE.md](docs/USAGE.md) — Detailed integration guide with examples
+- [docs/ROADMAP.md](docs/ROADMAP.md) — Full IT management suite roadmap
+- [CLAUDE.md](CLAUDE.md) — Project structure, conventions, and development workflow
