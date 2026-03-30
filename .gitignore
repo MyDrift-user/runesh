@@ -1,32 +1,59 @@
-# Rust
+# ── Rust ──────────────────────────────────────────────
 target/
+**/*.rs.bk
+*.pdb
 
-# Node
+# ── Node / Bun ───────────────────────────────────────
 node_modules/
 .next/
 out/
-
-# Bun
+dist/
 bun.lock
+*.tsbuildinfo
 
-# Environment
+# ── Environment & Secrets ────────────────────────────
 .env
-.env.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+secrets.json
 
-# IDE
+# ── IDE ──────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# OS
+# ── OS ───────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 Desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# ── Testing ──────────────────────────────────────────
 .playwright-mcp/
-# Playwright/test screenshots (not documentation assets)
-test-results/**/*.png
-tests/**/*.png
-e2e/**/*.png
-**/playwright-report/**/*.png
-.playwright-mcp/**/*.png
+test-results/
+**/playwright-report/
+coverage/
+*.lcov
+
+# ── Build Artifacts ──────────────────────────────────
+*.wasm
+*.dll
+*.so
+*.dylib
+wintun.dll
+
+# ── Logs ─────────────────────────────────────────────
+*.log
+logs/
+
+# ── Miscellaneous ────────────────────────────────────
+*.bak
+*.tmp
+*.orig
