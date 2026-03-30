@@ -1,0 +1,56 @@
+[package]
+name = "runesh-desktop"
+version.workspace = true
+edition.workspace = true
+description = "Cross-platform remote desktop sharing with screen capture, encoding, and input injection"
+
+[features]
+default = ["axum"]
+axum = ["dep:axum", "dep:futures-util"]
+clipboard = ["dep:arboard"]
+input = []
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+zstd = "0.13"
+base64 = { version = "0.22", features = ["std"] }
+
+# Optional: Axum WebSocket handlers
+axum = { version = "0.8", features = ["ws"], optional = true }
+futures-util = { version = "0.3", optional = true }
+
+# Optional: Clipboard sharing
+arboard = { version = "3", optional = true }
+
+# Windows screen capture + input
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+] }
+
+# macOS screen capture + input
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.24"
+core-foundation = "0.10"
+
+# Linux X11 screen capture + input
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13", features = ["shm", "xtest", "randr", "xinput"] }
