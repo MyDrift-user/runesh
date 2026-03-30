@@ -1,0 +1,37 @@
+[package]
+name = "runesh-remote"
+version.workspace = true
+edition.workspace = true
+description = "Remote file explorer and CLI over WebSocket with enterprise security"
+
+[features]
+default = ["axum", "cli", "fs"]
+axum = ["dep:axum", "dep:futures-util"]
+cli = ["dep:portable-pty"]
+fs = []
+watch = ["dep:notify"]
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+base64 = { version = "0.22", features = ["std"] }
+walkdir = "2"
+zip = "2"
+
+# Optional: Axum WebSocket handlers
+axum = { version = "0.8", features = ["ws"], optional = true }
+futures-util = { version = "0.3", optional = true }
+
+# Optional: PTY for remote CLI
+portable-pty = { version = "0.8", optional = true }
+
+# Optional: File system watching
+notify = { version = "7", optional = true }
