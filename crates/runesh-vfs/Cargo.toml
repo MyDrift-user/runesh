@@ -1,0 +1,37 @@
+[package]
+name = "runesh-vfs"
+version.workspace = true
+edition.workspace = true
+description = "Cross-platform virtual filesystem with cloud provider integration, overlay writes, and on-demand hydration"
+
+[features]
+default = []
+axum = ["dep:axum"]
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+
+# Optional: Axum REST API for file serving
+axum = { version = "0.8", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Storage_CloudFilters",
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_CorrelationVector",
+] }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+fuser = "0.15"
+libc = "0.2"
