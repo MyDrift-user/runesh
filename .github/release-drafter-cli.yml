@@ -1,5 +1,8 @@
 name-template: 'v$RESOLVED_VERSION'
 tag-template: 'v$RESOLVED_VERSION'
+tag-prefix: 'v'
+filter-by-commitish: true
+commitish: refs/heads/main
 template: |
   ## runesh-cli v$RESOLVED_VERSION
 

@@ -1,5 +1,6 @@
 name-template: 'ui-v$RESOLVED_VERSION'
 tag-template: 'ui-v$RESOLVED_VERSION'
+tag-prefix: 'ui-v'
 template: |
   ## @mydrift-user/runesh-ui v$RESOLVED_VERSION
 
