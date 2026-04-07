@@ -89,6 +89,13 @@ enum Commands {
 }
 
 fn main() {
+    // Error reporting. No-op unless RUNESH_SENTRY_DSN is set, so this is safe
+    // to leave in for everyone — only opted-in users (or you) actually report.
+    let _telemetry = runesh_telemetry::init(runesh_telemetry::Config::from_env(
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+    ));
+
     let cli = Cli::parse();
 
     match cli.command {

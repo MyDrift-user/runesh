@@ -26,6 +26,7 @@ RUNESH/
 │   ├── runesh-inventory/                # Hardware/software inventory collection (cross-platform)
 │   ├── runesh-remote/                   # Remote file explorer + CLI over WebSocket with PTY
 │   ├── runesh-tauri/                    # Tauri helpers (tray, process mgmt, config, elevation)
+│   ├── runesh-telemetry/                # Sentry/GlitchTip error reporting + tracing layer
 │   ├── runesh-tun/                      # Cross-platform TUN device (Windows wintun + Linux)
 │   └── runesh-vfs/                      # Virtual filesystem with cloud provider + overlay writes
 ├── templates/                           # Dockerfile + compose.yaml for new projects
@@ -91,6 +92,11 @@ Remote file explorer and CLI over WebSocket. File operations with path traversal
 
 ### runesh-vfs
 Cross-platform virtual filesystem that shows remote files natively in the OS file explorer (like OneDrive). Windows uses Cloud Filter API (cfapi) for placeholder files with cloud icons; Linux/macOS use FUSE. Supports 4 write modes: ReadOnly, WriteThrough, WriteLocal, WriteOverlay. The overlay mode enables copy-on-write for multi-tenant scenarios (schools: teachers maintain originals, students get personal overlay spaces where only their edits consume storage). LRU cache with configurable eviction.
+
+### runesh-telemetry
+Sentry/GlitchTip error reporting wired into the existing `tracing` stack. Drop-in init in `main.rs` — no-op unless `RUNESH_SENTRY_DSN` is set, so it's safe to leave in every binary. Provides a `tracing-subscriber` layer that forwards `WARN`/`ERROR` events as Sentry events automatically, plus an optional Axum/Tower middleware (feature `axum`) that captures request context. Because GlitchTip is wire-compatible with the Sentry SDK protocol, the same crate works against either backend — point the DSN at your self-hosted GlitchTip instance and you're done.
+
+Env vars: `RUNESH_SENTRY_DSN`, `RUNESH_ENV`, `RUNESH_SAMPLE_RATE`, `RUNESH_TELEMETRY_DEBUG`.
 
 ### runesh-desktop
 Remote desktop sharing with screen capture (DXGI on Windows, CoreGraphics on macOS, X11/XShm on Linux), frame encoding (JPEG/PNG/Zstd), input injection (SendInput/CGEvent/XTest), clipboard sync, multi-cursor support, and multi-monitor support. Wayland architecture via xdg-desktop-portal ready.

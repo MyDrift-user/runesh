@@ -18,6 +18,7 @@ console = "0.15"
 indicatif = "0.17"
 dirs-next = "2"
 self_update = { version = "0.42", default-features = false, features = ["archive-tar", "archive-zip", "compression-flate2", "rustls"] }
+runesh-telemetry = { path = "../runesh-telemetry", default-features = false }
 
 [package.metadata.wix]
 upgrade-guid = "B1D8D9F2-3E4A-4C7B-9A1F-7E2C5B6D8E10"
