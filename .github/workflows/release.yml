@@ -106,11 +106,6 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo install cargo-wix --locked
 
-      - name: Init WiX template
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: cargo wix init --package runesh-cli --force
-
       - name: Build MSI
         if: runner.os == 'Windows'
         shell: pwsh

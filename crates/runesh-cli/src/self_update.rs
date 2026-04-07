@@ -10,16 +10,27 @@ pub fn run(check_only: bool, allow_prerelease: bool) -> Result<(), Box<dyn std::
     let current = cargo_crate_version!();
     println!("current version: v{current}");
 
+    // Our release archives are packaged with a top-level directory:
+    //   runesh-<target>/runesh[.exe]
+    // Tell self_update where to find the binary inside that subdir.
+    let bin_in_archive = if cfg!(windows) {
+        "runesh-{{ target }}/{{ bin }}.exe"
+    } else {
+        "runesh-{{ target }}/{{ bin }}"
+    };
+
     let updater = self_update::backends::github::Update::configure()
         .repo_owner(REPO_OWNER)
         .repo_name(REPO_NAME)
         .bin_name(BIN_NAME)
+        .bin_path_in_archive(bin_in_archive)
         .show_download_progress(true)
         .show_output(false)
         .current_version(current)
-        .target_version_tag(if allow_prerelease { "" } else { "" })
         .no_confirm(true)
         .build()?;
+
+    let _ = allow_prerelease; // self_update github backend ignores prereleases by default
 
     let latest = updater.get_latest_release()?;
     println!("latest available: {}", latest.version);
