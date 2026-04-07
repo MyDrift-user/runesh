@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 
 mod init;
 mod new_project;
+mod self_update;
 
 /// Default GitHub repo for RUNESH shared code.
 /// Override with --repo flag or RUNESH_REPO env var.
@@ -74,6 +75,17 @@ enum Commands {
         #[arg(long, short = 'y')]
         yes: bool,
     },
+
+    /// Update the runesh CLI to the latest GitHub release.
+    Update {
+        /// Only check for an update; do not install.
+        #[arg(long)]
+        check: bool,
+
+        /// Allow installing prereleases.
+        #[arg(long)]
+        prerelease: bool,
+    },
 }
 
 fn main() {
@@ -88,6 +100,12 @@ fn main() {
         }
         Commands::New { name, description, crates, github, private, org, local, yes } => {
             if let Err(e) = new_project::run(name, description, crates, github, private, org, local, yes) {
+                eprintln!("\x1b[31merror:\x1b[0m {e}");
+                std::process::exit(1);
+            }
+        }
+        Commands::Update { check, prerelease } => {
+            if let Err(e) = self_update::run(check, prerelease) {
                 eprintln!("\x1b[31merror:\x1b[0m {e}");
                 std::process::exit(1);
             }

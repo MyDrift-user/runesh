@@ -3,6 +3,8 @@ name = "runesh-cli"
 version.workspace = true
 edition.workspace = true
 description = "CLI tool to scaffold new Rust + Next.js + shadcn/ui projects with RUNESH shared code"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mydrift-user/runesh"
 
 [[bin]]
 name = "runesh"
@@ -14,3 +16,10 @@ dialoguer = { version = "0.11", features = ["fuzzy-select"] }
 console = "0.15"
 indicatif = "0.17"
 dirs-next = "2"
+self_update = { version = "0.42", default-features = false, features = ["archive-tar", "archive-zip", "compression-flate2", "rustls"] }
+
+[package.metadata.wix]
+upgrade-guid = "B1D8D9F2-3E4A-4C7B-9A1F-7E2C5B6D8E10"
+path-guid    = "C2E9EAF3-4F5B-5D8C-AB20-8F3D6C7E9F21"
+license      = false
+eula         = false
