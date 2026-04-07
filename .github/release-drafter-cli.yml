@@ -1,0 +1,64 @@
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+template: |
+  ## runesh-cli v$RESOLVED_VERSION
+
+  Install or update:
+
+  ```sh
+  # macOS / Linux
+  curl -fsSL https://raw.githubusercontent.com/MyDrift-user/runesh/main/install.sh | bash
+
+  # Windows (PowerShell)
+  irm https://raw.githubusercontent.com/MyDrift-user/runesh/main/install.ps1 | iex
+
+  # Already installed
+  runesh update
+  ```
+
+  $CHANGES
+categories:
+  - title: 'Features'
+    labels:
+      - 'feature'
+      - 'enhancement'
+  - title: 'Bug Fixes'
+    labels:
+      - 'fix'
+      - 'bugfix'
+      - 'bug'
+  - title: 'Security'
+    labels:
+      - 'security'
+  - title: 'Breaking Changes'
+    labels:
+      - 'breaking'
+  - title: 'CI / Chores'
+    labels:
+      - 'chore'
+      - 'ci'
+      - 'docs'
+exclude-labels:
+  - 'skip-changelog'
+  - 'ui'
+include-paths:
+  - 'crates/**'
+  - 'Cargo.toml'
+  - 'Cargo.lock'
+  - 'install.sh'
+  - 'install.ps1'
+  - '.github/workflows/release.yml'
+version-resolver:
+  major:
+    labels:
+      - 'breaking'
+  minor:
+    labels:
+      - 'feature'
+      - 'enhancement'
+  patch:
+    labels:
+      - 'fix'
+      - 'bug'
+      - 'security'
+  default: patch
