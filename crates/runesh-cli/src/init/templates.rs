@@ -715,6 +715,13 @@ pub const GLOBALS_CSS_IMPORT: &str = r#"@import "tailwindcss";
 @import "shadcn/tailwind.css";
 @import "@mydrift-user/runesh-ui/src/styles/globals.css";
 
+/* Tell Tailwind v4 to scan @mydrift-user/runesh-ui's source so classes
+   that only appear inside the package (e.g. data-[active=true]:bg-accent
+   on the AppSidebar nav items) make it into the compiled CSS. Without
+   this, those classes get stripped and the active/hover states are
+   invisible. */
+@source "../../node_modules/@mydrift-user/runesh-ui/src/**/*.{ts,tsx}";
+
 @plugin "@tailwindcss/typography";
 "#;
 
