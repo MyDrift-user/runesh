@@ -3,15 +3,13 @@
 /**
  * Self-contained dashboard sidebar.
  *
- * Intentionally has NO dependency on the consumer's shadcn primitives.
- * Works in any Next.js project regardless of which shadcn flavor (Radix
- * `asChild` vs base-ui `render`) the consumer's `@/components/ui/*` are
- * built on. Only requirements:
- *   - Tailwind CSS in the consumer
- *   - lucide-react and next-themes as peer deps
- *   - A router link component passed as `linkComponent`
+ * Sized and spaced to match the canonical shadcn `Sidebar` primitive
+ * (16rem width, h-8 menu items, h-12 profile/team-switcher row, p-2
+ * section padding, [&>svg]:size-4 icons), but ships with NO dependency
+ * on the consumer's shadcn primitives so it works regardless of which
+ * shadcn flavor (Radix `asChild` or base-ui `render`) the consumer ships.
  *
- * Pair with [`DashboardShell`] which is also self-contained.
+ * Pair with [`DashboardShell`].
  */
 
 import * as React from "react"
@@ -94,6 +92,32 @@ export interface AppSidebarProps {
   profileExtra?: React.ReactNode
 }
 
+// ── Style tokens ─────────────────────────────────────────────────────────────
+//
+// Centralised so the whole component shares one rhythm. These match the
+// canonical shadcn Sidebar primitive defaults.
+
+const SIDEBAR_WIDTH = "w-64" // 16rem / 256px
+const HEADER_HEIGHT = "h-14" // 56px, matches DashboardShell toolbar
+const SECTION_PAD = "p-2" // 8px outer padding for the nav body
+const MENU_ITEM_BASE = [
+  // Layout
+  "group/menu-item flex h-8 w-full items-center gap-2 overflow-hidden",
+  "rounded-md px-2 text-left text-sm",
+  // Behaviour
+  "outline-none transition-colors",
+  "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+  // Default state
+  "text-sidebar-foreground/90",
+  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+  // Active state
+  "data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground",
+  // Icon: fixed 16x16 slot, never shifts even if title length varies
+  "[&>svg]:size-4 [&>svg]:shrink-0",
+  // Truncate the label
+  "[&>span]:truncate",
+].join(" ")
+
 // ── Sidebar component ───────────────────────────────────────────────────────
 
 export function AppSidebar({
@@ -124,31 +148,36 @@ export function AppSidebar({
     groups.set(label, bucket)
   }
 
-  // When every nav item falls into the single default group, the label is
-  // visual noise (a heavy "NAVIGATION" header above one list). Suppress it.
-  // Only render group labels when at least one item explicitly opts in via
-  // its own `group` field, which signals multi-section intent.
+  // When all items fall into the single default group, the label is just
+  // visual noise above one list. Hide it. Group labels render only when at
+  // least one item explicitly opts into multi-section mode via its `group`.
   const showGroupLabels = navItems.some((item) => item.group != null)
 
   return (
     <aside
       data-slot="runesh-app-sidebar"
-      className="flex h-screen w-64 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground"
+      className={`flex h-screen ${SIDEBAR_WIDTH} shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground`}
     >
       {/* Header */}
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
-        <Link href="/" className="flex items-center gap-2">
-          {brandIcon}
-          <span className="text-lg font-bold tracking-tight">{brandName}</span>
+      <div
+        className={`flex ${HEADER_HEIGHT} shrink-0 items-center gap-2 border-b border-sidebar-border px-4`}
+      >
+        <Link href="/" className="flex items-center gap-2 outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring rounded-md">
+          <div className="flex shrink-0 items-center justify-center">
+            {brandIcon}
+          </div>
+          <span className="truncate text-base font-semibold tracking-tight">
+            {brandName}
+          </span>
         </Link>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto p-2">
-        {Array.from(groups.entries()).map(([label, items]) => (
-          <div key={label} className="mb-2">
+      <nav className={`flex flex-1 flex-col gap-1 overflow-y-auto ${SECTION_PAD}`}>
+        {Array.from(groups.entries()).map(([label, items], i) => (
+          <div key={label} className={i === 0 ? "" : "mt-2"}>
             {showGroupLabels && (
-              <div className="px-2 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+              <div className="flex h-8 items-center px-2 text-xs font-medium text-sidebar-foreground/60">
                 {label}
               </div>
             )}
@@ -163,16 +192,10 @@ export function AppSidebar({
                     <Link
                       href={item.href}
                       data-active={isActive ? "true" : undefined}
-                      className={[
-                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm",
-                        "outline-none transition-colors",
-                        "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                        "focus-visible:ring-2 focus-visible:ring-ring",
-                        "data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground",
-                      ].join(" ")}
+                      className={MENU_ITEM_BASE}
                     >
-                      <item.icon className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{item.title}</span>
+                      <item.icon />
+                      <span>{item.title}</span>
                     </Link>
                   </li>
                 )
@@ -184,7 +207,7 @@ export function AppSidebar({
 
       {/* Profile footer */}
       {user && (
-        <div className="border-t border-border p-2">
+        <div className={`border-t border-sidebar-border ${SECTION_PAD}`}>
           <ProfileMenu
             user={user}
             onLogout={onLogout}
@@ -212,6 +235,28 @@ interface ProfileMenuProps {
   LinkComponent: LinkLike
 }
 
+const PROFILE_BUTTON = [
+  // Layout: same h-12 as shadcn's `lg` SidebarMenuButton size
+  "flex h-12 w-full items-center gap-2 overflow-hidden",
+  "rounded-md p-2 text-left text-sm",
+  // Behaviour
+  "outline-none transition-colors",
+  "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+  // States
+  "text-sidebar-foreground",
+  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+  "data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground",
+].join(" ")
+
+const MENU_LINK = [
+  "flex h-9 w-full items-center gap-2 px-3 text-sm",
+  "outline-none transition-colors",
+  "text-popover-foreground",
+  "hover:bg-accent hover:text-accent-foreground",
+  "focus-visible:bg-accent focus-visible:text-accent-foreground",
+  "[&>svg]:size-4 [&>svg]:shrink-0",
+].join(" ")
+
 function ProfileMenu({
   user,
   onLogout,
@@ -223,18 +268,13 @@ function ProfileMenu({
 }: ProfileMenuProps) {
   const [open, setOpen] = React.useState(false)
 
-  // floating-ui handles the heavy lifting:
-  //   - position the menu relative to the trigger
-  //   - autoUpdate keeps it positioned on scroll/resize
-  //   - shift() pushes it back into the viewport on collisions
-  //   - offset(8) gives a small gap above the trigger
-  //   - FloatingPortal renders into document.body so the sidebar's
-  //     overflow constraints can never clip it
+  // floating-ui handles positioning, autoUpdate, collision detection,
+  // portaling out of the sidebar overflow, and a11y interactions.
   const { refs, floatingStyles, context } = useFloating({
     open,
     onOpenChange: setOpen,
-    placement: "top-start",
-    middleware: [offset(8), shift({ padding: 8 })],
+    placement: "right-end",
+    middleware: [offset({ mainAxis: 8, alignmentAxis: -4 }), shift({ padding: 8 })],
     whileElementsMounted: autoUpdate,
   })
 
@@ -255,21 +295,24 @@ function ProfileMenu({
       <button
         ref={refs.setReference}
         type="button"
+        data-state={open ? "open" : "closed"}
         {...getReferenceProps()}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        className={PROFILE_BUTTON}
       >
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
+        {/* Avatar */}
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-sidebar-accent text-xs font-medium text-sidebar-accent-foreground">
           {initials}
         </div>
-        <div className="flex flex-1 flex-col overflow-hidden text-left text-sm leading-tight">
+        {/* Text column */}
+        <div className="grid flex-1 text-left text-sm leading-tight">
           <span className="truncate font-medium">{user.username}</span>
           {user.email && (
-            <span className="truncate text-xs text-muted-foreground">
+            <span className="truncate text-xs text-sidebar-foreground/60">
               {user.email}
             </span>
           )}
         </div>
-        <ChevronsUpDown className="ml-auto h-4 w-4 shrink-0 text-muted-foreground" />
+        <ChevronsUpDown className="ml-auto size-4 shrink-0 opacity-60" />
       </button>
 
       {open && (
@@ -279,45 +322,47 @@ function ProfileMenu({
               ref={refs.setFloating}
               style={floatingStyles}
               {...getFloatingProps()}
-              className="z-50 min-w-56 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg outline-none"
+              className="z-50 min-w-60 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg outline-none"
             >
-              <div className="px-3 py-2">
-                <div className="text-sm font-medium">{user.username}</div>
-                {user.email && (
-                  <div className="text-xs text-muted-foreground">
-                    {user.email}
-                  </div>
-                )}
-                {user.role && (
-                  <div className="text-xs capitalize text-muted-foreground">
-                    {user.role}
-                  </div>
-                )}
+              {/* Header */}
+              <div className="flex items-center gap-2 px-3 py-2">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-xs font-medium text-accent-foreground">
+                  {initials}
+                </div>
+                <div className="grid flex-1 text-left text-sm leading-tight">
+                  <span className="truncate font-medium">{user.username}</span>
+                  {user.email && (
+                    <span className="truncate text-xs text-muted-foreground">
+                      {user.email}
+                    </span>
+                  )}
+                </div>
               </div>
 
-              {(accountHref || settingsHref) && <MenuSeparator />}
+              {(accountHref || settingsHref || enableThemeToggle || extra) && (
+                <MenuSeparator />
+              )}
 
               {accountHref && (
                 <LinkComponent
                   href={accountHref}
-                  className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
+                  className={MENU_LINK}
                   onClick={() => setOpen(false)}
                 >
-                  <UserIcon className="h-4 w-4" />
-                  Account
+                  <UserIcon />
+                  <span>Account</span>
                 </LinkComponent>
               )}
               {settingsHref && (
                 <LinkComponent
                   href={settingsHref}
-                  className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
+                  className={MENU_LINK}
                   onClick={() => setOpen(false)}
                 >
-                  <Settings className="h-4 w-4" />
-                  Settings
+                  <Settings />
+                  <span>Settings</span>
                 </LinkComponent>
               )}
-
               {enableThemeToggle && <ThemeToggleItem />}
 
               {extra && (
@@ -337,10 +382,10 @@ function ProfileMenu({
                       setOpen(false)
                       onLogout()
                     }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                    className={MENU_LINK}
                   >
-                    <LogOut className="h-4 w-4" />
-                    Sign out
+                    <LogOut />
+                    <span>Sign out</span>
                   </button>
                 </>
               )}
@@ -364,10 +409,10 @@ function ThemeToggleItem() {
       type="button"
       role="menuitem"
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+      className={MENU_LINK}
     >
-      {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-      {isDark ? "Light mode" : "Dark mode"}
+      {isDark ? <Sun /> : <Moon />}
+      <span>{isDark ? "Light mode" : "Dark mode"}</span>
     </button>
   )
 }
