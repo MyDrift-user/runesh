@@ -16,7 +16,11 @@ thiserror = { workspace = true }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-jsonwebtoken = "10"
+# jsonwebtoken 10 requires explicit crypto provider selection. Enable
+# rust_crypto so HS/RS/ES sign/verify uses the pure-Rust path and consumers
+# don't need to call rustls::crypto::CryptoProvider::install_default() at
+# startup. aws_lc_rs is the alternative but pulls a C dep.
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
 reqwest = { version = "0.13", default-features = false, features = [
     "rustls", "charset", "http2",
     "json", "form",

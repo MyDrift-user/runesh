@@ -1363,7 +1363,7 @@ RUN cargo build --release --bin {name}-server
 # Pinned to the current Debian stable minor for reproducibility.
 FROM debian:bookworm-20250929-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl libssl3 nodejs tini \
+    ca-certificates curl gnupg libssl3 nodejs tini \
     debian-keyring debian-archive-keyring apt-transport-https \
     && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
     && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list \
