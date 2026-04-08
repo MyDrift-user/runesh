@@ -150,11 +150,6 @@ export function AppSidebar({
     groups.set(label, bucket)
   }
 
-  // When all items fall into the single default group, the label is just
-  // visual noise above one list. Hide it. Group labels render only when at
-  // least one item explicitly opts into multi-section mode via its `group`.
-  const showGroupLabels = navItems.some((item) => item.group != null)
-
   return (
     <aside
       data-slot="runesh-app-sidebar"
@@ -177,12 +172,13 @@ export function AppSidebar({
       {/* Nav */}
       <nav className={`flex flex-1 flex-col gap-1 overflow-y-auto ${SECTION_PAD}`}>
         {Array.from(groups.entries()).map(([label, items], i) => (
-          <div key={label} className={i === 0 ? "" : "mt-2"}>
-            {showGroupLabels && (
-              <div className="flex h-8 items-center px-2 text-xs font-medium text-muted-foreground">
-                {label}
-              </div>
-            )}
+          <div key={label} className={i === 0 ? "" : "mt-3"}>
+            {/* Section label. Always rendered so consumers can divide nav
+                into permission tiers (User / Moderator / Admin). Sized
+                small and quiet so it never dominates the items below. */}
+            <div className="px-2 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              {label}
+            </div>
             <ul className="flex flex-col gap-0.5">
               {items.map((item) => {
                 const isActive =
@@ -272,11 +268,16 @@ function ProfileMenu({
 
   // floating-ui handles positioning, autoUpdate, collision detection,
   // portaling out of the sidebar overflow, and a11y interactions.
+  // top-start opens the menu directly above the trigger button — the
+  // standard pattern Vercel / Linear / Cal use for sidebar profile menus.
+  // shift() pushes the menu back into the viewport on collision instead
+  // of clipping, and FloatingPortal renders to body so the sidebar's
+  // overflow can never clip it.
   const { refs, floatingStyles, context } = useFloating({
     open,
     onOpenChange: setOpen,
-    placement: "right-end",
-    middleware: [offset({ mainAxis: 8, alignmentAxis: -4 }), shift({ padding: 8 })],
+    placement: "top-start",
+    middleware: [offset(8), shift({ padding: 8 })],
     whileElementsMounted: autoUpdate,
   })
 
