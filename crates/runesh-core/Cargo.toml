@@ -40,5 +40,16 @@ deadpool-redis = { workspace = true, optional = true }
 # Optional: Prometheus metrics
 metrics = { version = "0.24", optional = true }
 metrics-exporter-prometheus = { version = "0.18", optional = true }
-# Optional: SQLx integration
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono"], optional = true }
+# Optional: SQLx integration.
+# default-features = false drops sqlx's `any` driver which transitively pulls
+# sqlx-mysql -> rsa (RUSTSEC-2023-0071 Marvin Attack timing sidechannel).
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "postgres",
+    "macros",
+    "migrate",
+    "json",
+    "uuid",
+    "chrono",
+], optional = true }

@@ -57,20 +57,23 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     let path = req.uri().path().to_string();
     let method = req.method().clone();
 
-    // Static files always pass through
-    let is_static = path.starts_with("/_next/")
-        || path.ends_with(".html")
-        || path.ends_with(".js")
-        || path.ends_with(".css")
-        || path.ends_with(".ico")
-        || path.ends_with(".png")
-        || path.ends_with(".svg")
-        || path.ends_with(".woff2")
-        || path.ends_with(".woff")
-        || path.ends_with(".json")
-        || path.ends_with(".webp");
+    // Static-asset bypass is STRICTLY limited to known static-asset path prefixes.
+    // SECURITY: Earlier versions matched path SUFFIXES (e.g. `.json`, `.html`) which
+    // let attackers reach API routes by crafting `/api/admin/users.json`. The new
+    // rule: any path under `/api/` ALWAYS goes through full authentication, and
+    // static-asset bypass only applies to well-known framework asset directories.
+    let is_api = path.starts_with("/api/");
+    let is_static_asset = !is_api && (
+        path.starts_with("/_next/")
+            || path.starts_with("/static/")
+            || path.starts_with("/assets/")
+            || path == "/favicon.ico"
+            || path == "/robots.txt"
+            || path == "/sitemap.xml"
+            || path == "/manifest.webmanifest"
+    );
 
-    if is_static || method == axum::http::Method::OPTIONS {
+    if is_static_asset || method == axum::http::Method::OPTIONS {
         return next.run(req).await;
     }
 

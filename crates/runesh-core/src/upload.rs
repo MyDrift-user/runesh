@@ -5,6 +5,12 @@ use crate::error::AppError;
 // ── Magic bytes validation ──────────────────────────────────────────────────
 
 /// Known file signatures (magic bytes) for common file types.
+///
+/// SVG is intentionally NOT in this list. SVG is an XML format that can embed
+/// `<script>` tags and event handlers, making it a stored-XSS vector when
+/// served back to a browser. Callers who need SVG must opt in explicitly via
+/// their allowlist AND serve SVGs with `Content-Disposition: attachment` so
+/// the browser downloads instead of rendering them.
 const MAGIC_BYTES: &[(&str, &[u8])] = &[
     ("jpg",  &[0xFF, 0xD8, 0xFF]),
     ("jpeg", &[0xFF, 0xD8, 0xFF]),
@@ -13,8 +19,23 @@ const MAGIC_BYTES: &[(&str, &[u8])] = &[
     ("webp", &[0x52, 0x49, 0x46, 0x46]), // RIFF header (also check WEBP at offset 8)
     ("pdf",  &[0x25, 0x50, 0x44, 0x46]),
     ("zip",  &[0x50, 0x4B, 0x03, 0x04]),
-    ("svg",  b"<?xml"),
-    ("svg",  b"<svg"),
+];
+
+/// Default safe upload allowlist — media + documents, no executable / active
+/// content. Use this when your application accepts user uploads that may be
+/// served back to browsers.
+///
+/// Deliberately excludes:
+/// - `svg` (stored XSS via embedded `<script>`)
+/// - `html`, `htm`, `xml`, `xhtml` (stored XSS)
+/// - `js`, `mjs`, `css` (script/style injection)
+/// - `exe`, `dll`, `so`, `bat`, `cmd`, `sh`, `ps1`, `py`, `php`, `jsp` (RCE)
+/// - `svgz`, `swf` (active content)
+pub const SAFE_UPLOAD_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "png", "gif", "webp", "pdf",
+    "txt", "md", "csv", "json",
+    "mp3", "mp4", "webm", "ogg", "wav",
+    "zip",
 ];
 
 /// Validate that file contents match the claimed extension by checking magic bytes.

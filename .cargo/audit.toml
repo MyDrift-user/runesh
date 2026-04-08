@@ -1,0 +1,24 @@
+# cargo-audit configuration for the RUNESH workspace.
+# See: https://rustsec.org/packages/cargo-audit.html
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071 — rsa crate Marvin Attack timing sidechannel.
+    #
+    # Context: the `rsa` crate is pulled in transitively through
+    # `sqlx-mysql`, which is an UNCONDITIONAL dependency of the `sqlx`
+    # meta-crate even with `default-features = false` set (upstream sqlx
+    # packaging quirk). RUNESH services only use PostgreSQL and never
+    # instantiate a MySQL connection, so the vulnerable RSA codepath
+    # (SCRAM-SHA-256 `sha256_password` MySQL auth plugin) is compiled in
+    # but never executed at runtime.
+    #
+    # No fixed version of `rsa` is available as of the advisory date.
+    # Re-evaluate when `rsa >= 0.10` ships with the constant-time fix OR
+    # when sqlx decouples its database drivers via proper optional deps.
+    "RUSTSEC-2023-0071",
+]
+
+# Unmaintained-crate warnings from gtk3 bindings (via Tauri) are tolerated
+# for the same reason — Tauri will migrate to gtk4 upstream eventually. We
+# don't suppress them so they stay visible in `cargo audit` output.

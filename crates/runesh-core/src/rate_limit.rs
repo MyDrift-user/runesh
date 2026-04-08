@@ -17,12 +17,36 @@ impl InMemoryRateLimiter {
     ///
     /// - `max_requests`: maximum requests allowed per key within the window.
     /// - `window_secs`: window duration in seconds.
+    ///
+    /// SECURITY: This constructor also spawns a background task that calls
+    /// [`Self::cleanup`] every `window_secs` seconds to evict expired keys.
+    /// Without it, the `requests` map would grow unbounded under attack
+    /// (one entry per unique source IP, never freed). The task terminates
+    /// automatically when the last `InMemoryRateLimiter` clone is dropped.
     pub fn new(max_requests: usize, window_secs: u64) -> Self {
-        Self {
+        let this = Self {
             requests: Arc::new(Mutex::new(HashMap::new())),
             max_requests,
             window: Duration::from_secs(window_secs),
-        }
+        };
+        // Spawn cleanup loop tied to the Arc's lifetime.
+        let weak = Arc::downgrade(&this.requests);
+        let window = this.window;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(window);
+            interval.tick().await; // first tick fires immediately — skip
+            loop {
+                interval.tick().await;
+                let Some(map) = weak.upgrade() else { break };
+                let now = Instant::now();
+                let mut guard = map.lock().unwrap_or_else(|e| e.into_inner());
+                guard.retain(|_, timestamps| {
+                    timestamps.retain(|t| now.duration_since(*t) < window);
+                    !timestamps.is_empty()
+                });
+            }
+        });
+        this
     }
 
     /// Check whether the given key is within the rate limit.
@@ -178,31 +202,53 @@ pub type RateLimiter = InMemoryRateLimiter;
 
 /// Extract the client IP from request headers.
 ///
-/// SECURITY: Only trusts proxy headers (X-Forwarded-For, X-Real-IP) when
-/// `trust_proxy` is true (i.e., you have a reverse proxy like Caddy/nginx
-/// in front). When false, uses the direct socket address only.
+/// # Security
+///
+/// This function is only as trustworthy as your deployment topology. There are
+/// two modes:
+///
+/// - `trust_proxy = false` (default): returns the direct socket peer (from
+///   `axum::extract::ConnectInfo`). Cannot be spoofed because the client is
+///   directly connected. Use this when the server is exposed to the public
+///   internet without any proxy in front.
+///
+/// - `trust_proxy = true`: returns the **leftmost** entry of `X-Forwarded-For`,
+///   which per [RFC 7239][rfc] is the original client. **This is only correct
+///   if your reverse proxy strips any inbound `X-Forwarded-For` header before
+///   appending its own**, otherwise an attacker can prepend a fake IP and spoof
+///   rate-limit keys, audit logs, and any IP-based ACLs. Caddy's `reverse_proxy`
+///   and nginx with `real_ip_header X-Forwarded-For; real_ip_recursive on;`
+///   both do this correctly by default; bare `proxy_pass` in nginx does **not**.
+///
+/// [rfc]: https://datatracker.ietf.org/doc/html/rfc7239
 #[cfg(feature = "axum")]
 pub fn extract_client_ip(req: &axum::extract::Request, trust_proxy: bool) -> String {
     if trust_proxy {
-        // When behind a trusted proxy, use the rightmost non-private IP from
-        // X-Forwarded-For (the proxy appends the real client IP)
         if let Some(forwarded) = req.headers().get("x-forwarded-for") {
             if let Ok(val) = forwarded.to_str() {
-                // Take the last entry - the one our trusted proxy added
-                if let Some(ip) = val.rsplit(',').next() {
-                    return ip.trim().to_string();
+                // Leftmost entry is the original client per RFC 7239.
+                // Relies on the trusted proxy having stripped/rewritten any
+                // inbound XFF header — see function docs.
+                if let Some(ip) = val.split(',').next() {
+                    let trimmed = ip.trim();
+                    if !trimmed.is_empty() {
+                        return trimmed.to_string();
+                    }
                 }
             }
         }
 
         if let Some(real_ip) = req.headers().get("x-real-ip") {
             if let Ok(val) = real_ip.to_str() {
-                return val.trim().to_string();
+                let trimmed = val.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
             }
         }
     }
 
-    // Direct connection - use socket address (cannot be spoofed)
+    // Fall through: direct socket address (cannot be spoofed).
     if let Some(connect_info) =
         req.extensions()
             .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()

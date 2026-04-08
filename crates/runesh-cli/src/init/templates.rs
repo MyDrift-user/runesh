@@ -14,7 +14,7 @@ axum = {{ version = "0.8", features = ["ws", "multipart"] }}
 tower = "0.5"
 tower-http = {{ version = "0.6", features = ["cors", "trace", "compression-gzip"] }}
 tokio = {{ version = "1", features = ["full"] }}
-sqlx = {{ version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }}
+sqlx = {{ version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "json", "uuid", "chrono"] }}
 serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
 tracing = "0.1"
@@ -204,7 +204,17 @@ r#"        .layer(runesh_telemetry::axum::layer())
         extra_handlers.push_str(r#"
 async fn upload_file(mut multipart: Multipart) -> Result<Json<serde_json::Value>, runesh_core::AppError> {
     while let Some(field) = multipart.next_field().await.map_err(|e| runesh_core::AppError::BadRequest(e.to_string()))? {
-        let uploaded = runesh_core::upload::save_upload(field, std::path::Path::new("./uploads"), 50 * 1024 * 1024, None).await?;
+        // SECURITY: pass runesh_core's SAFE_UPLOAD_EXTENSIONS allowlist. This
+        // rejects html/js/svg/executable uploads that would otherwise become
+        // stored-XSS or RCE vectors when served back. If your application
+        // needs to accept SVG or other active-content formats, copy this list
+        // and add them explicitly — and serve them as attachments below.
+        let uploaded = runesh_core::upload::save_upload(
+            field,
+            std::path::Path::new("./uploads"),
+            50 * 1024 * 1024,
+            Some(runesh_core::upload::SAFE_UPLOAD_EXTENSIONS),
+        ).await?;
         return Ok(Json(serde_json::json!({
             "url": format!("/api/uploads/{}", uploaded.storage_key),
             "filename": uploaded.filename,
@@ -222,9 +232,15 @@ async fn serve_upload(axum::extract::Path(filename): axum::extract::Path<String>
     if !path.exists() { return Err(runesh_core::AppError::NotFound("File not found".into())); }
     let data = tokio::fs::read(&path).await.map_err(|e| runesh_core::AppError::Internal(e.to_string()))?;
     let ct = mime_guess::from_path(&path).first_or_octet_stream().to_string();
+    // SECURITY: force download (Content-Disposition: attachment) instead of
+    // inline render. Combined with nosniff this blocks the stored-XSS path
+    // even if the caller's allowlist expands to formats like html/svg/xml.
+    // Escape quotes in the filename per RFC 6266.
+    let quoted = safe_name.replace('"', "\\\"");
     Ok(axum::response::Response::builder()
         .header("Content-Type", ct)
         .header("X-Content-Type-Options", "nosniff")
+        .header("Content-Disposition", format!("attachment; filename=\"{}\"", quoted))
         .body(axum::body::Body::from(data)).unwrap())
 }
 "#);
@@ -1258,10 +1274,22 @@ node_modules/
 .next/
 out/
 
-# Environment
+# Environment & secrets — never commit
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials.json
+secrets.json
+
+# Upload / user-data dirs (bind-mounted in prod, not source-controlled)
+uploads/
+/data/
 
 # IDE
 .vscode/
@@ -1278,7 +1306,7 @@ Desktop.ini
 src-tauri/target/
 src-tauri/gen/
 
-# Database
+# Database files
 *.db
 *.db-shm
 *.db-wal
@@ -1290,16 +1318,12 @@ dist/
 *.dmg
 *.AppImage
 *.deb
-
-# Database
-*.db
-*.db-shm
-*.db-wal
 "#;
 
 pub fn dockerfile(c: &ProjectConfig) -> String {
     format!(r#"# ── Stage 1: Build Next.js frontend ─────────────────────────────────────────
-FROM oven/bun:latest AS web-builder
+# Pinned to a specific major.minor for reproducibility. Bump deliberately.
+FROM oven/bun:1.3-alpine AS web-builder
 WORKDIR /build
 
 # Copy package files and .npmrc (for GitHub Packages registry)
@@ -1318,7 +1342,7 @@ COPY web/next.config.ts ./next.config.ts
 RUN bun run build
 
 # ── Stage 2: Build Rust backend ────────────────────────────────────────────
-FROM rust:1-bookworm AS rust-builder
+FROM rust:1.90-bookworm AS rust-builder
 WORKDIR /build
 
 # Copy workspace files (Cargo.toml uses git deps, no local paths needed)
@@ -1336,7 +1360,8 @@ ENV SQLX_OFFLINE=true
 RUN cargo build --release --bin {name}-server
 
 # ── Stage 3: Runtime ───────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+# Pinned to the current Debian stable minor for reproducibility.
+FROM debian:bookworm-20250929-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl libssl3 nodejs tini \
     debian-keyring debian-archive-keyring apt-transport-https \
@@ -1383,14 +1408,23 @@ CMD ["/app/start.sh"]
 }
 
 pub fn compose_yaml(c: &ProjectConfig) -> String {
-    format!(r#"services:
+    format!(r#"# Production compose. Required env vars (no defaults — fail fast if unset):
+#   POSTGRES_PASSWORD   strong random password for the app database
+#   JWT_SECRET          >=32 chars, random, never reused across environments
+# Optional:
+#   APP_BIND            interface to bind the public port to (default: 127.0.0.1)
+#   APP_PORT            public port (default: 8080) — put a reverse proxy in front
+#   SWAGGER_ENABLED     expose /swagger-ui (default: false in production)
+#   OIDC_*              enable OIDC SSO + bearer-token validation
+
+services:
   db:
     image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: {db}
       POSTGRES_USER: {db}
-      POSTGRES_PASSWORD: ${{POSTGRES_PASSWORD:-changeme}}
+      POSTGRES_PASSWORD: ${{POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -1398,17 +1432,22 @@ pub fn compose_yaml(c: &ProjectConfig) -> String {
       interval: 5s
       timeout: 5s
       retries: 5
+    security_opt:
+      - no-new-privileges:true
     networks:
       - internal
 
   redis:
     image: redis:8-alpine
     restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
+    security_opt:
+      - no-new-privileges:true
     networks:
       - internal
 
@@ -1418,20 +1457,25 @@ pub fn compose_yaml(c: &ProjectConfig) -> String {
       args:
         NPM_TOKEN: ${{NPM_TOKEN:-}}
     restart: unless-stopped
+    # SECURITY: bind to loopback by default so only a reverse proxy on the
+    # host (Caddy, nginx, Traefik) can reach the app. Override APP_BIND=0.0.0.0
+    # ONLY if you genuinely want to expose the container directly to the
+    # network without a TLS-terminating proxy.
     ports:
-      - "${{APP_PORT:-8080}}:8080"
+      - "${{APP_BIND:-127.0.0.1}}:${{APP_PORT:-8080}}:8080"
     environment:
-      DATABASE_URL: postgres://{db}:${{POSTGRES_PASSWORD:-changeme}}@db:5432/{db}
+      DATABASE_URL: postgres://{db}:${{POSTGRES_PASSWORD}}@db:5432/{db}
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${{JWT_SECRET}}
+      JWT_SECRET: ${{JWT_SECRET:?JWT_SECRET must be set (min 32 chars)}}
       PORT: "{port}"
       SWAGGER_ENABLED: ${{SWAGGER_ENABLED:-false}}
       RUST_LOG: ${{RUST_LOG:-info}}
-      # OIDC (uncomment to enable)
+      # OIDC (uncomment to enable SSO + bearer-token validation)
       # OIDC_ISSUER: ${{OIDC_ISSUER}}
       # OIDC_CLIENT_ID: ${{OIDC_CLIENT_ID}}
       # OIDC_CLIENT_SECRET: ${{OIDC_CLIENT_SECRET}}
       # OIDC_REDIRECT_URI: ${{OIDC_REDIRECT_URI:-http://localhost:8080/api/auth/callback}}
+      # OIDC_AUDIENCE: ${{OIDC_AUDIENCE:-}}
     depends_on:
       db:
         condition: service_healthy
@@ -1443,6 +1487,12 @@ pub fn compose_yaml(c: &ProjectConfig) -> String {
       timeout: 5s
       start_period: 10s
       retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     deploy:
       resources:
         limits:
