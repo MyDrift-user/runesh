@@ -327,16 +327,17 @@ impl ProjectConfig {
 
     pub fn npm_ui_dep_from_depth(&self, _depth: usize) -> String {
         match &self.source {
-            // --local: emit an absolute file: ref pointing at the local checkout
-            // so a fresh `bun install` resolves without hitting GitHub Packages.
-            // bun and npm both accept absolute file: paths in package.json.
-            RuneshSource::Local(runesh_path) => {
-                let normalized = runesh_path.replace('\\', "/");
-                let normalized = normalized.trim_end_matches('/');
-                format!(
-                    "\"@mydrift-user/runesh-ui\": \"file:{normalized}/packages/ui\""
-                )
-            }
+            // --local: omit the dep from package.json entirely. The package
+            // is satisfied by a directory junction created by
+            // relink_runesh_ui() before bun install runs, so webpack/Next
+            // resolves `@mydrift-user/runesh-ui/*` imports without bun
+            // ever trying to fetch (which would 401 against GitHub Packages)
+            // or copy (which EPERMs on Windows for the deep tree).
+            //
+            // Returning an empty string here means the consumer of this
+            // function (e.g. web_package_json) must handle the empty case
+            // and not emit a stray comma.
+            RuneshSource::Local(_) => String::new(),
             // --git (default): registry version. Consumers either set up
             // .npmrc with NPM_TOKEN for the GitHub Packages registry or
             // use `bun link @mydrift-user/runesh-ui` for local dev.
@@ -483,9 +484,106 @@ fn run_bun_installs(root: &Path, config: &ProjectConfig) {
         (config.has_extension, "extension"),
     ] {
         if dir {
+            // Under --local the package.json doesn't list @mydrift-user/runesh-ui
+            // (npm_ui_dep_from_depth returns "") because bun's `file:` install
+            // hits EPERM on Windows for the deep tree. Pre-create a directory
+            // junction (Windows) / symlink (unix) so the package is resolvable
+            // BEFORE bun install runs and BEFORE shadcn add tries to read it.
+            if label != "extension" {
+                if let RuneshSource::Local(runesh_path) = &config.source {
+                    relink_runesh_ui(&root.join(label), runesh_path);
+                }
+            }
             run_bun_install(&root.join(label), label);
+            // bun install may have stomped the junction if it found a stub
+            // package.json reference. Re-link to be safe.
+            if label != "extension" {
+                if let RuneshSource::Local(runesh_path) = &config.source {
+                    relink_runesh_ui(&root.join(label), runesh_path);
+                }
+            }
         }
     }
+}
+
+/// Replace `<pkg>/node_modules/@mydrift-user/runesh-ui` with a junction/symlink
+/// pointing at the live RUNESH packages/ui dir.
+fn relink_runesh_ui(pkg_dir: &Path, runesh_relative: &str) {
+    let target_link = pkg_dir.join("node_modules/@mydrift-user/runesh-ui");
+    let mut runesh_abs: PathBuf = if Path::new(runesh_relative).is_absolute() {
+        PathBuf::from(runesh_relative)
+    } else {
+        // runesh_relative was computed by make_relative() relative to the
+        // project root (parent of pkg_dir). Resolve it now.
+        pkg_dir
+            .parent()
+            .map(|p| p.join(runesh_relative))
+            .unwrap_or_else(|| PathBuf::from(runesh_relative))
+    };
+    runesh_abs = runesh_abs.join("packages").join("ui");
+    let runesh_abs = match fs::canonicalize(&runesh_abs) {
+        Ok(p) => p,
+        Err(_) => {
+            println!(
+                "  {} Could not resolve {} for runesh-ui junction",
+                style("!").yellow(),
+                runesh_abs.display()
+            );
+            return;
+        }
+    };
+
+    // Make sure the parent dir exists.
+    if let Some(parent) = target_link.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    // Always replace what's there — bun may have left an empty/partial copy.
+    let _ = remove_dir_or_link(&target_link);
+
+    let result = create_dir_link(&runesh_abs, &target_link);
+    if result.is_ok() {
+        println!("  {} Linked @mydrift-user/runesh-ui -> RUNESH/packages/ui", style("OK").green());
+    } else {
+        println!(
+            "  {} Could not link runesh-ui (manual `bun install` needed): {}",
+            style("!").yellow(),
+            result.err().unwrap()
+        );
+    }
+}
+
+#[cfg(windows)]
+fn create_dir_link(src: &Path, dst: &Path) -> Result<(), String> {
+    // Use `mklink /J` for a directory junction. Junctions don't need admin
+    // and survive across drives but only on the local machine.
+    let src_str = src.to_string_lossy().replace('/', "\\");
+    let dst_str = dst.to_string_lossy().replace('/', "\\");
+    let status = Command::new("cmd")
+        .args(["/c", "mklink", "/J", &dst_str, &src_str])
+        .status()
+        .map_err(|e| format!("mklink spawn: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("mklink exit code {:?}", status.code()))
+    }
+}
+
+#[cfg(unix)]
+fn create_dir_link(src: &Path, dst: &Path) -> Result<(), String> {
+    std::os::unix::fs::symlink(src, dst).map_err(|e| format!("symlink: {e}"))
+}
+
+fn remove_dir_or_link(path: &Path) -> Result<(), String> {
+    // On Windows a junction is removable via remove_dir; an empty dir is too.
+    // For a populated dir we need remove_dir_all.
+    if path.exists() || fs::symlink_metadata(path).is_ok() {
+        fs::remove_dir_all(path)
+            .or_else(|_| fs::remove_dir(path))
+            .or_else(|_| fs::remove_file(path))
+            .map_err(|e| format!("remove {path:?}: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Copy a component from the RUNESH package source into the consumer project.

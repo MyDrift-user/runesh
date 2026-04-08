@@ -433,8 +433,7 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "lint": "eslint"
   }},
   "dependencies": {{
-    {ui_dep},
-    "@base-ui/react": "^1.2.0",
+    {ui_dep_line}"@base-ui/react": "^1.2.0",
     "@tanstack/react-query": "^5.90.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -460,7 +459,14 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
   }}
 }}"#,
         name = c.name,
-        ui_dep = c.npm_ui_dep(),
+        ui_dep_line = {
+            let dep = c.npm_ui_dep();
+            if dep.is_empty() {
+                String::new()
+            } else {
+                format!("{dep},\n    ")
+            }
+        },
         editor_deps = editor_deps,
         telemetry_dep = if c.with_telemetry_web {
             // OPTIONAL — left enabled at runtime only when NEXT_PUBLIC_SENTRY_DSN is set.
@@ -1753,8 +1759,7 @@ pub fn desktop_package_json(c: &ProjectConfig) -> String {
     "start": "next start"
   }},
   "dependencies": {{
-    {ui_dep},
-    "@tauri-apps/api": "^2.5.0",
+    {ui_dep_line}"@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@base-ui/react": "^1.2.0",
     "class-variance-authority": "^0.7.1",
@@ -1777,7 +1782,13 @@ pub fn desktop_package_json(c: &ProjectConfig) -> String {
     "tailwindcss": "^4",
     "typescript": "^5"
   }}
-}}"#, name = c.name, ui_dep = c.npm_ui_dep())
+}}"#,
+        name = c.name,
+        ui_dep_line = {
+            let dep = c.npm_ui_dep();
+            if dep.is_empty() { String::new() } else { format!("{dep},\n    ") }
+        },
+    )
 }
 
 pub const NEXT_CONFIG_STATIC: &str = r#"import type { NextConfig } from "next";

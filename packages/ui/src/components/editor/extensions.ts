@@ -50,11 +50,7 @@ const FixDragHandleDrop = Extension.create({
         return [
             new Plugin({
                 key: new PluginKey("fixDragHandleDrop"),
-                appendTransaction(
-                    transactions: Array<{ getMeta: (key: string) => unknown }>,
-                    oldState: { doc: any },
-                    newState: { doc: any; tr: any },
-                ) {
+                appendTransaction(transactions, oldState, newState) {
                     const isDrop = transactions.some(
                         (tr) => tr.getMeta("uiEvent") === "drop",
                     );
@@ -129,8 +125,8 @@ const TrailingNode = Node.create({
         return [
             new Plugin({
                 key: pluginKey,
-                appendTransaction(_transactions: unknown[], _oldState: unknown, newState: { doc: { lastChild: { type: { name: string } }; content: { size: number } }; tr: { insert: (pos: number, node: unknown) => unknown }; schema: { nodes: Record<string, { create: () => unknown }> } }) {
-                    const { doc, tr, schema } = newState;
+                appendTransaction(_transactions, _oldState, newState) {
+                    const { doc, tr, schema } = newState as any;
                     const lastNode = doc.lastChild;
                     const shouldInsert = lastNode && lastNode.type.name !== "paragraph";
                     if (shouldInsert) {
