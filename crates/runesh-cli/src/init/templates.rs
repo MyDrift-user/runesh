@@ -155,6 +155,21 @@ r#"        .layer(runesh_telemetry::axum::layer())
             paths
         })))
 "#);
+        // OIDC bearer validation (Keycloak / Azure EntraID / Auth0 / …).
+        // Active only when OIDC_ISSUER is set in the environment, otherwise
+        // the auth middleware uses the local HS256 JwtSecret path.
+        extra_setup.push_str(r#"
+    // OIDC bearer-token verification. No-op unless OIDC_ISSUER is set.
+    let oidc_verifier = runesh_auth::OidcVerifier::from_env()
+        .await
+        .expect("OIDC discovery failed");
+    let app = if let Some(verifier) = oidc_verifier {
+        tracing::info!("OIDC bearer validation enabled");
+        app.layer(axum::Extension(verifier))
+    } else {
+        app
+    };
+"#);
     }
     if c.with_openapi {
         extra_imports.push_str("use utoipa::OpenApi;\nuse runesh_core::openapi::{setup_swagger, SwaggerConfig, add_bearer_security};\n");
@@ -412,7 +427,7 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
   "version": "0.1.0",
   "private": true,
   "scripts": {{
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint"
@@ -477,6 +492,32 @@ pub const TSCONFIG: &str = r#"{
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules"]
+}
+"#;
+
+/// shadcn/ui project config. Pre-written so we never have to run
+/// `bunx shadcn init` (which is interactive and unreliable in CI/headless).
+/// Once this file exists, `bunx shadcn add <component>` works directly.
+pub const COMPONENTS_JSON: &str = r#"{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": true,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/app/globals.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "@/components",
+    "utils": "@/lib/utils",
+    "ui": "@/components/ui",
+    "lib": "@/lib",
+    "hooks": "@/hooks"
+  }
 }
 "#;
 
@@ -1168,12 +1209,20 @@ APP_PORT=8080
 
     if c.with_auth {
         env.push_str(r#"
-# ── OIDC (uncomment to enable SSO) ────────────────────────────────────────
+# ── OIDC (uncomment to enable SSO + bearer-token validation) ──────────────
+# Setting OIDC_ISSUER does TWO things:
+#   1. Enables the redirect-based login flow at /auth/login (cookie session,
+#      requires CLIENT_ID/SECRET/REDIRECT_URI below).
+#   2. Enables bearer-token validation: any Bearer token whose JWT header
+#      uses RS*/ES*/PS*/EdDSA is verified against the issuer's JWKS instead
+#      of the local JWT_SECRET. This is what lets API clients pass tokens
+#      issued directly by Keycloak / Azure EntraID / Auth0 / etc.
 # OIDC_ISSUER=https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0
 # OIDC_CLIENT_ID=your-client-id
 # OIDC_CLIENT_SECRET=your-client-secret
 # OIDC_REDIRECT_URI=http://localhost:8080/api/auth/callback
 # OIDC_SCOPE=openid profile email offline_access
+# OIDC_AUDIENCE=          # optional: enforce `aud` claim if your IdP sets one
 "#);
     }
 
@@ -1699,7 +1748,7 @@ pub fn desktop_package_json(c: &ProjectConfig) -> String {
   "version": "0.1.0",
   "private": true,
   "scripts": {{
-    "dev": "next dev -p 3100",
+    "dev": "next dev --webpack -p 3100",
     "build": "next build --webpack",
     "start": "next start"
   }},

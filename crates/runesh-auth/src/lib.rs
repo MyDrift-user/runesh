@@ -1,4 +1,5 @@
 pub mod error;
+pub mod jwks;
 pub mod oidc;
 pub mod token;
 pub mod store;
@@ -10,6 +11,7 @@ pub mod axum_middleware;
 pub mod handlers;
 
 pub use error::AuthError;
+pub use jwks::OidcVerifier;
 pub use oidc::{OidcProvider, OidcSession, OidcSessionStore, OidcUserInfo};
 #[cfg(feature = "redis")]
 pub use oidc::RedisOidcSessionStore;

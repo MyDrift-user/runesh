@@ -326,10 +326,22 @@ impl ProjectConfig {
     }
 
     pub fn npm_ui_dep_from_depth(&self, _depth: usize) -> String {
-        // Always use registry version in package.json.
-        // For local dev, `bun link @mydrift-user/runesh-ui` overrides this with the local copy.
-        // For Docker/CI, bun installs from GitHub Packages registry.
-        "\"@mydrift-user/runesh-ui\": \"*\"".into()
+        match &self.source {
+            // --local: emit an absolute file: ref pointing at the local checkout
+            // so a fresh `bun install` resolves without hitting GitHub Packages.
+            // bun and npm both accept absolute file: paths in package.json.
+            RuneshSource::Local(runesh_path) => {
+                let normalized = runesh_path.replace('\\', "/");
+                let normalized = normalized.trim_end_matches('/');
+                format!(
+                    "\"@mydrift-user/runesh-ui\": \"file:{normalized}/packages/ui\""
+                )
+            }
+            // --git (default): registry version. Consumers either set up
+            // .npmrc with NPM_TOKEN for the GitHub Packages registry or
+            // use `bun link @mydrift-user/runesh-ui` for local dev.
+            RuneshSource::Git(_) => "\"@mydrift-user/runesh-ui\": \"*\"".into(),
+        }
     }
 
     pub fn has_any_frontend(&self) -> bool {
@@ -508,38 +520,56 @@ fn run_bun_install(dir: &Path, label: &str) {
     match Command::new("bun").arg("install").current_dir(dir).status() {
         Ok(s) if s.success() => {}
         Ok(_) => println!("  {} bun install had warnings in {label}/ (non-fatal)", style("!").yellow()),
-        Err(_) => println!("  {} bun not found - run 'bun install' in {label}/ manually", style("!").yellow()),
+        Err(_) => {
+            println!("  {} bun not found - run 'bun install' in {label}/ manually", style("!").yellow());
+            return;
+        }
     }
 
-    // Only init shadcn for Next.js frontends, not extensions
-    if label != "extension" {
-        println!("  {} Initializing shadcn/ui in {label}/...", style("->").green());
-        match Command::new("bunx").args(["shadcn@latest", "init", "-y", "-d"]).current_dir(dir).status() {
-            Ok(s) if s.success() => {}
-            _ => {
-                println!("  {} shadcn init skipped in {label}/", style("!").yellow());
-                return;
-            }
-        }
+    // Only Next.js frontends need shadcn components — extensions don't.
+    if label == "extension" {
+        return;
+    }
 
-        // Install all shadcn base components needed by RUNESH shared components
-        let shadcn_components = [
-            "sidebar", "button", "input", "separator", "sheet", "skeleton",
-            "tooltip", "select", "table", "command", "alert-dialog",
-        ];
-        println!("  {} Adding shadcn components in {label}/...", style("->").green());
-        match Command::new("bunx")
-            .arg("shadcn@latest")
-            .arg("add")
-            .args(&shadcn_components)
-            .arg("-y")
-            .arg("-o")
-            .current_dir(dir)
-            .status()
-        {
-            Ok(s) if s.success() => {}
-            _ => println!("  {} shadcn add skipped - run 'bunx shadcn add {}' manually", style("!").yellow(), shadcn_components.join(" ")),
-        }
+    // shadcn add invokes the package manager to install peer deps for
+    // certain components (e.g. cmdk for `command`). On React 19 projects
+    // some of those resolve via npm with peer-dep conflicts even though
+    // bun would handle them. Pre-install the known troublemakers via bun
+    // so shadcn add never has to touch npm.
+    let preinstall = ["cmdk"];
+    println!("  {} Pre-installing shadcn peer deps in {label}/...", style("->").green());
+    let _ = Command::new("bun")
+        .arg("add")
+        .args(&preinstall)
+        .current_dir(dir)
+        .status();
+
+    // Comprehensive list of components used across RUNESH dashboard, editor,
+    // and data-table features. shadcn writes the .tsx file even when its
+    // internal package-install step warns, so we tolerate non-zero exits.
+    // components.json is pre-written by write_files, so we don't run init.
+    let shadcn_components = [
+        "alert-dialog", "avatar", "badge", "button", "card", "collapsible",
+        "command", "dialog", "dropdown-menu", "form", "input", "label",
+        "popover", "scroll-area", "select", "separator", "sheet", "sidebar",
+        "skeleton", "table", "textarea", "tooltip",
+    ];
+    println!("  {} Adding {} shadcn components in {label}/...", style("->").green(), shadcn_components.len());
+    match Command::new("bunx")
+        .arg("--bun")
+        .arg("shadcn@latest")
+        .arg("add")
+        .args(&shadcn_components)
+        .arg("--yes")
+        .arg("--overwrite")
+        .current_dir(dir)
+        .status()
+    {
+        Ok(s) if s.success() => {}
+        _ => println!(
+            "  {} shadcn add finished with warnings in {label}/ - some components may need manual install",
+            style("!").yellow()
+        ),
     }
 }
 
@@ -598,6 +628,7 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
     if c.has_web {
         w("web/package.json", &templates::web_package_json(c))?;
         w("web/tsconfig.json", templates::TSCONFIG)?;
+        w("web/components.json", templates::COMPONENTS_JSON)?;
         w("web/next.config.ts", &templates::next_config(c))?;
         w("web/postcss.config.mjs", templates::POSTCSS_CONFIG)?;
 

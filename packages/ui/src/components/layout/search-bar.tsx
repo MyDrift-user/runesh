@@ -112,8 +112,6 @@ export function SearchBar({
           setResults([])
         }
       }}
-      title="Search"
-      description="Search and navigate"
     >
       <CommandInput
         placeholder={placeholder}

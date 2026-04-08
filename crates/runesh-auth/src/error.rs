@@ -26,4 +26,7 @@ pub enum AuthError {
 
     #[error("JWT error: {0}")]
     Jwt(#[from] jsonwebtoken::errors::Error),
+
+    #[error("Token invalid: {0}")]
+    TokenInvalid(String),
 }

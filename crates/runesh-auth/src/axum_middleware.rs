@@ -174,6 +174,51 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
         }
     }
 
+    // Two acceptable token formats:
+    //   1. First-party HS256 JWT signed with JwtSecret (default).
+    //   2. OIDC bearer signed by an IdP, validated against its JWKS — only
+    //      when an `OidcVerifier` extension is installed.
+    //
+    // We pick the path by looking at the JWT header `alg`. HS* always uses the
+    // local secret; RS*/ES*/PS*/EdDSA always uses OIDC. If OIDC is requested
+    // but no verifier is installed, we fail closed with 401 rather than
+    // accidentally accepting an unsigned token.
+    let alg_is_asymmetric = jsonwebtoken::decode_header(&token)
+        .map(|h| matches!(
+            h.alg,
+            jsonwebtoken::Algorithm::RS256 | jsonwebtoken::Algorithm::RS384 | jsonwebtoken::Algorithm::RS512
+            | jsonwebtoken::Algorithm::ES256 | jsonwebtoken::Algorithm::ES384
+            | jsonwebtoken::Algorithm::PS256 | jsonwebtoken::Algorithm::PS384 | jsonwebtoken::Algorithm::PS512
+            | jsonwebtoken::Algorithm::EdDSA
+        ))
+        .unwrap_or(false);
+
+    if alg_is_asymmetric {
+        let verifier = req.extensions().get::<crate::OidcVerifier>().cloned();
+        let Some(verifier) = verifier else {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "OIDC bearer not accepted (no verifier configured)"})),
+            )
+                .into_response();
+        };
+        return match verifier.validate(&token).await {
+            Ok(claims) => {
+                let mut req = req;
+                req.extensions_mut().insert(claims);
+                next.run(req).await
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "OIDC bearer validation failed");
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({"error": "invalid or expired OIDC token"})),
+                )
+                    .into_response()
+            }
+        };
+    }
+
     match validate_access_token(&token, &secret) {
         Ok(claims) => {
             let mut req = req;
