@@ -37,6 +37,13 @@ clap = {{ version = "4", features = ["derive", "env"] }}
         content.push_str(&c.cargo_dep("runesh-auth"));
         content.push('\n');
     }
+    if c.with_telemetry_server {
+        content.push_str("\n# Optional: error reporting (Sentry/GlitchTip-compatible).\n");
+        content.push_str("# At runtime this is a no-op unless RUNESH_SENTRY_DSN is set,\n");
+        content.push_str("# so deploying without telemetry requires no code changes.\n");
+        content.push_str(&c.cargo_dep_with_features("runesh-telemetry", &["tracing-layer", "axum"]));
+        content.push('\n');
+    }
 
     content
 }
@@ -74,6 +81,11 @@ runesh-core.workspace = true
     if c.with_upload || c.with_editor {
         deps.push_str("mime_guess = \"2\"\n");
     }
+    if c.with_telemetry_server {
+        // Optional error reporting. The integration is a no-op when
+        // RUNESH_SENTRY_DSN is unset, so this dependency is safe to ship.
+        deps.push_str("runesh-telemetry = { workspace = true }\n");
+    }
 
     deps
 }
@@ -83,12 +95,36 @@ pub fn server_main(c: &ProjectConfig) -> String {
     let mut extra_imports = String::new();
     let mut extra_middleware = String::new();
     let mut extra_setup = String::new();
+    let mut telemetry_init = String::new();
+    let mut telemetry_middleware = String::new();
+
+    if c.with_telemetry_server {
+        // Telemetry is opt-in at *deploy* time: the guard is held but does
+        // nothing unless RUNESH_SENTRY_DSN is set in the environment. The
+        // tracing layer is always installed so existing tracing::error!
+        // calls can be reported when telemetry is enabled.
+        extra_imports.push_str("use tracing_subscriber::prelude::*;\n");
+        telemetry_init.push_str(
+r#"    // ── Optional error reporting (Sentry / GlitchTip) ──
+    // No-op unless RUNESH_SENTRY_DSN is set, so this is safe in every env.
+    let _telemetry_guard = runesh_telemetry::init(runesh_telemetry::Config::from_env(
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+    ));
+"#,
+        );
+        telemetry_middleware.push_str(
+r#"        .layer(runesh_telemetry::axum::layer())
+        .layer(runesh_telemetry::axum::NewSentryLayer::new_from_top())
+"#,
+        );
+    }
 
     if c.with_rate_limit {
         extra_imports.push_str("use runesh_core::rate_limit::{RateLimiter, rate_limit_layer};\n");
         extra_middleware.push_str(r#"        .layer(middleware::from_fn(move |req, next| {
             let limiter = RateLimiter::new(100, 60);
-            rate_limit_layer(limiter, true, req, next)
+            rate_limit_layer(runesh_core::RateLimiterBackend::InMemory(limiter), true, req, next)
         }))
 "#);
     }
@@ -106,18 +142,18 @@ pub fn server_main(c: &ProjectConfig) -> String {
 "#);
         extra_middleware.push_str(r#"        .layer(middleware::from_fn(auth_middleware))
         .layer(axum::Extension(JwtSecret(cli.jwt_secret.clone())))
-        .layer(axum::Extension(AuthExemptPaths({{
+        .layer(axum::Extension(AuthExemptPaths({
             let mut paths = vec![
                 "/auth/".into(),
                 "/api/v1/health".into(),
                 "/swagger-ui".into(),
                 "/api/openapi.json".into(),
             ];
-            if !cli.upload_auth_required {{
+            if !cli.upload_auth_required {
                 paths.push("/api/uploads".into());
-            }}
+            }
             paths
-        }})))
+        })))
 "#);
     }
     if c.with_openapi {
@@ -222,12 +258,7 @@ async fn main() {{
     dotenvy::dotenv().ok();
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(&cli.log_level))
-        )
-        .init();
+{telemetry_init}{tracing_init}
 
     let pool = runesh_core::db::create_pool(Some(&cli.database_url))
         .await
@@ -251,7 +282,7 @@ async fn main() {{
 
     let app = Router::new()
         .route("/api/v1/health", get(health))
-{extra_routes}{extra_middleware}        .layer(runesh_core::middleware::cors::cors_layer(&cors_origins))
+{extra_routes}{extra_middleware}{telemetry_middleware}        .layer(runesh_core::middleware::cors::cors_layer(&cors_origins))
         .layer(middleware::from_fn(runesh_core::middleware::security_headers::security_headers_middleware))
         .layer(middleware::from_fn(runesh_core::middleware::logging::logging_middleware))
         .layer(middleware::from_fn(runesh_core::middleware::request_id::request_id_middleware))
@@ -269,7 +300,7 @@ async fn main() {{
         .unwrap();
 }}
 {openapi_struct}
-{health_annotation}async fn health(axum::extract::State(pool): axum::extract::State<PgPool>) -> Json<serde_json::Value> {{
+{health_annotation}async fn health(axum::extract::State(pool): axum::extract::State<PgPool>) -> (axum::http::StatusCode, Json<serde_json::Value>) {{
     runesh_core::middleware::health::health_handler(axum::extract::State(pool)).await
 }}
 {extra_handlers}
@@ -280,6 +311,28 @@ async fn main() {{
         extra_cli_fields = extra_cli_fields,
         extra_routes = extra_routes,
         extra_middleware = extra_middleware,
+        telemetry_init = telemetry_init,
+        telemetry_middleware = telemetry_middleware,
+        tracing_init = if c.with_telemetry_server {
+            // Compose the fmt layer with the Sentry layer so tracing events
+            // flow to both stdout and (when DSN is set) Sentry/GlitchTip.
+r#"    use tracing_subscriber::Layer;
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(&cli.log_level));
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(env_filter))
+        .with(runesh_telemetry::tracing_layer())
+        .init();
+"#
+        } else {
+r#"    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new(&cli.log_level))
+        )
+        .init();
+"#
+        },
         extra_setup = extra_setup,
         extra_handlers = extra_handlers,
         health_annotation = if c.with_openapi {
@@ -378,7 +431,7 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "shadcn": "^4.0.5",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
-    "tw-animate-css": "^1.4.0"{editor_deps}
+    "tw-animate-css": "^1.4.0"{editor_deps}{telemetry_dep}
   }},
   "devDependencies": {{
     "@tailwindcss/postcss": "^4",
@@ -390,7 +443,18 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "tailwindcss": "^4",
     "typescript": "^5"
   }}
-}}"#, name = c.name, ui_dep = c.npm_ui_dep(), editor_deps = editor_deps)
+}}"#,
+        name = c.name,
+        ui_dep = c.npm_ui_dep(),
+        editor_deps = editor_deps,
+        telemetry_dep = if c.with_telemetry_web {
+            // OPTIONAL — left enabled at runtime only when NEXT_PUBLIC_SENTRY_DSN is set.
+            r#",
+    "@sentry/nextjs": "^8.45.0""#
+        } else {
+            ""
+        },
+    )
 }
 
 pub const TSCONFIG: &str = r#"{
@@ -425,6 +489,155 @@ const nextConfig: NextConfig = {
 
 export default nextConfig;
 "#;
+
+/// next.config.ts that conditionally wraps the config in `withSentryConfig`
+/// when the Sentry/GlitchTip frontend integration is enabled.
+///
+/// At deploy time the wrapping is still a no-op unless `NEXT_PUBLIC_SENTRY_DSN`
+/// is set, so a project scaffolded with telemetry can be deployed without it.
+pub fn next_config(c: &ProjectConfig) -> String {
+    if !c.with_telemetry_web {
+        return NEXT_CONFIG.to_string();
+    }
+    r#"import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
+
+const nextConfig: NextConfig = {
+  output: "standalone",
+  transpilePackages: ["@mydrift-user/runesh-ui"],
+};
+
+// Sentry / GlitchTip wiring is OPTIONAL at deploy time:
+//   - If NEXT_PUBLIC_SENTRY_DSN is unset, the SDK initializes to a no-op and
+//     no events are sent. Remove `withSentryConfig` below if you want to strip
+//     the SDK out entirely.
+//   - Source-map upload to GlitchTip/Sentry only happens when SENTRY_AUTH_TOKEN
+//     is set in the build environment, so CI without it just skips that step.
+//   - For self-hosted GlitchTip set SENTRY_URL in the build environment; the
+//     bundler plugin reads it automatically.
+export default withSentryConfig(nextConfig, {
+  silent: !process.env.CI,
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  widenClientFileUpload: true,
+  hideSourceMaps: true,
+  disableLogger: true,
+  sourcemaps: {
+    // Skip source-map upload when no auth token (dev, CI without secrets).
+    disable: !process.env.SENTRY_AUTH_TOKEN,
+  },
+});
+"#.to_string()
+}
+
+// ── Sentry / GlitchTip frontend templates ────────────────────────────────────
+//
+// These follow the modern Next.js 13+ pattern: client/server/edge configs are
+// loaded by `instrumentation.ts` via `register()`. Everything reads from
+// `NEXT_PUBLIC_SENTRY_DSN` so the integration is a no-op when the DSN is unset.
+
+pub const SENTRY_CLIENT_CONFIG: &str = r#"// Browser-side Sentry initialization. Loaded by instrumentation-client.
+// No-op if NEXT_PUBLIC_SENTRY_DSN is not set.
+import * as Sentry from "@sentry/nextjs";
+
+const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+
+if (dsn) {
+  Sentry.init({
+    dsn,
+    environment: process.env.NEXT_PUBLIC_SENTRY_ENV ?? "development",
+    release: process.env.NEXT_PUBLIC_APP_VERSION,
+    // Performance traces sample rate. 0.0 = errors only, 1.0 = full traces.
+    tracesSampleRate: Number(process.env.NEXT_PUBLIC_SENTRY_SAMPLE_RATE ?? "0"),
+    // Session replay (off by default — costs bandwidth + storage).
+    replaysSessionSampleRate: 0,
+    replaysOnErrorSampleRate: 0,
+    sendDefaultPii: false,
+    debug: false,
+  });
+}
+"#;
+
+pub const SENTRY_SERVER_CONFIG: &str = r#"// Node runtime (Next.js server actions, route handlers, RSC).
+// No-op if NEXT_PUBLIC_SENTRY_DSN / SENTRY_DSN is not set.
+import * as Sentry from "@sentry/nextjs";
+
+const dsn = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
+
+if (dsn) {
+  Sentry.init({
+    dsn,
+    environment: process.env.SENTRY_ENV ?? process.env.NODE_ENV ?? "development",
+    release: process.env.NEXT_PUBLIC_APP_VERSION,
+    tracesSampleRate: Number(process.env.SENTRY_SAMPLE_RATE ?? "0"),
+    sendDefaultPii: false,
+    debug: false,
+  });
+}
+"#;
+
+pub const SENTRY_EDGE_CONFIG: &str = r#"// Edge runtime (middleware, edge route handlers).
+// No-op if NEXT_PUBLIC_SENTRY_DSN / SENTRY_DSN is not set.
+import * as Sentry from "@sentry/nextjs";
+
+const dsn = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
+
+if (dsn) {
+  Sentry.init({
+    dsn,
+    environment: process.env.SENTRY_ENV ?? process.env.NODE_ENV ?? "development",
+    release: process.env.NEXT_PUBLIC_APP_VERSION,
+    tracesSampleRate: Number(process.env.SENTRY_SAMPLE_RATE ?? "0"),
+    sendDefaultPii: false,
+    debug: false,
+  });
+}
+"#;
+
+pub const SENTRY_INSTRUMENTATION: &str = r#"// Next.js instrumentation hook. Loads the right Sentry config for the runtime
+// the request is being handled in. This file is the modern (Next 13+) entry
+// point for server-side observability — see:
+// https://nextjs.org/docs/app/building-your-application/optimizing/instrumentation
+import * as Sentry from "@sentry/nextjs";
+
+export async function register() {
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    await import("../sentry.server.config");
+  }
+  if (process.env.NEXT_RUNTIME === "edge") {
+    await import("../sentry.edge.config");
+  }
+}
+
+export const onRequestError = Sentry.captureRequestError;
+"#;
+
+pub fn sentry_web_env() -> &'static str {
+    r#"# ── Error reporting (OPTIONAL — Sentry / GlitchTip) ──────────────────────
+# Copy this file to .env.local and fill in the DSN to enable reporting.
+# Leaving these unset is the supported way to deploy without telemetry —
+# the SDK initializes to a no-op and no events are sent.
+
+# DSN exposed to the browser (required for client-side reporting).
+# NEXT_PUBLIC_SENTRY_DSN=https://<key>@errors.example.com/<project-id>
+# NEXT_PUBLIC_SENTRY_ENV=production
+# NEXT_PUBLIC_SENTRY_SAMPLE_RATE=0.0
+# NEXT_PUBLIC_APP_VERSION=0.1.0
+
+# Server-only DSN (defaults to NEXT_PUBLIC_SENTRY_DSN if unset).
+# SENTRY_DSN=
+# SENTRY_ENV=production
+# SENTRY_SAMPLE_RATE=0.0
+
+# Source-map upload during `next build` (only used at build time, never runtime).
+# All optional — without these the build skips source-map upload entirely.
+# SENTRY_URL=https://errors.example.com/      # self-hosted GlitchTip URL
+# SENTRY_ORG=your-org
+# SENTRY_PROJECT=your-project
+# SENTRY_AUTH_TOKEN=
+"#
+}
 
 pub const POSTCSS_CONFIG: &str = r#"const config = {
   plugins: {
@@ -961,6 +1174,18 @@ APP_PORT=8080
 # OIDC_CLIENT_SECRET=your-client-secret
 # OIDC_REDIRECT_URI=http://localhost:8080/api/auth/callback
 # OIDC_SCOPE=openid profile email offline_access
+"#);
+    }
+
+    if c.with_telemetry_server {
+        env.push_str(r#"
+# ── Error reporting (OPTIONAL — Sentry / GlitchTip) ───────────────────────
+# Telemetry is wired into the binary but stays a no-op until you set
+# RUNESH_SENTRY_DSN. Leave these commented out to deploy without reporting.
+# RUNESH_SENTRY_DSN=https://<key>@errors.example.com/<project-id>
+# RUNESH_ENV=production
+# RUNESH_SAMPLE_RATE=0.0      # 0.0 = errors only, 1.0 = full perf traces
+# RUNESH_TELEMETRY_DEBUG=0
 "#);
     }
 

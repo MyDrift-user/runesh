@@ -78,12 +78,14 @@ pub fn run(
     let mut with_dashboard = false;
     let mut with_editor = false;
     let mut with_data_table = false;
+    let mut with_telemetry_web = false;
 
     if has_web {
         if accept_defaults {
             with_dashboard = true;
             with_editor = true;
             with_data_table = true;
+            // telemetry stays opt-in even with --yes
         } else {
             println!("\n  {} Select frontend features:\n", style("2/4").dim());
 
@@ -91,18 +93,20 @@ pub fn run(
                 "Dashboard shell (sidebar + toolbar + search command palette)",
                 "Novel WYSIWYG editor (wiki/rich text, file attachments, tables)",
                 "Data table (sortable, paginated, searchable)",
+                "Error reporting via Sentry/GlitchTip (OPTIONAL — off by default; deploy without a DSN to disable)",
             ];
 
             let sel = MultiSelect::new()
                 .with_prompt("Frontend features (space to toggle)")
                 .items(features)
-                .defaults(&[true, true, true])
+                .defaults(&[true, true, true, false])
                 .interact()
                 .map_err(|e| e.to_string())?;
 
             with_dashboard = sel.contains(&0);
             with_editor = sel.contains(&1);
             with_data_table = sel.contains(&2);
+            with_telemetry_web = sel.contains(&3);
         }
     }
 
@@ -114,6 +118,7 @@ pub fn run(
     let mut with_upload = false;
     let mut with_openapi = false;
     let mut with_docker = false;
+    let mut with_telemetry_server = false;
 
     if has_server {
         if accept_defaults {
@@ -121,6 +126,7 @@ pub fn run(
             with_rate_limit = true;
             with_openapi = true;
             with_docker = true;
+            // telemetry stays opt-in even with --yes
         } else {
             println!("\n  {} Select server features:\n", style("3/4").dim());
 
@@ -131,12 +137,13 @@ pub fn run(
                 "File Upload Handler",
                 "OpenAPI / Swagger UI (utoipa)",
                 "Docker (Dockerfile + compose.yaml)",
+                "Error reporting via Sentry/GlitchTip (OPTIONAL — off by default; deploy without a DSN to disable)",
             ];
 
             let sel = MultiSelect::new()
                 .with_prompt("Server features (space to toggle)")
                 .items(features)
-                .defaults(&[true, true, false, false, true, true])
+                .defaults(&[true, true, false, false, true, true, false])
                 .interact()
                 .map_err(|e| e.to_string())?;
 
@@ -146,6 +153,7 @@ pub fn run(
             with_upload = sel.contains(&3);
             with_openapi = sel.contains(&4);
             with_docker = sel.contains(&5);
+            with_telemetry_server = sel.contains(&6);
         }
     }
 
@@ -197,6 +205,8 @@ pub fn run(
         with_data_table,
         with_openapi,
         with_docker,
+        with_telemetry_server,
+        with_telemetry_web,
     };
 
     // ── Generate ────────────────────────────────────────────────────────
@@ -280,6 +290,13 @@ pub(crate) struct ProjectConfig {
     pub with_data_table: bool,
     pub with_openapi: bool,
     pub with_docker: bool,
+    /// Sentry/GlitchTip error reporting on the Rust server. Optional — off by default.
+    /// Even when scaffolded in, the integration is a no-op at runtime unless
+    /// `RUNESH_SENTRY_DSN` is set, so deploying without telemetry just works.
+    pub with_telemetry_server: bool,
+    /// Sentry/GlitchTip error reporting on the Next.js frontend. Optional — off
+    /// by default. Same runtime behavior: no DSN means no reports.
+    pub with_telemetry_web: bool,
 }
 
 impl ProjectConfig {
@@ -581,8 +598,17 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
     if c.has_web {
         w("web/package.json", &templates::web_package_json(c))?;
         w("web/tsconfig.json", templates::TSCONFIG)?;
-        w("web/next.config.ts", templates::NEXT_CONFIG)?;
+        w("web/next.config.ts", &templates::next_config(c))?;
         w("web/postcss.config.mjs", templates::POSTCSS_CONFIG)?;
+
+        // ── Sentry / GlitchTip frontend integration (optional) ──
+        if c.with_telemetry_web {
+            w("web/sentry.client.config.ts", templates::SENTRY_CLIENT_CONFIG)?;
+            w("web/sentry.server.config.ts", templates::SENTRY_SERVER_CONFIG)?;
+            w("web/sentry.edge.config.ts", templates::SENTRY_EDGE_CONFIG)?;
+            w("web/src/instrumentation.ts", templates::SENTRY_INSTRUMENTATION)?;
+            w("web/.env.local.example", templates::sentry_web_env())?;
+        }
         // Copy globals.css from RUNESH (includes theme + editor styles)
         {
             let css_src = match &c.source {

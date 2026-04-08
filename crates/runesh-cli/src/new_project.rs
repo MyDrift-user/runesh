@@ -21,6 +21,7 @@ const AVAILABLE_CRATES: &[(&str, &str)] = &[
     ("desktop",   "Remote desktop with screen capture, input injection, multi-cursor"),
     ("vfs",       "Virtual filesystem with cloud provider + overlay writes"),
     ("tun",       "Cross-platform TUN device (WireGuard tunneling)"),
+    ("telemetry", "Sentry/GlitchTip error reporting (OPTIONAL — off by default; no-op without DSN)"),
 ];
 
 pub fn run(
