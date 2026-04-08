@@ -26,6 +26,18 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { useTheme } from "next-themes"
+import {
+  FloatingFocusManager,
+  FloatingPortal,
+  autoUpdate,
+  offset,
+  shift,
+  useClick,
+  useDismiss,
+  useFloating,
+  useInteractions,
+  useRole,
+} from "@floating-ui/react"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -112,6 +124,12 @@ export function AppSidebar({
     groups.set(label, bucket)
   }
 
+  // When every nav item falls into the single default group, the label is
+  // visual noise (a heavy "NAVIGATION" header above one list). Suppress it.
+  // Only render group labels when at least one item explicitly opts in via
+  // its own `group` field, which signals multi-section intent.
+  const showGroupLabels = navItems.some((item) => item.group != null)
+
   return (
     <aside
       data-slot="runesh-app-sidebar"
@@ -128,10 +146,12 @@ export function AppSidebar({
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto p-2">
         {Array.from(groups.entries()).map(([label, items]) => (
-          <div key={label} className="mb-4">
-            <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              {label}
-            </div>
+          <div key={label} className="mb-2">
+            {showGroupLabels && (
+              <div className="px-2 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                {label}
+              </div>
+            )}
             <ul className="flex flex-col gap-0.5">
               {items.map((item) => {
                 const isActive =
@@ -202,111 +222,40 @@ function ProfileMenu({
   LinkComponent,
 }: ProfileMenuProps) {
   const [open, setOpen] = React.useState(false)
-  const wrapperRef = React.useRef<HTMLDivElement>(null)
 
-  // Close when clicking outside.
-  React.useEffect(() => {
-    if (!open) return
-    function onPointerDown(e: PointerEvent) {
-      if (
-        wrapperRef.current &&
-        !wrapperRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener("pointerdown", onPointerDown)
-    return () => document.removeEventListener("pointerdown", onPointerDown)
-  }, [open])
+  // floating-ui handles the heavy lifting:
+  //   - position the menu relative to the trigger
+  //   - autoUpdate keeps it positioned on scroll/resize
+  //   - shift() pushes it back into the viewport on collisions
+  //   - offset(8) gives a small gap above the trigger
+  //   - FloatingPortal renders into document.body so the sidebar's
+  //     overflow constraints can never clip it
+  const { refs, floatingStyles, context } = useFloating({
+    open,
+    onOpenChange: setOpen,
+    placement: "top-start",
+    middleware: [offset(8), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  })
 
-  // Close on Escape.
-  React.useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false)
-    }
-    document.addEventListener("keydown", onKey)
-    return () => document.removeEventListener("keydown", onKey)
-  }, [open])
+  const click = useClick(context)
+  const dismiss = useDismiss(context)
+  const role = useRole(context, { role: "menu" })
+
+  const { getReferenceProps, getFloatingProps } = useInteractions([
+    click,
+    dismiss,
+    role,
+  ])
 
   const initials = user.username.slice(0, 2).toUpperCase()
 
   return (
-    <div className="relative" ref={wrapperRef}>
-      {open && (
-        <div
-          role="menu"
-          className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg"
-        >
-          <div className="px-3 py-2">
-            <div className="text-sm font-medium">{user.username}</div>
-            {user.email && (
-              <div className="text-xs text-muted-foreground">{user.email}</div>
-            )}
-            {user.role && (
-              <div className="text-xs capitalize text-muted-foreground">
-                {user.role}
-              </div>
-            )}
-          </div>
-
-          {(accountHref || settingsHref) && <MenuSeparator />}
-
-          {accountHref && (
-            <LinkComponent
-              href={accountHref}
-              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
-              onClick={() => setOpen(false)}
-            >
-              <UserIcon className="h-4 w-4" />
-              Account
-            </LinkComponent>
-          )}
-          {settingsHref && (
-            <LinkComponent
-              href={settingsHref}
-              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
-              onClick={() => setOpen(false)}
-            >
-              <Settings className="h-4 w-4" />
-              Settings
-            </LinkComponent>
-          )}
-
-          {enableThemeToggle && <ThemeToggleItem onSelect={() => {}} />}
-
-          {extra && (
-            <>
-              <MenuSeparator />
-              {extra}
-            </>
-          )}
-
-          {onLogout && (
-            <>
-              <MenuSeparator />
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false)
-                  onLogout()
-                }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-              >
-                <LogOut className="h-4 w-4" />
-                Sign out
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
+    <>
       <button
+        ref={refs.setReference}
         type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        {...getReferenceProps()}
         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
       >
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
@@ -322,7 +271,84 @@ function ProfileMenu({
         </div>
         <ChevronsUpDown className="ml-auto h-4 w-4 shrink-0 text-muted-foreground" />
       </button>
-    </div>
+
+      {open && (
+        <FloatingPortal>
+          <FloatingFocusManager context={context} modal={false}>
+            <div
+              ref={refs.setFloating}
+              style={floatingStyles}
+              {...getFloatingProps()}
+              className="z-50 min-w-56 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg outline-none"
+            >
+              <div className="px-3 py-2">
+                <div className="text-sm font-medium">{user.username}</div>
+                {user.email && (
+                  <div className="text-xs text-muted-foreground">
+                    {user.email}
+                  </div>
+                )}
+                {user.role && (
+                  <div className="text-xs capitalize text-muted-foreground">
+                    {user.role}
+                  </div>
+                )}
+              </div>
+
+              {(accountHref || settingsHref) && <MenuSeparator />}
+
+              {accountHref && (
+                <LinkComponent
+                  href={accountHref}
+                  className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => setOpen(false)}
+                >
+                  <UserIcon className="h-4 w-4" />
+                  Account
+                </LinkComponent>
+              )}
+              {settingsHref && (
+                <LinkComponent
+                  href={settingsHref}
+                  className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => setOpen(false)}
+                >
+                  <Settings className="h-4 w-4" />
+                  Settings
+                </LinkComponent>
+              )}
+
+              {enableThemeToggle && <ThemeToggleItem />}
+
+              {extra && (
+                <>
+                  <MenuSeparator />
+                  {extra}
+                </>
+              )}
+
+              {onLogout && (
+                <>
+                  <MenuSeparator />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setOpen(false)
+                      onLogout()
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Sign out
+                  </button>
+                </>
+              )}
+            </div>
+          </FloatingFocusManager>
+        </FloatingPortal>
+      )}
+    </>
   )
 }
 
@@ -330,17 +356,14 @@ function MenuSeparator() {
   return <div className="my-1 h-px bg-border" />
 }
 
-function ThemeToggleItem({ onSelect }: { onSelect: () => void }) {
+function ThemeToggleItem() {
   const { resolvedTheme, setTheme } = useTheme()
   const isDark = resolvedTheme === "dark"
   return (
     <button
       type="button"
       role="menuitem"
-      onClick={() => {
-        setTheme(isDark ? "light" : "dark")
-        onSelect()
-      }}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
       className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
     >
       {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
