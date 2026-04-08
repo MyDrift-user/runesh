@@ -15,25 +15,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@mydrift-user"
 
       - name: Set version from release tag
         working-directory: packages/ui
         run: |
           VERSION="${GITHUB_REF_NAME#ui-v}"
-          bun run npm pkg set version="$VERSION"
-
-      - name: Setup .npmrc for GitHub Packages
-        run: |
-          echo "@mydrift-user:registry=https://npm.pkg.github.com" >> packages/ui/.npmrc
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> packages/ui/.npmrc
-
-      - name: Install dependencies
-        working-directory: packages/ui
-        run: bun install --no-save
+          npm pkg set version="$VERSION"
 
       - name: Publish to GitHub Packages
         working-directory: packages/ui
-        run: bun publish --access public
+        run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
