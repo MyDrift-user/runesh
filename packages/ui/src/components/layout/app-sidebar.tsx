@@ -106,12 +106,14 @@ const MENU_ITEM_BASE = [
   "rounded-md px-2 text-left text-sm",
   // Behaviour
   "outline-none transition-colors",
-  "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-  // Default state
-  "text-sidebar-foreground/90",
-  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+  "focus-visible:ring-2 focus-visible:ring-ring",
+  // Default state. Uses generic `accent` tokens (always defined by shadcn
+  // base theme) instead of `sidebar-accent` which not every consumer wires
+  // into Tailwind v4's --color-* namespace.
+  "text-foreground/80",
+  "hover:bg-accent hover:text-accent-foreground",
   // Active state
-  "data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground",
+  "data-[active=true]:bg-accent data-[active=true]:font-medium data-[active=true]:text-accent-foreground",
   // Icon: fixed 16x16 slot, never shifts even if title length varies
   "[&>svg]:size-4 [&>svg]:shrink-0",
   // Truncate the label
@@ -162,7 +164,7 @@ export function AppSidebar({
       <div
         className={`flex ${HEADER_HEIGHT} shrink-0 items-center gap-2 border-b border-sidebar-border px-4`}
       >
-        <Link href="/" className="flex items-center gap-2 outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring rounded-md">
+        <Link href="/" className="flex items-center gap-2 outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md">
           <div className="flex shrink-0 items-center justify-center">
             {brandIcon}
           </div>
@@ -177,7 +179,7 @@ export function AppSidebar({
         {Array.from(groups.entries()).map(([label, items], i) => (
           <div key={label} className={i === 0 ? "" : "mt-2"}>
             {showGroupLabels && (
-              <div className="flex h-8 items-center px-2 text-xs font-medium text-sidebar-foreground/60">
+              <div className="flex h-8 items-center px-2 text-xs font-medium text-muted-foreground">
                 {label}
               </div>
             )}
@@ -241,11 +243,11 @@ const PROFILE_BUTTON = [
   "rounded-md p-2 text-left text-sm",
   // Behaviour
   "outline-none transition-colors",
-  "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-  // States
-  "text-sidebar-foreground",
-  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-  "data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground",
+  "focus-visible:ring-2 focus-visible:ring-ring",
+  // States. Generic accent tokens for cross-consumer compatibility.
+  "text-foreground",
+  "hover:bg-accent hover:text-accent-foreground",
+  "data-[state=open]:bg-accent data-[state=open]:text-accent-foreground",
 ].join(" ")
 
 const MENU_LINK = [
@@ -300,14 +302,14 @@ function ProfileMenu({
         className={PROFILE_BUTTON}
       >
         {/* Avatar */}
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-sidebar-accent text-xs font-medium text-sidebar-accent-foreground">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-xs font-medium text-accent-foreground">
           {initials}
         </div>
         {/* Text column */}
         <div className="grid flex-1 text-left text-sm leading-tight">
           <span className="truncate font-medium">{user.username}</span>
           {user.email && (
-            <span className="truncate text-xs text-sidebar-foreground/60">
+            <span className="truncate text-xs text-muted-foreground">
               {user.email}
             </span>
           )}
