@@ -131,14 +131,18 @@ pub fn init(config: Config) -> Option<TelemetryGuard> {
 
 /// Build a `tracing-subscriber` layer that forwards `tracing` events to Sentry.
 ///
-/// By default, `WARN` and `ERROR` events become breadcrumbs/events. Configure
-/// further via [`sentry_tracing::layer`] if you need different mappings.
+/// `WARN` and `ERROR` events become breadcrumbs/events. Span tracking is
+/// disabled because sentry-tracing 0.47's `HubSwitchGuard` is not safe across
+/// tokio worker threads — futures get moved between workers, the enter/exit
+/// counts don't match, and the layer panics on span exit. Dropping spans
+/// preserves the important behaviour (errors still flow) without the foot-gun.
+/// See: <https://github.com/getsentry/sentry-rust/issues/737>
 #[cfg(feature = "tracing-layer")]
 pub fn tracing_layer<S>() -> sentry_tracing::SentryLayer<S>
 where
     S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    sentry_tracing::layer()
+    sentry_tracing::layer().span_filter(|_| false)
 }
 
 /// Axum / Tower middleware helpers.
