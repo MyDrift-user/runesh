@@ -18,3 +18,6 @@ pub use oidc::RedisOidcSessionStore;
 pub use token::{Claims, TokenConfig};
 pub use store::AuthStore;
 pub use session::SessionConfig;
+
+#[cfg(feature = "axum")]
+pub use axum_middleware::{ApiKeyVerifier, ApiKeyVerifierExt, AuthExemptPaths, JwtSecret};

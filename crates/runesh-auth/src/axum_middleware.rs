@@ -32,6 +32,58 @@ impl Default for AuthExemptPaths {
     }
 }
 
+/// Pluggable verifier for `X-Api-Key` headers.
+///
+/// Consumer projects implement this against their own user/key store
+/// (typically a database lookup) and install it as an Axum extension. The
+/// global [`auth_middleware`] will call into it whenever it sees an
+/// `X-Api-Key` header, BEFORE falling through to JWT/cookie validation.
+///
+/// On success, return the [`Claims`] that should be attached to request
+/// extensions for downstream handlers. The `sub`, `role`, and `exp` fields
+/// are load-bearing; other fields can be defaulted.
+///
+/// ## Example
+///
+/// ```ignore
+/// use std::sync::Arc;
+/// use runesh_auth::{ApiKeyVerifier, ApiKeyVerifierExt, Claims};
+///
+/// struct PgApiKeyStore { pool: sqlx::PgPool }
+///
+/// #[async_trait::async_trait]
+/// impl ApiKeyVerifier for PgApiKeyStore {
+///     async fn verify(&self, api_key: &str) -> Option<Claims> {
+///         let row: Option<(uuid::Uuid, String)> = sqlx::query_as(
+///             "SELECT id, role FROM users WHERE api_key = $1"
+///         ).bind(api_key).fetch_optional(&self.pool).await.ok().flatten();
+///         row.map(|(id, role)| Claims {
+///             sub: id.to_string(), role, exp: i64::MAX,
+///             ..Default::default()
+///         })
+///     }
+/// }
+///
+/// let verifier = Arc::new(PgApiKeyStore { pool });
+/// let app = Router::new()
+///     .layer(middleware::from_fn(auth_middleware))
+///     .layer(axum::Extension(ApiKeyVerifierExt::new(verifier)));
+/// ```
+#[async_trait::async_trait]
+pub trait ApiKeyVerifier: Send + Sync + 'static {
+    async fn verify(&self, api_key: &str) -> Option<Claims>;
+}
+
+/// Type-erased Axum extension wrapper for an [`ApiKeyVerifier`].
+#[derive(Clone)]
+pub struct ApiKeyVerifierExt(pub std::sync::Arc<dyn ApiKeyVerifier>);
+
+impl ApiKeyVerifierExt {
+    pub fn new<V: ApiKeyVerifier>(verifier: std::sync::Arc<V>) -> Self {
+        Self(verifier)
+    }
+}
+
 /// Axum middleware that validates Bearer tokens and injects [`Claims`]
 /// into request extensions.
 ///
@@ -101,6 +153,35 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     // Non-API paths pass through
     if !path.starts_with("/api/") {
         return soft_auth(req, next).await;
+    }
+
+    // ── X-Api-Key path ────────────────────────────────────────────────
+    // If the request carries an X-Api-Key header AND a verifier is
+    // installed, validate via the verifier and short-circuit. This is
+    // the SECOND auth mode used by API clients (CLIs, scripts, server-
+    // to-server). Falls through to JWT/cookie validation if either the
+    // header is absent or no verifier is installed.
+    if let Some(api_key) = req
+        .headers()
+        .get("x-api-key")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
+        if let Some(verifier_ext) = req.extensions().get::<crate::ApiKeyVerifierExt>().cloned() {
+            return match verifier_ext.0.verify(&api_key).await {
+                Some(claims) => {
+                    let mut req = req;
+                    req.extensions_mut().insert(claims);
+                    next.run(req).await
+                }
+                None => (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({"error": "invalid API key"})),
+                )
+                    .into_response(),
+            };
+        }
     }
 
     // Extract JWT secret

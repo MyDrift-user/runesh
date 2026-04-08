@@ -37,22 +37,34 @@ impl TokenConfig {
 // ── JWT Claims ──────────────────────────────────────────────────────────────
 
 /// Claims embedded in every JWT.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Only `sub`, `role`, and `exp` are load-bearing for the security boundary.
+/// `email`, `name`, `permissions`, and `iat` default to empty when missing
+/// so this struct can deserialize tokens issued by any consumer project,
+/// regardless of which optional human-facing fields they include.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Claims {
     /// User ID (UUID string).
     pub sub: String,
-    /// User email.
+    /// User email. Optional, defaults to empty when the issuing project
+    /// doesn't embed email in tokens.
+    #[serde(default)]
     pub email: String,
-    /// Display name.
+    /// Display name. Optional, defaults to empty when the issuing project
+    /// doesn't embed a display name. Falls back to `username` for projects
+    /// that use that field instead.
+    #[serde(default, alias = "username")]
     pub name: String,
     /// Effective role (e.g. "admin", "user", "manager").
     pub role: String,
-    /// Permission strings loaded from the project's RBAC system.
+    /// Permission strings loaded from the project's RBAC system. Optional
+    /// for projects that don't ship a permissions list.
     #[serde(default)]
     pub permissions: Vec<String>,
     /// Expiration (Unix timestamp).
     pub exp: i64,
-    /// Issued at (Unix timestamp).
+    /// Issued at (Unix timestamp). Optional for tokens that omit it.
+    #[serde(default)]
     pub iat: i64,
 }
 
@@ -90,11 +102,18 @@ pub fn issue_access_token(
 }
 
 /// Validate an access token and return its claims.
+///
+/// Pinned to HS256 to prevent algorithm confusion attacks. Tokens signed
+/// with any other algorithm are rejected here; consumers that want to
+/// accept asymmetric IdP tokens should layer the [`crate::OidcVerifier`]
+/// in addition.
+///
+/// `sub` and `exp` are required. `iat` is recommended but not enforced
+/// because not every issuing project embeds it.
 pub fn validate_access_token(token: &str, secret: &str) -> Result<Claims, AuthError> {
-    // Pin to HS256 only - reject tokens with other algorithms
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
-    validation.set_required_spec_claims(&["sub", "exp", "iat"]);
+    validation.set_required_spec_claims(&["sub", "exp"]);
 
     let data = decode::<Claims>(
         token,
