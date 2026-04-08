@@ -1,6 +1,20 @@
 "use client"
 
-import Link from "next/link"
+/**
+ * Self-contained dashboard sidebar.
+ *
+ * Intentionally has NO dependency on the consumer's shadcn primitives.
+ * Works in any Next.js project regardless of which shadcn flavor (Radix
+ * `asChild` vs base-ui `render`) the consumer's `@/components/ui/*` are
+ * built on. Only requirements:
+ *   - Tailwind CSS in the consumer
+ *   - lucide-react and next-themes as peer deps
+ *   - A router link component passed as `linkComponent`
+ *
+ * Pair with [`DashboardShell`] which is also self-contained.
+ */
+
+import * as React from "react"
 import { usePathname } from "next/navigation"
 import {
   ChevronsUpDown,
@@ -12,29 +26,6 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { useTheme } from "next-themes"
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarRail,
-} from "@/components/ui/sidebar"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,11 +33,9 @@ export interface NavItem {
   title: string
   href: string
   icon: LucideIcon
-  /** When true the item is only shown to users with `role === "admin"`.
-   * UI-only filter. The backend MUST enforce authorization independently. */
+  /** UI-only filter. Backend MUST enforce authorization independently. */
   adminOnly?: boolean
-  /** Optional group label. Items sharing a label are rendered together
-   * under that group heading; items without a label go in the default group. */
+  /** Optional group label, items sharing a label render under one heading. */
   group?: string
 }
 
@@ -56,46 +45,52 @@ export interface AppSidebarUser {
   role?: string
 }
 
+/**
+ * Generic link component contract. Pass `Link` from `next/link` or any
+ * router. Defaults to a plain `<a>` for SSR safety.
+ */
+export type LinkLikeProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+  href: string
+  children?: React.ReactNode
+}
+export type LinkLike = React.ComponentType<LinkLikeProps>
+
+const DefaultLink: LinkLike = ({ href, children, ...rest }) => (
+  <a href={href} {...rest}>
+    {children}
+  </a>
+)
+
 export interface AppSidebarProps {
-  /** Navigation items rendered in the sidebar body. */
   navItems: NavItem[]
-  /** Current authenticated user. When `null`, the profile footer is hidden. */
   user: AppSidebarUser | null
-  /** Brand icon component rendered in the sidebar header. */
   brandIcon: React.ReactNode
-  /** Brand name displayed next to the icon. */
   brandName: string
   /** Default group label, applied to nav items that don't set their own. */
   defaultGroupLabel?: string
-
-  // ── Profile footer actions ────────────────────────────────────────────────
-  /** Called when the user clicks "Sign out". */
+  /** Router link component (e.g. `next/link`'s `Link`). Defaults to `<a>`. */
+  linkComponent?: LinkLike
+  /** Called when "Sign out" is clicked. Hidden when omitted. */
   onLogout?: () => void
-  /** Optional href for the "Account" entry. Hidden when omitted. */
+  /** Optional href for the "Account" entry. */
   accountHref?: string
-  /** Optional href for the "Settings" entry. Hidden when omitted. */
+  /** Optional href for the "Settings" entry. */
   settingsHref?: string
   /** Show the dark/light theme toggle in the profile dropdown. Default `true`. */
   enableThemeToggle?: boolean
-  /** Extra dropdown items rendered above the Sign out action. */
+  /** Extra dropdown items rendered above Sign out. */
   profileExtra?: React.ReactNode
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+// ── Sidebar component ───────────────────────────────────────────────────────
 
-/**
- * Standard RUNESH dashboard sidebar.
- *
- * Renders a brand header, grouped navigation, and an optional profile
- * footer with a shadcn-based dropdown menu (account, settings, theme
- * toggle, sign out). Pair with [`DashboardShell`] for the full layout.
- */
 export function AppSidebar({
   navItems,
   user,
   brandIcon,
   brandName,
   defaultGroupLabel = "Navigation",
+  linkComponent: Link = DefaultLink,
   onLogout,
   accountHref,
   settingsHref,
@@ -104,14 +99,11 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const pathname = usePathname()
 
-  // UI-only role filter. Backend authorization is the source of truth.
-  const visibleNav = navItems.filter((item) => {
-    if (item.adminOnly && user?.role !== "admin") return false
-    return true
-  })
+  const visibleNav = navItems.filter(
+    (item) => !item.adminOnly || user?.role === "admin"
+  )
 
-  // Group nav items by their `group` (or fall back to `defaultGroupLabel`),
-  // preserving the original order within each group.
+  // Group items by `group` (or default), preserve original order.
   const groups = new Map<string, NavItem[]>()
   for (const item of visibleNav) {
     const label = item.group ?? defaultGroupLabel
@@ -121,42 +113,58 @@ export function AppSidebar({
   }
 
   return (
-    <Sidebar>
-      <SidebarHeader className="border-b border-sidebar-border px-4 h-14 flex items-center">
+    <aside
+      data-slot="runesh-app-sidebar"
+      className="flex h-screen w-64 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground"
+    >
+      {/* Header */}
+      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
         <Link href="/" className="flex items-center gap-2">
           {brandIcon}
           <span className="text-lg font-bold tracking-tight">{brandName}</span>
         </Link>
-      </SidebarHeader>
+      </div>
 
-      <SidebarContent>
+      {/* Nav */}
+      <nav className="flex-1 overflow-y-auto p-2">
         {Array.from(groups.entries()).map(([label, items]) => (
-          <SidebarGroup key={label}>
-            <SidebarGroupLabel>{label}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {items.map((item) => {
-                  const isActive =
-                    item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
-                  return (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
-                        <Link href={item.href}>
-                          <item.icon className="h-4 w-4" />
-                          <span>{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          <div key={label} className="mb-4">
+            <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              {label}
+            </div>
+            <ul className="flex flex-col gap-0.5">
+              {items.map((item) => {
+                const isActive =
+                  item.href === "/"
+                    ? pathname === "/"
+                    : pathname.startsWith(item.href)
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      data-active={isActive ? "true" : undefined}
+                      className={[
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm",
+                        "outline-none transition-colors",
+                        "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                        "focus-visible:ring-2 focus-visible:ring-ring",
+                        "data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground",
+                      ].join(" ")}
+                    >
+                      <item.icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{item.title}</span>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
         ))}
-      </SidebarContent>
+      </nav>
 
+      {/* Profile footer */}
       {user && (
-        <SidebarFooter className="border-t border-sidebar-border p-2">
+        <div className="border-t border-border p-2">
           <ProfileMenu
             user={user}
             onLogout={onLogout}
@@ -164,12 +172,11 @@ export function AppSidebar({
             settingsHref={settingsHref}
             enableThemeToggle={enableThemeToggle}
             extra={profileExtra}
+            LinkComponent={Link}
           />
-        </SidebarFooter>
+        </div>
       )}
-
-      <SidebarRail />
-    </Sidebar>
+    </aside>
   )
 }
 
@@ -182,6 +189,7 @@ interface ProfileMenuProps {
   settingsHref?: string
   enableThemeToggle: boolean
   extra?: React.ReactNode
+  LinkComponent: LinkLike
 }
 
 function ProfileMenu({
@@ -191,109 +199,152 @@ function ProfileMenu({
   settingsHref,
   enableThemeToggle,
   extra,
+  LinkComponent,
 }: ProfileMenuProps) {
+  const [open, setOpen] = React.useState(false)
+  const wrapperRef = React.useRef<HTMLDivElement>(null)
+
+  // Close when clicking outside.
+  React.useEffect(() => {
+    if (!open) return
+    function onPointerDown(e: PointerEvent) {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown)
+    return () => document.removeEventListener("pointerdown", onPointerDown)
+  }, [open])
+
+  // Close on Escape.
+  React.useEffect(() => {
+    if (!open) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false)
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [open])
+
   const initials = user.username.slice(0, 2).toUpperCase()
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+    <div className="relative" ref={wrapperRef}>
+      {open && (
+        <div
+          role="menu"
+          className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg"
         >
-          <Avatar className="h-7 w-7">
-            <AvatarFallback className="text-xs font-medium">{initials}</AvatarFallback>
-          </Avatar>
-          <div className="flex flex-1 flex-col text-left text-sm leading-tight overflow-hidden">
-            <span className="truncate font-medium">{user.username}</span>
+          <div className="px-3 py-2">
+            <div className="text-sm font-medium">{user.username}</div>
             {user.email && (
-              <span className="truncate text-xs text-muted-foreground">{user.email}</span>
-            )}
-          </div>
-          <ChevronsUpDown className="ml-auto h-4 w-4 shrink-0 text-muted-foreground" />
-        </button>
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent
-        className="w-(--radix-dropdown-menu-trigger-width) min-w-56"
-        side="right"
-        align="end"
-        sideOffset={8}
-      >
-        <DropdownMenuLabel className="font-normal">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-medium">{user.username}</span>
-            {user.email && (
-              <span className="text-xs text-muted-foreground">{user.email}</span>
+              <div className="text-xs text-muted-foreground">{user.email}</div>
             )}
             {user.role && (
-              <span className="text-xs text-muted-foreground capitalize">{user.role}</span>
+              <div className="text-xs capitalize text-muted-foreground">
+                {user.role}
+              </div>
             )}
           </div>
-        </DropdownMenuLabel>
 
-        {(accountHref || settingsHref) && <DropdownMenuSeparator />}
+          {(accountHref || settingsHref) && <MenuSeparator />}
 
-        <DropdownMenuGroup>
           {accountHref && (
-            <DropdownMenuItem asChild>
-              <Link href={accountHref}>
-                <UserIcon className="h-4 w-4" />
-                Account
-              </Link>
-            </DropdownMenuItem>
+            <LinkComponent
+              href={accountHref}
+              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
+              onClick={() => setOpen(false)}
+            >
+              <UserIcon className="h-4 w-4" />
+              Account
+            </LinkComponent>
           )}
           {settingsHref && (
-            <DropdownMenuItem asChild>
-              <Link href={settingsHref}>
-                <Settings className="h-4 w-4" />
-                Settings
-              </Link>
-            </DropdownMenuItem>
+            <LinkComponent
+              href={settingsHref}
+              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
+              onClick={() => setOpen(false)}
+            >
+              <Settings className="h-4 w-4" />
+              Settings
+            </LinkComponent>
           )}
-        </DropdownMenuGroup>
 
-        {enableThemeToggle && (
-          <>
-            <DropdownMenuSeparator />
-            <ThemeToggleItem />
-          </>
-        )}
+          {enableThemeToggle && <ThemeToggleItem onSelect={() => {}} />}
 
-        {extra && (
-          <>
-            <DropdownMenuSeparator />
-            {extra}
-          </>
-        )}
+          {extra && (
+            <>
+              <MenuSeparator />
+              {extra}
+            </>
+          )}
 
-        {onLogout && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onLogout}>
-              <LogOut className="h-4 w-4" />
-              Sign out
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          {onLogout && (
+            <>
+              <MenuSeparator />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false)
+                  onLogout()
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                <LogOut className="h-4 w-4" />
+                Sign out
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
+          {initials}
+        </div>
+        <div className="flex flex-1 flex-col overflow-hidden text-left text-sm leading-tight">
+          <span className="truncate font-medium">{user.username}</span>
+          {user.email && (
+            <span className="truncate text-xs text-muted-foreground">
+              {user.email}
+            </span>
+          )}
+        </div>
+        <ChevronsUpDown className="ml-auto h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
+    </div>
   )
 }
 
-function ThemeToggleItem() {
+function MenuSeparator() {
+  return <div className="my-1 h-px bg-border" />
+}
+
+function ThemeToggleItem({ onSelect }: { onSelect: () => void }) {
   const { resolvedTheme, setTheme } = useTheme()
   const isDark = resolvedTheme === "dark"
   return (
-    <DropdownMenuItem
-      onSelect={(e) => {
-        // Don't close the menu so the user sees the icon flip.
-        e.preventDefault()
+    <button
+      type="button"
+      role="menuitem"
+      onClick={() => {
         setTheme(isDark ? "light" : "dark")
+        onSelect()
       }}
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
     >
       {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       {isDark ? "Light mode" : "Dark mode"}
-    </DropdownMenuItem>
+    </button>
   )
 }
