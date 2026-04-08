@@ -21,7 +21,8 @@ pub fn run_elevated(binary: &Path, args: &[&str]) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
 
     let verb: Vec<u16> = OsStr::new("runas\0").encode_wide().collect();
-    let file: Vec<u16> = OsStr::new(&binary.to_string_lossy())
+    let binary_str = binary.to_string_lossy().into_owned();
+    let file: Vec<u16> = OsStr::new(&binary_str)
         .encode_wide()
         .chain(Some(0))
         .collect();

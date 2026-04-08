@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 /// Find a binary by name, checking:
 /// 1. Same directory as the current executable

@@ -122,10 +122,13 @@ export const suggestionItems = createSuggestionItems([
         searchTerms: ["table", "grid", "spreadsheet", "rows", "columns"],
         icon: <Table size={18} />,
         command: ({ editor, range }) => {
-            editor
+            // Tiptap 3 lost module-augmented `insertTable` on ChainedCommands
+            // in some type-check paths. Cast to any so the runtime command
+            // (provided by @tiptap/extension-table) still dispatches.
+            (editor
                 .chain()
                 .focus()
-                .deleteRange(range)
+                .deleteRange(range) as any)
                 .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
                 .run();
         },

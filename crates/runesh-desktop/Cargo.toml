@@ -33,7 +33,7 @@ arboard = { version = "3", optional = true }
 
 # Windows screen capture + input
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
@@ -48,7 +48,7 @@ windows = { version = "0.61", features = [
 
 # macOS screen capture + input
 [target.'cfg(target_os = "macos")'.dependencies]
-core-graphics = "0.24"
+core-graphics = "0.25"
 core-foundation = "0.10"
 
 # Linux X11 screen capture + input

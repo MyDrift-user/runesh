@@ -357,8 +357,7 @@ impl OidcSessionStore {
         let state = Uuid::new_v4().to_string();
 
         // PKCE
-        let mut verifier_bytes = [0u8; 32];
-        rand::RngCore::fill_bytes(&mut rand::rng(), &mut verifier_bytes);
+        let verifier_bytes = rand::random::<[u8; 32]>();
         let code_verifier =
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
 

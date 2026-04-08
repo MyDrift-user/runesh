@@ -428,10 +428,10 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     if c.with_editor {
         editor_deps = r#",
     "novel": "^1.0.2",
-    "@tiptap/extension-table": "^2.27.2",
-    "@tiptap/extension-table-cell": "^2.27.2",
-    "@tiptap/extension-table-header": "^2.27.2",
-    "@tiptap/extension-table-row": "^2.27.2",
+    "@tiptap/extension-table": "^3.22.2",
+    "@tiptap/extension-table-cell": "^3.22.2",
+    "@tiptap/extension-table-header": "^3.22.2",
+    "@tiptap/extension-table-row": "^3.22.2",
     "tiptap-extension-global-drag-handle": "^0.1.18",
     "lowlight": "^3.3.0",
     "use-debounce": "^10.1.0",
@@ -453,7 +453,7 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "@tanstack/react-query": "^5.90.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^0.577.0",
+    "lucide-react": "^1.7.0",
     "next": "16.2.1",
     "next-themes": "^0.4.6",
     "react": "19.2.4",
@@ -471,7 +471,7 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^6"
   }}
 }}"#,
         name = c.name,
@@ -1814,7 +1814,7 @@ pub fn desktop_package_json(c: &ProjectConfig) -> String {
     "@base-ui/react": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^0.577.0",
+    "lucide-react": "^1.7.0",
     "next": "16.2.1",
     "next-themes": "^0.4.6",
     "react": "19.2.4",
@@ -1830,7 +1830,7 @@ pub fn desktop_package_json(c: &ProjectConfig) -> String {
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^6"
   }}
 }}"#,
         name = c.name,
@@ -1996,7 +1996,7 @@ pub fn extension_package_json(c: &ProjectConfig) -> String {
     "@types/react-dom": "^19",
     "@wxt-dev/module-react": "latest",
     "wxt": "latest",
-    "typescript": "^5",
+    "typescript": "^6",
     "tailwindcss": "^4",
     "@tailwindcss/postcss": "^4",
     "autoprefixer": "^10",

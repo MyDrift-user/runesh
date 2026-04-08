@@ -4,9 +4,9 @@
 //! show/hide window, connect/disconnect, quit.
 
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{IsMenuItem, Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager,
+    AppHandle, Emitter, Manager,
 };
 
 /// Menu item IDs for the default tray menu.
@@ -44,10 +44,11 @@ pub fn setup_tray(
         menu_items.push(MenuItem::with_id(app, *id, *label, true, None::<&str>)?);
     }
 
-    let menu = Menu::with_items(
-        app,
-        &menu_items.iter().collect::<Vec<_>>(),
-    )?;
+    let refs: Vec<&dyn IsMenuItem<_>> = menu_items
+        .iter()
+        .map(|m| m as &dyn IsMenuItem<_>)
+        .collect();
+    let menu = Menu::with_items(app, &refs)?;
 
     let icon = tauri::image::Image::from_bytes(icon_bytes)?;
 

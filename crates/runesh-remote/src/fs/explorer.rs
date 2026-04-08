@@ -97,7 +97,9 @@ pub async fn read_file(
     // Compute checksum
     let mut hasher = Sha256::new();
     hasher.update(&buffer);
-    let checksum = format!("{:x}", hasher.finalize());
+    // sha2 0.11 returns hybrid_array::Array; convert via hex::encode which
+    // takes AsRef<[u8]>.
+    let checksum = hex::encode(hasher.finalize());
 
     Ok((buffer, total_size, checksum))
 }

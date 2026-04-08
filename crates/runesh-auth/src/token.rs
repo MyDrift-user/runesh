@@ -108,10 +108,7 @@ pub fn validate_access_token(token: &str, secret: &str) -> Result<Claims, AuthEr
 
 /// Generate a cryptographically random 256-bit refresh token.
 pub fn generate_refresh_token() -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 32];
-    rand::rng().fill_bytes(&mut bytes);
-    hex::encode(bytes)
+    hex::encode(rand::random::<[u8; 32]>())
 }
 
 /// Hash a refresh token for safe storage (SHA-256).
