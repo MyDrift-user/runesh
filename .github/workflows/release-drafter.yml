@@ -1,4 +1,4 @@
-name: Release Drafter (UI)
+name: Release Drafter
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: release-drafter-ui
+  group: release-drafter
   cancel-in-progress: false
 
 jobs:
@@ -20,7 +20,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: release-drafter/release-drafter@v6
-        with:
-          config-name: release-drafter-ui.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

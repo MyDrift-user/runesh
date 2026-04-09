@@ -1,12 +1,12 @@
 name-template: 'v$RESOLVED_VERSION'
 tag-template: 'v$RESOLVED_VERSION'
 tag-prefix: 'v'
-filter-by-commitish: true
-commitish: refs/heads/main
 template: |
-  ## runesh-cli v$RESOLVED_VERSION
+  ## RUNESH v$RESOLVED_VERSION
 
-  Install or update:
+  Single release for the whole repo: `runesh-cli` binaries + `@mydrift-user/runesh-ui` npm package.
+
+  Install or update the CLI:
 
   ```sh
   # macOS / Linux
@@ -17,6 +17,12 @@ template: |
 
   # Already installed
   runesh update
+  ```
+
+  Use the UI package:
+
+  ```json
+  "@mydrift-user/runesh-ui": "^$RESOLVED_VERSION"
   ```
 
   $CHANGES
@@ -43,14 +49,6 @@ categories:
       - 'docs'
 exclude-labels:
   - 'skip-changelog'
-  - 'ui'
-include-paths:
-  - 'crates/**'
-  - 'Cargo.toml'
-  - 'Cargo.lock'
-  - 'install.sh'
-  - 'install.ps1'
-  - '.github/workflows/release.yml'
 version-resolver:
   major:
     labels:

@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,8 +22,6 @@ env:
 jobs:
   build:
     name: Build ${{ matrix.target }}
-    # Only fire for runesh-cli releases (v*), not @runesh/ui releases (ui-v*)
-    if: github.event_name == 'workflow_dispatch' || (startsWith(github.event.release.tag_name, 'v') && !startsWith(github.event.release.tag_name, 'ui-v'))
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -154,3 +153,30 @@ jobs:
             echo "no artifacts to upload"; exit 1
           fi
           gh release upload "${{ steps.tag.outputs.tag }}" "${files[@]}" --clobber
+
+  publish-ui:
+    name: Publish @mydrift-user/runesh-ui to GitHub Packages
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@mydrift-user"
+
+      - name: Set version from release tag
+        working-directory: packages/ui
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm pkg set version="$VERSION"
+
+      - name: Publish
+        working-directory: packages/ui
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
