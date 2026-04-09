@@ -213,7 +213,6 @@ pub fn run(
 
     create_dirs(&root, &config)?;
     write_files(&root, &config)?;
-    setup_npmrc(&root, &config)?;
     run_bun_installs(&root, &config);
 
     // ── Done ────────────────────────────────────────────────────────────
@@ -338,9 +337,7 @@ impl ProjectConfig {
             // function (e.g. web_package_json) must handle the empty case
             // and not emit a stray comma.
             RuneshSource::Local(_) => String::new(),
-            // --git (default): registry version. Consumers either set up
-            // .npmrc with NPM_TOKEN for the GitHub Packages registry or
-            // use `bun link @mydrift/runesh-ui` for local dev.
+            // --git (default): public npm registry version.
             RuneshSource::Git(_) => "\"@mydrift/runesh-ui\": \"*\"".into(),
         }
     }
@@ -432,19 +429,13 @@ fn make_relative(from: &Path, to: &Path) -> Result<String, String> {
     Ok(rel)
 }
 
-fn setup_npmrc(root: &Path, config: &ProjectConfig) -> Result<(), String> {
-    // Always write .npmrc for GitHub Packages registry
-    let npmrc = format!("{scope}:registry=https://npm.pkg.github.com\n", scope = crate::DEFAULT_NPM_SCOPE);
+#[allow(dead_code)]
+fn setup_local_dev(root: &Path, config: &ProjectConfig) -> Result<(), String> {
     let frontends: Vec<&str> = [
         if config.has_web { Some("web") } else { None },
         if config.has_desktop_frontend { Some("desktop") } else { None },
         if config.has_extension { Some("extension") } else { None },
     ].into_iter().flatten().collect();
-
-    for dir in &frontends {
-        fs::write(root.join(dir).join(".npmrc"), &npmrc)
-            .map_err(|e| format!("write {dir}/.npmrc: {e}"))?;
-    }
 
     // For local dev: create .cargo/config.toml with path overrides + bun link
     if let RuneshSource::Local(path) = &config.source {

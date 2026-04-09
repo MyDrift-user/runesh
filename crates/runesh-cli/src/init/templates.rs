@@ -1232,7 +1232,6 @@ RUST_LOG=info
 # ── Docker ─────────────────────────────────────────────────────────────────
 POSTGRES_PASSWORD=changeme
 APP_PORT=8080
-# NPM_TOKEN=ghp_xxx  # GitHub token for @mydrift/runesh-ui package (if private)
 "#));
     }
 
@@ -1333,14 +1332,7 @@ pub fn dockerfile(c: &ProjectConfig) -> String {
 FROM oven/bun:1.3-alpine AS web-builder
 WORKDIR /build
 
-# Copy package files and .npmrc (for GitHub Packages registry)
-COPY web/package.json web/bun.lock* web/.npmrc* ./
-# If @mydrift/runesh-ui is on a private GitHub Packages registry, pass a token:
-#   docker build --build-arg NPM_TOKEN=ghp_xxx .
-ARG NPM_TOKEN
-RUN if [ -n "$NPM_TOKEN" ]; then \
-      echo "//npm.pkg.github.com/:_authToken=${{NPM_TOKEN}}" >> .npmrc; \
-    fi
+COPY web/package.json web/bun.lock* ./
 RUN bun install
 
 # Copy source and build
@@ -1461,8 +1453,6 @@ services:
   app:
     build:
       context: .
-      args:
-        NPM_TOKEN: ${{NPM_TOKEN:-}}
     restart: unless-stopped
     # SECURITY: bind to loopback by default so only a reverse proxy on the
     # host (Caddy, nginx, Traefik) can reach the app. Override APP_BIND=0.0.0.0
