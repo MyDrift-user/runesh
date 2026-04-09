@@ -155,7 +155,7 @@ jobs:
           gh release upload "${{ steps.tag.outputs.tag }}" "${files[@]}" --clobber
 
   publish-ui:
-    name: Publish @mydrift-user/runesh-ui to GitHub Packages
+    name: Publish @mydrift-user/runesh-ui to npmjs.com
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
@@ -166,8 +166,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@mydrift-user"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Set version from release tag
         working-directory: packages/ui
@@ -177,6 +176,6 @@ jobs:
 
       - name: Publish
         working-directory: packages/ui
-        run: npm publish
+        run: npm publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
