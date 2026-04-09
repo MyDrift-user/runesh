@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 mod init;
 mod new_project;
 mod self_update;
+mod sync;
 
 /// Default GitHub repo for RUNESH shared code.
 /// Override with --repo flag or RUNESH_REPO env var.
@@ -76,6 +77,9 @@ enum Commands {
         yes: bool,
     },
 
+    /// Sync shared CLAUDE.md rules from RUNESH into the current project.
+    Sync,
+
     /// Update the runesh CLI to the latest GitHub release.
     Update {
         /// Only check for an update; do not install.
@@ -107,6 +111,12 @@ fn main() {
         }
         Commands::New { name, description, crates, github, private, org, local, yes } => {
             if let Err(e) = new_project::run(name, description, crates, github, private, org, local, yes) {
+                eprintln!("\x1b[31merror:\x1b[0m {e}");
+                std::process::exit(1);
+            }
+        }
+        Commands::Sync => {
+            if let Err(e) = sync::run() {
                 eprintln!("\x1b[31merror:\x1b[0m {e}");
                 std::process::exit(1);
             }

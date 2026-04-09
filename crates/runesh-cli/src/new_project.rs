@@ -427,16 +427,25 @@ fn generate_claude_md(name: &str, description: &str, crates: &BTreeSet<String>) 
 
 {description}
 
+{base}
+<!-- PROJECT -->
+
+## Stack
+
+- Rust (Axum) + PostgreSQL (SQLx)
+- Next.js + React 19 + shadcn/ui v4 + Tailwind CSS v4
+- Package manager: bun
+- Shared code: @mydrift-user/runesh-ui + runesh crates
+
 ## Structure
 
 ```
 {name}/
 ├── crates/
 │   └── {snake_name}-server/     # Axum backend server
-├── docs/
+├── web/                         # Next.js frontend
 ├── Cargo.toml                   # Rust workspace
 ├── CLAUDE.md                    # This file
-└── README.md
 ```
 
 ## RUNESH Integration
@@ -445,43 +454,31 @@ This project uses [RUNESH](https://github.com/mydrift-user/runesh) shared crates
 
 {crate_list}
 
-## Development Workflow
-
-### Build Commands
+## Commands
 
 ```bash
 cargo check                      # Check compilation
 cargo build                      # Build debug
 cargo run -p {snake_name}-server # Run server
 cargo test                       # Run tests
+cd web && bun dev                # Start frontend
+docker compose up -d             # Start full stack
 ```
 
-### Git Branch Naming
+## Branch Naming
 
-| Prefix | Usage | Example |
-|--------|-------|---------|
-| `feat/` | New feature | `feat/user-dashboard` |
-| `fix/` | Bug fix | `fix/auth-token-refresh` |
-| `refactor/` | Restructuring | `refactor/api-routes` |
-| `chore/` | Dependencies, CI | `chore/update-deps` |
+`type/short-description`
 
-### Commit Messages
+Prefixes: `feat/`, `fix/`, `refactor/`, `chore/`, `docs/`, `test/`
 
-Follow [Conventional Commits](https://www.conventionalcommits.org/):
-
-```
-type(scope): short description
-```
-
-Types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `perf`
-
-### Code Conventions
+## Code Conventions
 
 - **Error handling**: `thiserror` enums with `?` operator
 - **Async**: tokio runtime, `spawn_blocking` for CPU work
 - **Logging**: `tracing` crate with structured fields
 - **Serialization**: `serde` with `#[serde(rename_all = "snake_case")]`
 "#,
+        base = include_str!("../../../templates/CLAUDE.base.md").trim_end(),
         snake_name = name.replace('-', "_"),
     )
 }
