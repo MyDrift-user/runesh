@@ -9,7 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 
 const RAW_BASE_URL: &str =
-    "https://raw.githubusercontent.com/mydrift-user/runesh/main/templates/CLAUDE.base.md";
+    "https://raw.githubusercontent.com/MyDrift-user/runesh/main/templates/CLAUDE.base.md";
 
 const MARKER: &str = "<!-- PROJECT -->";
 
