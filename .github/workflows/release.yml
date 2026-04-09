@@ -155,7 +155,7 @@ jobs:
           gh release upload "${{ steps.tag.outputs.tag }}" "${files[@]}" --clobber
 
   publish-ui:
-    name: Publish @mydrift-user/runesh-ui to npmjs.com
+    name: Publish @mydrift/runesh-ui to npmjs.com
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:

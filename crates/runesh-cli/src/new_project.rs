@@ -435,7 +435,7 @@ fn generate_claude_md(name: &str, description: &str, crates: &BTreeSet<String>) 
 - Rust (Axum) + PostgreSQL (SQLx)
 - Next.js + React 19 + shadcn/ui v4 + Tailwind CSS v4
 - Package manager: bun
-- Shared code: @mydrift-user/runesh-ui + runesh crates
+- Shared code: @mydrift/runesh-ui + runesh crates
 
 ## Structure
 

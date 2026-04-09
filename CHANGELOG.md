@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after a pre-written `components.json`. `cmdk` is pre-installed via `bun add`
   so shadcn's internal peer-dep step doesn't fall into npm's React 19 conflict.
 - **Scaffolder creates a Windows directory junction** (or unix symlink) for
-  `@mydrift-user/runesh-ui` under `--local` mode, bypassing bun's EPERM on
+  `@mydrift/runesh-ui` under `--local` mode, bypassing bun's EPERM on
   deep-tree copies.
 - **`runesh update` handles both archive layouts** — tarballs and zips with
   the `runesh-<target>/<bin>` subdir layout now resolve correctly.
@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **All JS deps bumped**: Tiptap 2→3, lucide-react 0→1, TypeScript 5→6.
 - **Scaffolder pins `next dev --webpack`** (and the desktop variant) so
   Next 16's Turbopack default doesn't break `transpilePackages` on the
-  local `@mydrift-user/runesh-ui` package.
+  local `@mydrift/runesh-ui` package.
 - **CSP, security headers, cookie layout** all reviewed — already solid,
   no changes needed.
 

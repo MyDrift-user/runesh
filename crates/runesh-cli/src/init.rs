@@ -318,7 +318,7 @@ impl ProjectConfig {
         format!("{crate_name} = {{ git = \"{}\", features = [{feats}] }}", self.repo_url())
     }
 
-    /// npm dependency for @mydrift-user/runesh-ui.
+    /// npm dependency for @mydrift/runesh-ui.
     /// `subdir_depth` is how many levels deep the package.json is from the project root
     /// (e.g. 1 for `web/package.json`, 1 for `extension/package.json`).
     pub fn npm_ui_dep(&self) -> String {
@@ -330,7 +330,7 @@ impl ProjectConfig {
             // --local: omit the dep from package.json entirely. The package
             // is satisfied by a directory junction created by
             // relink_runesh_ui() before bun install runs, so webpack/Next
-            // resolves `@mydrift-user/runesh-ui/*` imports without bun
+            // resolves `@mydrift/runesh-ui/*` imports without bun
             // ever trying to fetch (which would 401 against GitHub Packages)
             // or copy (which EPERMs on Windows for the deep tree).
             //
@@ -340,8 +340,8 @@ impl ProjectConfig {
             RuneshSource::Local(_) => String::new(),
             // --git (default): registry version. Consumers either set up
             // .npmrc with NPM_TOKEN for the GitHub Packages registry or
-            // use `bun link @mydrift-user/runesh-ui` for local dev.
-            RuneshSource::Git(_) => "\"@mydrift-user/runesh-ui\": \"*\"".into(),
+            // use `bun link @mydrift/runesh-ui` for local dev.
+            RuneshSource::Git(_) => "\"@mydrift/runesh-ui\": \"*\"".into(),
         }
     }
 
@@ -464,11 +464,11 @@ fn setup_npmrc(root: &Path, config: &ProjectConfig) -> Result<(), String> {
                 .map_err(|e| format!("write .cargo/config.toml: {e}"))?;
         }
 
-        // Link @mydrift-user/runesh-ui for local dev
+        // Link @mydrift/runesh-ui for local dev
         for dir in &frontends {
-            println!("  {} Linking @mydrift-user/runesh-ui in {dir}/...", console::style("->").green());
+            println!("  {} Linking @mydrift/runesh-ui in {dir}/...", console::style("->").green());
             let _ = std::process::Command::new("bun")
-                .args(["link", "@mydrift-user/runesh-ui"])
+                .args(["link", "@mydrift/runesh-ui"])
                 .current_dir(root.join(dir))
                 .status();
         }
@@ -484,7 +484,7 @@ fn run_bun_installs(root: &Path, config: &ProjectConfig) {
         (config.has_extension, "extension"),
     ] {
         if dir {
-            // Under --local the package.json doesn't list @mydrift-user/runesh-ui
+            // Under --local the package.json doesn't list @mydrift/runesh-ui
             // (npm_ui_dep_from_depth returns "") because bun's `file:` install
             // hits EPERM on Windows for the deep tree. Pre-create a directory
             // junction (Windows) / symlink (unix) so the package is resolvable
@@ -506,10 +506,10 @@ fn run_bun_installs(root: &Path, config: &ProjectConfig) {
     }
 }
 
-/// Replace `<pkg>/node_modules/@mydrift-user/runesh-ui` with a junction/symlink
+/// Replace `<pkg>/node_modules/@mydrift/runesh-ui` with a junction/symlink
 /// pointing at the live RUNESH packages/ui dir.
 fn relink_runesh_ui(pkg_dir: &Path, runesh_relative: &str) {
-    let target_link = pkg_dir.join("node_modules/@mydrift-user/runesh-ui");
+    let target_link = pkg_dir.join("node_modules/@mydrift/runesh-ui");
     let mut runesh_abs: PathBuf = if Path::new(runesh_relative).is_absolute() {
         PathBuf::from(runesh_relative)
     } else {
@@ -542,7 +542,7 @@ fn relink_runesh_ui(pkg_dir: &Path, runesh_relative: &str) {
 
     let result = create_dir_link(&runesh_abs, &target_link);
     if result.is_ok() {
-        println!("  {} Linked @mydrift-user/runesh-ui -> RUNESH/packages/ui", style("OK").green());
+        println!("  {} Linked @mydrift/runesh-ui -> RUNESH/packages/ui", style("OK").green());
     } else {
         println!(
             "  {} Could not link runesh-ui (manual `bun install` needed): {}",
@@ -595,7 +595,7 @@ fn copy_runesh_component(web_root: &Path, relative_path: &str, source: &RuneshSo
         }
         RuneshSource::Git(_) => {
             // For git source, try to find the linked package in node_modules
-            web_root.join("node_modules/@mydrift-user/runesh-ui/src").join(relative_path)
+            web_root.join("node_modules/@mydrift/runesh-ui/src").join(relative_path)
         }
     };
 
