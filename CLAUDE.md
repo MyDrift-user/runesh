@@ -2,6 +2,34 @@
 
 Shared code repository for Rust + Next.js + shadcn/ui projects.
 
+## Workflow Rules
+
+- **Every change MUST go through a Pull Request (PR).** No direct commits to `main`.
+- **Before creating a PR, always merge `main` into the feature branch** to ensure the latest changes are included.
+- **Every frontend change MUST be verified using the Playwright MCP** before committing.
+- **Always use `bun`.** Never use `npm` or `yarn`.
+- **Always test changes end-to-end** (docker rebuild, playwright) before claiming they work. Compiling is not testing.
+
+## Attribution
+
+- **Never add Claude/AI as co-author, contributor, or any form of attribution in commits, PRs, or code.**
+
+## AI Assistant Rules
+
+- **Never do more than what was asked.** Do not add features, configs, gitignore rules, or "improvements" that were not explicitly requested. If in doubt, ask first.
+- **Never modify infrastructure (docker, CI, env, volumes, databases) without explicit confirmation.** Changing volume names, postgres versions, or compose structure can destroy data.
+- **Never commit screenshots, test artifacts, or temporary files** to the repo. Clean up after yourself but do not modify .gitignore unless asked.
+- **Never use em dashes or en dashes** anywhere in commits, release notes, or prose. Rewrite the sentence to avoid them entirely.
+- **Keep release bodies short.** No filler prose, no walls of text.
+
+## Writing Pull Requests
+
+- Title starts with a past-tense verb: `Added`, `Fixed`, `Refactored`, etc.
+- Body MUST contain `resolve #<issue-number>` to auto-close the linked issue (if applicable)
+- One PR per issue. Keep changes focused.
+- Include a `## Summary` with bullet points and a `## Test plan`
+- Squash merge to main
+
 ## Structure
 
 ```
@@ -94,7 +122,7 @@ Remote file explorer and CLI over WebSocket. File operations with path traversal
 Cross-platform virtual filesystem that shows remote files natively in the OS file explorer (like OneDrive). Windows uses Cloud Filter API (cfapi) for placeholder files with cloud icons; Linux/macOS use FUSE. Supports 4 write modes: ReadOnly, WriteThrough, WriteLocal, WriteOverlay. The overlay mode enables copy-on-write for multi-tenant scenarios (schools: teachers maintain originals, students get personal overlay spaces where only their edits consume storage). LRU cache with configurable eviction.
 
 ### runesh-telemetry
-Sentry/GlitchTip error reporting wired into the existing `tracing` stack. Drop-in init in `main.rs` — no-op unless `RUNESH_SENTRY_DSN` is set, so it's safe to leave in every binary. Provides a `tracing-subscriber` layer that forwards `WARN`/`ERROR` events as Sentry events automatically, plus an optional Axum/Tower middleware (feature `axum`) that captures request context. Because GlitchTip is wire-compatible with the Sentry SDK protocol, the same crate works against either backend — point the DSN at your self-hosted GlitchTip instance and you're done.
+Sentry/GlitchTip error reporting wired into the existing `tracing` stack. Drop-in init in `main.rs` that does nothing unless `RUNESH_SENTRY_DSN` is set, so it's safe to leave in every binary. Provides a `tracing-subscriber` layer that forwards `WARN`/`ERROR` events as Sentry events automatically, plus an optional Axum/Tower middleware (feature `axum`) that captures request context. Because GlitchTip is wire-compatible with the Sentry SDK protocol, the same crate works against either backend. Just point the DSN at your self-hosted GlitchTip instance.
 
 Env vars: `RUNESH_SENTRY_DSN`, `RUNESH_ENV`, `RUNESH_SAMPLE_RATE`, `RUNESH_TELEMETRY_DEBUG`.
 
@@ -164,7 +192,7 @@ Optional longer body explaining why, not what.
 ```
 
 **Types**: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `perf`, `ci`
-**Scope**: crate name without `runesh-` prefix — e.g., `core`, `auth`, `desktop`, `remote`, `inventory`, `vfs`, `ui`
+**Scope**: crate name without `runesh-` prefix, e.g. `core`, `auth`, `desktop`, `remote`, `inventory`, `vfs`, `ui`
 
 Examples:
 ```
@@ -174,14 +202,6 @@ chore(deps): update sysinfo to 0.35
 refactor(core): extract rate limiter into generic backend trait
 docs(vfs): add overlay provider usage examples
 ```
-
-### Pull Requests
-
-- One feature/fix per PR — keep PRs focused
-- PR title matches the primary commit message format
-- Include a `## Summary` with bullet points and a `## Test plan`
-- Link related issues if applicable
-- Squash merge to main
 
 ### Adding a New Crate
 
@@ -194,15 +214,6 @@ docs(vfs): add overlay provider usage examples
    - Platform-specific deps under `[target.'cfg(...)'.dependencies]`
 4. Add crate description to this CLAUDE.md under the appropriate section
 5. Add integration example to `docs/USAGE.md`
-
-### AI Assistant Rules
-
-- **Never do more than what was asked.** Do not add features, configs, gitignore rules, or "improvements" that were not explicitly requested. If in doubt, ask first.
-- **Never modify infrastructure (docker, CI, env, volumes, databases) without explicit confirmation.** Changing volume names, postgres versions, or compose structure can destroy data.
-- **Never commit screenshots, test artifacts, or temporary files** to the repo. Clean up after yourself but do not modify .gitignore unless asked.
-- **Always test changes end-to-end** (docker rebuild, playwright) before claiming they work. Compiling is not testing.
-- **Never use em dashes or en dashes** anywhere in commits, release notes, or prose.
-- **Keep release bodies short.** No filler prose, no walls of text.
 
 ### Code Conventions
 
