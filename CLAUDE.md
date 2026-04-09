@@ -195,6 +195,15 @@ docs(vfs): add overlay provider usage examples
 4. Add crate description to this CLAUDE.md under the appropriate section
 5. Add integration example to `docs/USAGE.md`
 
+### AI Assistant Rules
+
+- **Never do more than what was asked.** Do not add features, configs, gitignore rules, or "improvements" that were not explicitly requested. If in doubt, ask first.
+- **Never modify infrastructure (docker, CI, env, volumes, databases) without explicit confirmation.** Changing volume names, postgres versions, or compose structure can destroy data.
+- **Never commit screenshots, test artifacts, or temporary files** to the repo. Clean up after yourself but do not modify .gitignore unless asked.
+- **Always test changes end-to-end** (docker rebuild, playwright) before claiming they work. Compiling is not testing.
+- **Never use em dashes or en dashes** anywhere in commits, release notes, or prose.
+- **Keep release bodies short.** No filler prose, no walls of text.
+
 ### Code Conventions
 
 - **Error handling**: `thiserror` enums, `?` operator, map internal errors to user-safe messages
