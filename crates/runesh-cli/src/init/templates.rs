@@ -547,7 +547,7 @@ pub const NEXT_CONFIG: &str = r#"import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  transpilePackages: ["@mydrift-user/runesh-ui"],
+  transpilePackages: ["@mydrift/runesh-ui"],
 };
 
 export default nextConfig;
@@ -567,7 +567,7 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  transpilePackages: ["@mydrift-user/runesh-ui"],
+  transpilePackages: ["@mydrift/runesh-ui"],
 };
 
 // Sentry / GlitchTip wiring is OPTIONAL at deploy time:
@@ -713,14 +713,14 @@ export default config;
 pub const GLOBALS_CSS_IMPORT: &str = r#"@import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@mydrift-user/runesh-ui/src/styles/globals.css";
+@import "@mydrift/runesh-ui/src/styles/globals.css";
 
-/* Tell Tailwind v4 to scan @mydrift-user/runesh-ui's source so classes
+/* Tell Tailwind v4 to scan @mydrift/runesh-ui's source so classes
    that only appear inside the package (e.g. data-[active=true]:bg-accent
    on the AppSidebar nav items) make it into the compiled CSS. Without
    this, those classes get stripped and the active/hover states are
    invisible. */
-@source "../../node_modules/@mydrift-user/runesh-ui/src/**/*.{ts,tsx}";
+@source "../../node_modules/@mydrift/runesh-ui/src/**/*.{ts,tsx}";
 
 @plugin "@tailwindcss/typography";
 "#;
@@ -768,10 +768,10 @@ pub fn layout_tsx(c: &ProjectConfig, is_desktop: bool) -> String {
 
 import "./globals.css";
 import {{ Toaster }} from "sonner";
-import {{ ThemeProvider }} from "@mydrift-user/runesh-ui/src/components/providers/theme-provider";
-import {{ QueryProvider }} from "@mydrift-user/runesh-ui/src/components/providers/query-provider";
-import {{ AuthProvider }} from "@mydrift-user/runesh-ui/src/components/providers/auth-provider";
-import {{ CHIRON_GOROUND_URL, FONT_FAMILY_SANS }} from "@mydrift-user/runesh-ui/src/fonts";
+import {{ ThemeProvider }} from "@mydrift/runesh-ui/src/components/providers/theme-provider";
+import {{ QueryProvider }} from "@mydrift/runesh-ui/src/components/providers/query-provider";
+import {{ AuthProvider }} from "@mydrift/runesh-ui/src/components/providers/auth-provider";
+import {{ CHIRON_GOROUND_URL, FONT_FAMILY_SANS }} from "@mydrift/runesh-ui/src/fonts";
 {extra_imports}
 export default function RootLayout({{ children }}: {{ children: React.ReactNode }}) {{
   return (
@@ -809,7 +809,7 @@ export default function Home() {{
 "#, name = c.name)
 }
 
-pub const UTILS_TS: &str = r#"export { cn } from "@mydrift-user/runesh-ui/src/lib/utils";
+pub const UTILS_TS: &str = r#"export { cn } from "@mydrift/runesh-ui/src/lib/utils";
 "#;
 
 // ── Dashboard shell template ────────────────────────────────────────────────
@@ -822,7 +822,7 @@ import {{ Home, Settings, FileText, Table2 }} from "lucide-react";
 import {{ AppSidebar, type NavItem }} from "@/components/layout/app-sidebar";
 import {{ DashboardShell }} from "@/components/layout/dashboard-shell";
 import {{ SearchBar, type SearchResult }} from "@/components/layout/search-bar";
-import {{ useAuth }} from "@mydrift-user/runesh-ui/src/components/providers/auth-provider";
+import {{ useAuth }} from "@mydrift/runesh-ui/src/components/providers/auth-provider";
 
 const navItems: NavItem[] = [
   {{ title: "Dashboard", href: "/", icon: Home }},
@@ -888,7 +888,7 @@ import { useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { formatRelativeTime, formatFileSize } from "@mydrift-user/runesh-ui/src/lib/format";
+import { formatRelativeTime, formatFileSize } from "@mydrift/runesh-ui/src/lib/format";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
 
@@ -1016,13 +1016,13 @@ import {
   handleCommandNavigation,
 } from "novel";
 import { useDebouncedCallback } from "use-debounce";
-import { defaultExtensions } from "@mydrift-user/runesh-ui/src/components/editor/extensions";
-import { slashCommand, suggestionItems } from "@mydrift-user/runesh-ui/src/components/editor/slash-command";
-import { EditorBubbleMenu } from "@mydrift-user/runesh-ui/src/components/editor/bubble-menu";
-import { TableMenu } from "@mydrift-user/runesh-ui/src/components/editor/table-menu";
-import { SearchHighlightExtension } from "@mydrift-user/runesh-ui/src/components/editor/search-highlight-extension";
-import { CollapsibleHeadingExtension } from "@mydrift-user/runesh-ui/src/components/editor/collapsible-heading-extension";
-import { FileHandlerExtension, type UploadFn } from "@mydrift-user/runesh-ui/src/components/editor/file-handler";
+import { defaultExtensions } from "@mydrift/runesh-ui/src/components/editor/extensions";
+import { slashCommand, suggestionItems } from "@mydrift/runesh-ui/src/components/editor/slash-command";
+import { EditorBubbleMenu } from "@mydrift/runesh-ui/src/components/editor/bubble-menu";
+import { TableMenu } from "@mydrift/runesh-ui/src/components/editor/table-menu";
+import { SearchHighlightExtension } from "@mydrift/runesh-ui/src/components/editor/search-highlight-extension";
+import { CollapsibleHeadingExtension } from "@mydrift/runesh-ui/src/components/editor/collapsible-heading-extension";
+import { FileHandlerExtension, type UploadFn } from "@mydrift/runesh-ui/src/components/editor/file-handler";
 
 const onUpload: UploadFn = async (file: File) => {
   const formData = new FormData();
@@ -1232,7 +1232,7 @@ RUST_LOG=info
 # ── Docker ─────────────────────────────────────────────────────────────────
 POSTGRES_PASSWORD=changeme
 APP_PORT=8080
-# NPM_TOKEN=ghp_xxx  # GitHub token for @mydrift-user/runesh-ui package (if private)
+# NPM_TOKEN=ghp_xxx  # GitHub token for @mydrift/runesh-ui package (if private)
 "#));
     }
 
@@ -1335,7 +1335,7 @@ WORKDIR /build
 
 # Copy package files and .npmrc (for GitHub Packages registry)
 COPY web/package.json web/bun.lock* web/.npmrc* ./
-# If @mydrift-user/runesh-ui is on a private GitHub Packages registry, pass a token:
+# If @mydrift/runesh-ui is on a private GitHub Packages registry, pass a token:
 #   docker build --build-arg NPM_TOKEN=ghp_xxx .
 ARG NPM_TOKEN
 RUN if [ -n "$NPM_TOKEN" ]; then \
@@ -1648,7 +1648,7 @@ pub fn claude_md(c: &ProjectConfig) -> String {
     if c.has_tauri { stack.push("Tauri v2 desktop".into()); }
     if c.has_extension { stack.push("Chrome extension (WXT)".into()); }
     stack.push("Package manager: bun (never npm/yarn)".into());
-    stack.push(format!("Shared code: @mydrift-user/runesh-ui + runesh-core/runesh-auth crates"));
+    stack.push(format!("Shared code: @mydrift/runesh-ui + runesh-core/runesh-auth crates"));
 
     // ── Structure ────────────────────────────────────────────────────────
     let mut structure = Vec::new();
@@ -1735,11 +1735,11 @@ Every issue and PR must have a label: `bug`, `enhancement`, `feature`, `refactor
 
 ## Architecture Notes
 
-### Shared Package (@mydrift-user/runesh-ui)
+### Shared Package (@mydrift/runesh-ui)
 - Published to GitHub Packages, consumed via `transpilePackages` in `next.config.ts`
 - Tiptap/ProseMirror deps are `peerDependencies` (single instance required)
 - No `exports` field -- uses unrestricted subpath resolution
-- Imports: `@mydrift-user/runesh-ui/src/components/editor/extensions`
+- Imports: `@mydrift/runesh-ui/src/components/editor/extensions`
 
 ### Backend (runesh-core / runesh-auth)
 - Git dependencies from RUNESH repo
@@ -1854,7 +1854,7 @@ const nextConfig: NextConfig = {
   output: "export",
   images: { unoptimized: true },
   trailingSlash: true,
-  transpilePackages: ["@mydrift-user/runesh-ui"],
+  transpilePackages: ["@mydrift/runesh-ui"],
 };
 
 export default nextConfig;
@@ -2081,7 +2081,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 "#;
 
 pub fn extension_popup_app(c: &ProjectConfig) -> String {
-    format!(r#"import {{ useChromeStorage }} from "@mydrift-user/runesh-ui/src/hooks/use-chrome-storage";
+    format!(r#"import {{ useChromeStorage }} from "@mydrift/runesh-ui/src/hooks/use-chrome-storage";
 
 export function App() {{
   const [count, setCount] = useChromeStorage("popup_count", 0);

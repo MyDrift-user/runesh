@@ -5,7 +5,7 @@ WORKDIR /build
 COPY web/package.json web/bun.lock* ./
 COPY web/.npmrc* ./
 
-# If @mydrift-user/runesh-ui is on a private GitHub Packages registry, pass a token:
+# If @mydrift/runesh-ui is on a private GitHub Packages registry, pass a token:
 #   docker build --build-arg NPM_TOKEN=ghp_xxx .
 ARG NPM_TOKEN
 RUN if [ -n "$NPM_TOKEN" ]; then \

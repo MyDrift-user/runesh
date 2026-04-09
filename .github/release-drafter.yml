@@ -4,7 +4,7 @@ tag-prefix: 'v'
 template: |
   ## RUNESH v$RESOLVED_VERSION
 
-  Single release for the whole repo: `runesh-cli` binaries + `@mydrift-user/runesh-ui` npm package.
+  Single release for the whole repo: `runesh-cli` binaries + `@mydrift/runesh-ui` npm package.
 
   Install or update the CLI:
 
@@ -22,7 +22,7 @@ template: |
   Use the UI package:
 
   ```json
-  "@mydrift-user/runesh-ui": "^$RESOLVED_VERSION"
+  "@mydrift/runesh-ui": "^$RESOLVED_VERSION"
   ```
 
   $CHANGES

@@ -8,7 +8,7 @@ mod sync;
 /// Default GitHub repo for RUNESH shared code.
 /// Override with --repo flag or RUNESH_REPO env var.
 pub const DEFAULT_REPO: &str = "https://github.com/mydrift-user/runesh";
-pub const DEFAULT_NPM_SCOPE: &str = "@mydrift-user";
+pub const DEFAULT_NPM_SCOPE: &str = "@mydrift";
 
 #[derive(Parser)]
 #[command(name = "runesh", version, about = "Scaffold and manage RUNESH-based projects")]
