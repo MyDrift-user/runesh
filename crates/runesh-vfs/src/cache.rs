@@ -49,7 +49,7 @@ impl CacheManager {
 
     /// Cache file content after hydration.
     pub async fn put(&self, path: &str, data: &[u8]) -> Result<(), VfsError> {
-        let cache_file = self.cache_path(path);
+        let cache_file = self.cache_path(path)?;
 
         if let Some(parent) = cache_file.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -80,7 +80,7 @@ impl CacheManager {
 
     /// Get cached content. Returns None if not cached or evicted.
     pub async fn get(&self, path: &str) -> Option<Vec<u8>> {
-        let cache_file = self.cache_path(path);
+        let cache_file = self.cache_path(path).ok()?;
 
         if !cache_file.exists() {
             return None;
@@ -96,24 +96,28 @@ impl CacheManager {
 
     /// Check if a file is cached.
     pub async fn contains(&self, path: &str) -> bool {
-        self.cache_path(path).exists()
+        self.cache_path(path).map(|p| p.exists()).unwrap_or(false)
     }
 
     /// Evict a specific file from cache (dehydration).
     pub async fn evict(&self, path: &str) -> Result<(), VfsError> {
-        let cache_file = self.cache_path(path);
+        let cache_file = self.cache_path(path)?;
 
-        if cache_file.exists() {
-            let size = tokio::fs::metadata(&cache_file)
-                .await
-                .map(|m| m.len())
-                .unwrap_or(0);
-
-            tokio::fs::remove_file(&cache_file).await?;
-            self.current_bytes.fetch_sub(size, Ordering::Relaxed);
-            self.entries.write().await.remove(path);
-
-            tracing::debug!(path = %path, size, "Cache: evicted file");
+        // Atomic remove: handle the file-not-found case gracefully (TOCTOU safe)
+        match tokio::fs::remove_file(&cache_file).await {
+            Ok(()) => {
+                let size = self
+                    .entries
+                    .write()
+                    .await
+                    .remove(path)
+                    .map(|e| e.size)
+                    .unwrap_or(0);
+                self.current_bytes.fetch_sub(size, Ordering::Relaxed);
+                tracing::debug!(path = %path, size, "Cache: evicted file");
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
 
         Ok(())
@@ -134,9 +138,15 @@ impl CacheManager {
                 break;
             }
 
-            let cache_file = self.cache_path(&entry.path);
+            let cache_file = match self.cache_path(&entry.path) {
+                Ok(p) => p,
+                Err(_) => {
+                    entries.remove(&entry.path);
+                    continue;
+                }
+            };
             if tokio::fs::remove_file(&cache_file).await.is_ok() {
-                current -= entry.size;
+                current = current.saturating_sub(entry.size);
                 entries.remove(&entry.path);
                 tracing::debug!(path = %entry.path, "Cache: LRU evicted");
             }
@@ -156,8 +166,32 @@ impl CacheManager {
     }
 
     /// Get the cache file path for a given VFS path.
-    fn cache_path(&self, path: &str) -> PathBuf {
-        self.cache_dir.join(path)
+    /// Validates that the result stays within the cache directory.
+    fn cache_path(&self, path: &str) -> Result<PathBuf, VfsError> {
+        // Reject paths with traversal components or null bytes
+        if path.contains("..") || path.contains('\0') {
+            return Err(VfsError::PathTraversal);
+        }
+
+        // Lexical check: normalize and verify prefix.
+        // Use components() to resolve any remaining . or redundant separators.
+        use std::path::Component;
+        let mut normalized = self.cache_dir.clone();
+        for component in Path::new(path).components() {
+            match component {
+                Component::Normal(c) => normalized.push(c),
+                Component::CurDir => {}
+                // ParentDir, RootDir, Prefix all escape the sandbox
+                _ => return Err(VfsError::PathTraversal),
+            }
+        }
+
+        // Double-check the result starts with our cache dir
+        if !normalized.starts_with(&self.cache_dir) {
+            return Err(VfsError::PathTraversal);
+        }
+
+        Ok(normalized)
     }
 
     /// Scan existing cache directory and populate entries map.

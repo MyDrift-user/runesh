@@ -28,7 +28,10 @@ pub struct FsPolicy {
 impl Default for FsPolicy {
     fn default() -> Self {
         Self {
-            root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+            root: std::env::current_dir().unwrap_or_else(|_| {
+                // Use the system temp dir as a safe fallback instead of filesystem root
+                std::env::temp_dir()
+            }),
             allow_write: true,
             allow_delete: true,
             allow_execute: false,
@@ -106,10 +109,13 @@ impl FsPolicy {
         })?;
 
         if !canonical.starts_with(&canonical_root) {
-            return Err(RemoteError::PathTraversal(format!(
-                "Path escapes sandbox root: {}",
-                requested
-            )));
+            tracing::warn!(
+                requested = %requested,
+                "Path traversal attempt blocked"
+            );
+            return Err(RemoteError::PathTraversal(
+                "Path escapes sandbox root".into(),
+            ));
         }
 
         // Check blocked patterns

@@ -44,6 +44,16 @@ mod pty_impl {
                 .map(String::from)
                 .unwrap_or_else(default_shell);
 
+            // Validate shell path: only allow safe filesystem characters
+            if !shell_path.chars().all(|c| {
+                c.is_ascii_alphanumeric()
+                    || matches!(c, '/' | '\\' | '.' | ':' | '_' | '-')
+            }) {
+                return Err(RemoteError::NotAllowed(
+                    "Shell path contains invalid characters".into(),
+                ));
+            }
+
             let mut cmd = CommandBuilder::new(&shell_path);
 
             if let Some(cwd) = cwd {

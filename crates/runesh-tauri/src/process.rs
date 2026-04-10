@@ -33,8 +33,22 @@ pub fn find_binary(name: &str) -> Option<PathBuf> {
     which::which(name).ok()
 }
 
+/// Validate that a process name contains only safe characters.
+/// Allows alphanumeric, dots, hyphens, and underscores.
+fn is_valid_process_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 255
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+}
+
 /// Check if a process with the given name is running.
 pub fn is_process_running(name: &str) -> bool {
+    if !is_valid_process_name(name) {
+        return false;
+    }
+
     #[cfg(windows)]
     {
         let output = Command::new("tasklist")

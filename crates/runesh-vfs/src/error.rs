@@ -8,6 +8,9 @@ pub enum VfsError {
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
 
+    #[error("Path traversal blocked")]
+    PathTraversal,
+
     #[error("Read-only filesystem")]
     ReadOnly,
 
@@ -41,6 +44,7 @@ impl VfsError {
         match self {
             VfsError::NotFound(_) => 404,
             VfsError::PermissionDenied(_) => 403,
+            VfsError::PathTraversal => 403,
             VfsError::ReadOnly => 403,
             VfsError::AlreadyMounted(_) => 409,
             VfsError::NotMounted(_) => 404,
@@ -57,6 +61,7 @@ impl VfsError {
         match self {
             VfsError::NotFound(_) => "not_found",
             VfsError::PermissionDenied(_) => "permission_denied",
+            VfsError::PathTraversal => "path_traversal",
             VfsError::ReadOnly => "read_only",
             VfsError::AlreadyMounted(_) => "already_mounted",
             VfsError::NotMounted(_) => "not_mounted",

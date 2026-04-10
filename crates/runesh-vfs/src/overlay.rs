@@ -5,7 +5,7 @@
 //! Original files are never modified — only edited files consume storage.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,6 +13,30 @@ use tokio::sync::RwLock;
 
 use crate::error::VfsError;
 use crate::provider::{FileProvider, VfsEntry};
+
+/// Validate a relative path and resolve it under a base directory.
+/// Rejects traversal (`..'`, null bytes, absolute paths).
+fn safe_join(base: &Path, relative: &str) -> Result<PathBuf, VfsError> {
+    if relative.contains('\0') {
+        return Err(VfsError::PathTraversal);
+    }
+
+    let mut result = base.to_path_buf();
+    for component in Path::new(relative).components() {
+        match component {
+            Component::Normal(c) => result.push(c),
+            Component::CurDir => {}
+            // ParentDir, RootDir, Prefix all escape the sandbox
+            _ => return Err(VfsError::PathTraversal),
+        }
+    }
+
+    if !result.starts_with(base) {
+        return Err(VfsError::PathTraversal);
+    }
+
+    Ok(result)
+}
 
 /// Copy-on-write overlay provider.
 ///
@@ -53,8 +77,9 @@ impl OverlayProvider {
     }
 
     /// Get the upper layer path for a given relative path.
-    fn upper_file(&self, path: &str) -> PathBuf {
-        self.upper_path.join(path)
+    /// Returns an error if the path would escape the upper directory.
+    fn upper_file(&self, path: &str) -> Result<PathBuf, VfsError> {
+        safe_join(&self.upper_path, path)
     }
 
     /// Check if a file exists in the upper layer.
@@ -74,7 +99,7 @@ impl OverlayProvider {
         }
 
         let content = self.lower.read_file(path, 0, 0).await?;
-        let upper_file = self.upper_file(path);
+        let upper_file = self.upper_file(path)?;
 
         if let Some(parent) = upper_file.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -113,7 +138,7 @@ impl FileProvider for OverlayProvider {
         drop(deleted);
 
         // Override with upper layer entries (modified files)
-        let upper_dir = self.upper_file(path);
+        let upper_dir = self.upper_file(path)?;
         if upper_dir.is_dir() {
             let mut read_dir = tokio::fs::read_dir(&upper_dir).await?;
             while let Some(entry) = read_dir.next_entry().await? {
@@ -171,7 +196,7 @@ impl FileProvider for OverlayProvider {
         }
 
         // Check upper first
-        let upper_file = self.upper_file(path);
+        let upper_file = self.upper_file(path)?;
         if upper_file.exists() {
             let metadata = tokio::fs::metadata(&upper_file).await?;
             let name = upper_file
@@ -209,7 +234,7 @@ impl FileProvider for OverlayProvider {
         }
 
         // Check upper layer first
-        let upper_file = self.upper_file(path);
+        let upper_file = self.upper_file(path)?;
         if upper_file.exists() {
             return read_from_disk(&upper_file, offset, length).await;
         }
@@ -227,9 +252,9 @@ impl FileProvider for OverlayProvider {
         // Copy-on-write: ensure file exists in upper layer
         if !self.has_upper(path).await {
             // Try to copy from lower; if not found, create new
+            let upper_file = self.upper_file(path)?;
             match self.lower.read_file(path, 0, 0).await {
                 Ok(content) => {
-                    let upper_file = self.upper_file(path);
                     if let Some(parent) = upper_file.parent() {
                         tokio::fs::create_dir_all(parent).await?;
                     }
@@ -237,7 +262,6 @@ impl FileProvider for OverlayProvider {
                 }
                 Err(VfsError::NotFound(_)) => {
                     // New file — just create in upper
-                    let upper_file = self.upper_file(path);
                     if let Some(parent) = upper_file.parent() {
                         tokio::fs::create_dir_all(parent).await?;
                     }
@@ -249,7 +273,7 @@ impl FileProvider for OverlayProvider {
         }
 
         // Write to upper layer
-        let upper_file = self.upper_file(path);
+        let upper_file = self.upper_file(path)?;
         if offset == 0 && data.len() as u64 >= tokio::fs::metadata(&upper_file).await.map(|m| m.len()).unwrap_or(0) {
             // Full overwrite
             tokio::fs::write(&upper_file, data).await?;
@@ -272,7 +296,7 @@ impl FileProvider for OverlayProvider {
 
     async fn delete(&self, path: &str) -> Result<(), VfsError> {
         // Remove from upper layer if present
-        let upper_file = self.upper_file(path);
+        let upper_file = self.upper_file(path)?;
         if upper_file.exists() {
             if upper_file.is_dir() {
                 tokio::fs::remove_dir_all(&upper_file).await?;
@@ -290,7 +314,7 @@ impl FileProvider for OverlayProvider {
     }
 
     async fn mkdir(&self, path: &str) -> Result<(), VfsError> {
-        let upper_dir = self.upper_file(path);
+        let upper_dir = self.upper_file(path)?;
         tokio::fs::create_dir_all(&upper_dir).await?;
         self.modified.write().await.insert(path.to_string());
         self.deleted.write().await.remove(path);
@@ -301,8 +325,8 @@ impl FileProvider for OverlayProvider {
         // Ensure source exists in upper (copy up if needed)
         self.copy_up(old_path).await?;
 
-        let old_upper = self.upper_file(old_path);
-        let new_upper = self.upper_file(new_path);
+        let old_upper = self.upper_file(old_path)?;
+        let new_upper = self.upper_file(new_path)?;
 
         if let Some(parent) = new_upper.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -366,11 +390,22 @@ async fn scan_upper_dir(base: &Path, dir: &Path, files: &mut HashSet<String>) {
 }
 
 /// Load the deleted files list from disk.
+/// Validates that deserialized paths do not contain traversal sequences.
 async fn load_deleted_list(upper_path: &Path) -> HashSet<String> {
     let list_path = upper_path.join(".overlay-deleted.json");
-    if let Ok(data) = tokio::fs::read_to_string(&list_path).await {
-        serde_json::from_str(&data).unwrap_or_default()
-    } else {
-        HashSet::new()
+    let data = match tokio::fs::read_to_string(&list_path).await {
+        Ok(d) => d,
+        Err(_) => return HashSet::new(),
+    };
+
+    match serde_json::from_str::<HashSet<String>>(&data) {
+        Ok(deleted) => deleted
+            .into_iter()
+            .filter(|p| !p.contains("..") && !p.contains('\0'))
+            .collect(),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to parse overlay deleted list");
+            HashSet::new()
+        }
     }
 }
