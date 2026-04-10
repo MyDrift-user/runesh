@@ -4897,7 +4897,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-auth"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -4924,7 +4924,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-cli"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "clap",
  "console 0.16.3",
@@ -4937,7 +4937,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-core"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "axum",
  "chrono",
@@ -4962,7 +4962,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-desktop"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "arboard",
  "axum",
@@ -4986,7 +4986,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-inventory"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "axum",
  "chrono",
@@ -5003,7 +5003,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-remote"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -5026,7 +5026,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-tauri"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "dirs",
  "serde",
@@ -5043,7 +5043,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-telemetry"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "http",
  "sentry",
@@ -5056,7 +5056,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-tun"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "bytes",
  "thiserror 2.0.18",
@@ -5067,7 +5067,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-vfs"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "async-trait",
  "axum",
