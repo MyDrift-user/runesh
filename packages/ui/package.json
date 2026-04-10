@@ -1,6 +1,6 @@
 {
   "name": "@mydrift/runesh-ui",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org"
