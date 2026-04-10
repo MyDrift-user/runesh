@@ -124,9 +124,12 @@ mod session_impl {
             let session = sessions.get_mut(session_id).ok_or_else(|| {
                 RemoteError::SessionNotFound(session_id.into())
             })?;
-
             session.last_activity = Instant::now();
+
+            // PTY write is a blocking I/O call; execute it immediately
+            // but keep lock scope minimal. The write itself is fast (kernel buffer).
             session.pty.write_input(data)
+            // Lock is released here at end of function.
         }
 
         /// Read output from a session.
@@ -139,8 +142,9 @@ mod session_impl {
             let session = sessions.get_mut(session_id).ok_or_else(|| {
                 RemoteError::SessionNotFound(session_id.into())
             })?;
-
             session.last_activity = Instant::now();
+
+            // PTY read is non-blocking (reads whatever is available).
             session.pty.read_output(buf)
         }
 

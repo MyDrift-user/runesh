@@ -26,7 +26,11 @@ pub fn run_elevated(binary: &Path, args: &[&str]) -> Result<(), String> {
         .encode_wide()
         .chain(Some(0))
         .collect();
-    let params_str = args.join(" ");
+    let params_str = args
+        .iter()
+        .map(|arg| quote_windows_arg(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
     let params: Vec<u16> = OsStr::new(&params_str)
         .encode_wide()
         .chain(Some(0))
@@ -52,6 +56,48 @@ pub fn run_elevated(binary: &Path, args: &[&str]) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+/// Quote a single argument for the Windows command line.
+///
+/// Follows the Microsoft C/C++ argument parsing rules:
+/// - If the arg contains spaces, tabs, or quotes, wrap in double quotes
+/// - Backslashes before a quote are doubled; trailing backslashes before
+///   the closing quote are doubled
+fn quote_windows_arg(arg: &str) -> String {
+    if !arg.is_empty() && !arg.contains(|c: char| c == ' ' || c == '\t' || c == '"') {
+        return arg.to_string();
+    }
+
+    let mut quoted = String::with_capacity(arg.len() + 2);
+    quoted.push('"');
+
+    let mut backslashes: usize = 0;
+    for c in arg.chars() {
+        if c == '\\' {
+            backslashes += 1;
+        } else if c == '"' {
+            // Double the backslashes before a quote, then escape the quote
+            for _ in 0..(backslashes * 2 + 1) {
+                quoted.push('\\');
+            }
+            quoted.push('"');
+            backslashes = 0;
+        } else {
+            for _ in 0..backslashes {
+                quoted.push('\\');
+            }
+            quoted.push(c);
+            backslashes = 0;
+        }
+    }
+
+    // Double trailing backslashes before the closing quote
+    for _ in 0..(backslashes * 2) {
+        quoted.push('\\');
+    }
+    quoted.push('"');
+    quoted
 }
 
 /// Check if the current process is running with elevated (Administrator) privileges.

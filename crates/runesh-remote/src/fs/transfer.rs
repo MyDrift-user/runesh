@@ -72,6 +72,21 @@ impl UploadManager {
                 RemoteError::Internal("Upload state lost".into())
             })?;
 
+            // Bounds check: reject invalid chunk indices
+            if chunk_index >= state.total_chunks {
+                return Err(RemoteError::BadRequest(format!(
+                    "Chunk index {chunk_index} exceeds total chunks {}",
+                    state.total_chunks
+                )));
+            }
+
+            // Reject duplicate chunks
+            if state.received_chunks[chunk_index as usize] {
+                return Err(RemoteError::BadRequest(format!(
+                    "Chunk {chunk_index} already received"
+                )));
+            }
+
             let chunk_path = state.temp_dir.join(format!("chunk_{chunk_index:06}"));
             tokio::fs::write(&chunk_path, data).await?;
 
