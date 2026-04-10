@@ -90,6 +90,12 @@ export interface AppSidebarProps {
   enableThemeToggle?: boolean
   /** Extra dropdown items rendered above Sign out. */
   profileExtra?: React.ReactNode
+  /**
+   * Override which href is considered active. Pass `null` to suppress all
+   * active highlighting (useful for error pages). When omitted, the current
+   * pathname from `usePathname()` is used.
+   */
+  activeHref?: string | null
 }
 
 // ── Style tokens ─────────────────────────────────────────────────────────────
@@ -134,8 +140,10 @@ export function AppSidebar({
   settingsHref,
   enableThemeToggle = true,
   profileExtra,
+  activeHref,
 }: AppSidebarProps) {
-  const pathname = usePathname()
+  const currentPathname = usePathname()
+  const pathname = activeHref === null ? "" : (activeHref ?? currentPathname)
 
   const visibleNav = navItems.filter(
     (item) => !item.adminOnly || user?.role === "admin"
