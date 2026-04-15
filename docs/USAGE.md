@@ -6,7 +6,7 @@ Complete integration guide for all shared components.
 
 ## Table of Contents
 
-- [Frontend (@runesh/ui)](#frontend-runeshui)
+- [Frontend (@mydrift/runesh-ui)](#frontend-mydriftrunesh-ui)
   - [Installation](#installation)
   - [Layout: AppSidebar + DashboardShell](#layout-appsidebar--dashboardshell)
   - [Layout: SearchBar](#layout-searchbar)
@@ -33,22 +33,22 @@ Complete integration guide for all shared components.
 
 ---
 
-## Frontend (@runesh/ui)
+## Frontend (@mydrift/runesh-ui)
 
 ### Installation
 
-Add to your project's `package.json`:
-
-```json
-{
-  "dependencies": {
-    "@runesh/ui": "file:../RUNESH/packages/ui"
-  }
-}
+```bash
+bun add @mydrift/runesh-ui
 ```
 
-The package expects these peer dependencies (which your Next.js project already has):
-`next`, `react`, `react-dom`
+Peer dependencies (your Next.js app likely already has these):
+`next`, `react`, `react-dom`, `next-themes`, `lucide-react`, `novel`, `lowlight`,
+`@tiptap/core`, `@tiptap/pm`, `@tiptap/extension-image`, `@tiptap/extension-table`,
+`@tiptap/extension-table-cell`, `@tiptap/extension-table-header`,
+`@tiptap/extension-table-row`, `tiptap-extension-global-drag-handle`, `tiptap-markdown`.
+
+Public subpaths:
+`@mydrift/runesh-ui`, `/components`, `/lib`, `/hooks`, `/fonts`, `/styles/globals.css`.
 
 ### Layout: AppSidebar + DashboardShell
 
@@ -56,8 +56,7 @@ The main UI frame used across all projects. `DashboardShell` provides the full l
 
 ```tsx
 // app/layout.tsx
-import { AppSidebar } from "@runesh/ui/components/layout/app-sidebar"
-import { DashboardShell } from "@runesh/ui/components/layout/dashboard-shell"
+import { AppSidebar, DashboardShell } from "@mydrift/runesh-ui/components"
 import { Home, Settings, Users } from "lucide-react"
 
 const navItems = [
@@ -111,7 +110,7 @@ export default function Layout({ children }) {
 Command palette (Ctrl+K) with pluggable search.
 
 ```tsx
-import { SearchBar } from "@runesh/ui/components/layout/search-bar"
+import { SearchBar } from "@mydrift/runesh-ui/components"
 
 async function onSearch(query: string) {
   const res = await api.get(`/search?q=${query}`)
@@ -134,7 +133,7 @@ async function onSearch(query: string) {
 Standard page title + description + action buttons.
 
 ```tsx
-import { PageHeader } from "@runesh/ui/components/layout/page-header"
+import { PageHeader } from "@mydrift/runesh-ui/components"
 import { Button } from "@/components/ui/button"
 
 <PageHeader title="Users" description="Manage user accounts">
@@ -148,12 +147,15 @@ Full-featured rich text editor with slash commands, tables, and more.
 
 ```tsx
 import { EditorRoot, EditorContent } from "novel"
-import { defaultExtensions } from "@runesh/ui/editor/extensions"
-import { slashCommand, suggestionItems } from "@runesh/ui/editor/slash-command"
-import { EditorBubbleMenu } from "@runesh/ui/editor/bubble-menu"
-import { TableMenu } from "@runesh/ui/editor/table-menu"
-import { SearchHighlightExtension } from "@runesh/ui/editor/search-highlight-extension"
-import { CollapsibleHeadingExtension } from "@runesh/ui/editor/collapsible-heading-extension"
+import {
+  defaultExtensions,
+  slashCommand,
+  suggestionItems,
+  EditorBubbleMenu,
+  TableMenu,
+  SearchHighlightExtension,
+  CollapsibleHeadingExtension,
+} from "@mydrift/runesh-ui/components"
 
 const extensions = [...defaultExtensions, slashCommand, SearchHighlightExtension, CollapsibleHeadingExtension]
 
@@ -185,7 +187,7 @@ const extensions = [...defaultExtensions, slashCommand, SearchHighlightExtension
 Generic sortable, searchable, paginated table.
 
 ```tsx
-import { DataTable, type DataTableColumn } from "@runesh/ui/components/ui/data-table"
+import { DataTable, type DataTableColumn } from "@mydrift/runesh-ui/components"
 
 interface User { id: string; name: string; email: string; role: string }
 
@@ -231,8 +233,7 @@ const columns: DataTableColumn<User>[] = [
 Fetch wrapper with auto token refresh, 401 retry, and file upload with progress.
 
 ```tsx
-import { api, uploadFile } from "@runesh/ui/lib/api-client"
-import { setTokenPrefix } from "@runesh/ui/lib/token-store"
+import { api, uploadFile, setTokenPrefix } from "@mydrift/runesh-ui/lib"
 
 // Set once at app startup to avoid key collisions
 setTokenPrefix("myapp")
@@ -253,7 +254,7 @@ await uploadFile("/api/uploads", formData, (pct) => {
 LocalStorage-based token persistence. Configure the prefix to avoid collisions:
 
 ```tsx
-import { setTokenPrefix, storeTokens, clearTokens, getAccessToken } from "@runesh/ui/lib/token-store"
+import { setTokenPrefix, storeTokens, clearTokens, getAccessToken } from "@mydrift/runesh-ui/lib"
 
 setTokenPrefix("rummz")  // Keys: rummz_access_token, rummz_refresh_token, etc.
 
@@ -272,7 +273,7 @@ Frontend OIDC flow with PKCE (used with runesh-auth backend).
 import {
   generateCodeVerifier, generateCodeChallenge, generateState,
   buildAuthUrl, storePending, retrievePending,
-} from "@runesh/ui/lib/auth-pkce"
+} from "@mydrift/runesh-ui/lib"
 
 // Start login
 const verifier = generateCodeVerifier()
@@ -303,8 +304,7 @@ storeTokens(res.access_token, res.refresh_token, res.expires_in, res.user)
 
 ```tsx
 // app/layout.tsx
-import { ThemeProvider } from "@runesh/ui/components/providers/theme-provider"
-import { QueryProvider } from "@runesh/ui/components/providers/query-provider"
+import { ThemeProvider, QueryProvider } from "@mydrift/runesh-ui/components"
 
 <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
   <QueryProvider staleTime={60000} retry={1}>
@@ -329,7 +329,7 @@ const mono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] })
 
 **Static export / Tauri:**
 ```tsx
-import { CHIRON_GOROUND_URL, FONT_FAMILY_SANS } from "@runesh/ui/fonts"
+import { CHIRON_GOROUND_URL, FONT_FAMILY_SANS } from "@mydrift/runesh-ui/fonts"
 
 <head>
   <link rel="stylesheet" href={CHIRON_GOROUND_URL} />
@@ -342,7 +342,7 @@ import { CHIRON_GOROUND_URL, FONT_FAMILY_SANS } from "@runesh/ui/fonts"
 Copy or import `globals.css` for the shared OKLCH theme:
 
 ```css
-@import "@runesh/ui/styles/globals.css";
+@import "@mydrift/runesh-ui/styles/globals.css";
 ```
 
 Or copy the file to your project and customize colors.
@@ -596,7 +596,7 @@ APP_PORT=8080
 ```
 RUNESH/
 ├── packages/
-│   └── ui/                              # @runesh/ui
+│   └── ui/                              # @mydrift/runesh-ui
 │       └── src/
 │           ├── components/
 │           │   ├── editor/              # Novel WYSIWYG editor

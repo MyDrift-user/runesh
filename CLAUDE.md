@@ -35,7 +35,7 @@ Shared code repository for Rust + Next.js + shadcn/ui projects.
 ```
 RUNESH/
 ├── packages/
-│   └── ui/                              # @runesh/ui - Shared React/Next.js components
+│   └── ui/                              # @mydrift/runesh-ui - Shared React/Next.js components
 │       └── src/
 │           ├── components/
 │           │   ├── editor/              # Novel WYSIWYG editor + custom table, slash commands
@@ -96,8 +96,8 @@ RUNESH/
 See [docs/USAGE.md](docs/USAGE.md) for integration guide. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full IT suite roadmap (~23 crates).
 
 ### Frontend
-```json
-"@runesh/ui": "file:../RUNESH/packages/ui"
+```bash
+bun add @mydrift/runesh-ui
 ```
 
 ### Backend
