@@ -2,7 +2,7 @@
 
 use self_update::cargo_crate_version;
 
-const REPO_OWNER: &str = "mydrift-user";
+const REPO_OWNER: &str = "MyDrift-user";
 const REPO_NAME: &str = "runesh";
 const BIN_NAME: &str = "runesh";
 

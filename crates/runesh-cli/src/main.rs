@@ -7,7 +7,7 @@ mod sync;
 
 /// Default GitHub repo for RUNESH shared code.
 /// Override with --repo flag or RUNESH_REPO env var.
-pub const DEFAULT_REPO: &str = "https://github.com/mydrift-user/runesh";
+pub const DEFAULT_REPO: &str = "https://github.com/MyDrift-user/runesh";
 pub const DEFAULT_NPM_SCOPE: &str = "@mydrift";
 
 #[derive(Parser)]
@@ -52,7 +52,7 @@ enum Commands {
         description: Option<String>,
 
         /// RUNESH crates to include (comma-separated, e.g. "core,auth,inventory").
-        /// Available: core, auth, inventory, remote, desktop, vfs, tun, mesh
+        /// Available: core, auth, inventory, remote, desktop, vfs, tun, tauri, telemetry
         #[arg(long, short = 'c')]
         crates: Option<String>,
 
