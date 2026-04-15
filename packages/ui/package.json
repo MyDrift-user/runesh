@@ -1,6 +1,6 @@
 {
   "name": "@mydrift/runesh-ui",
-  "version": "0.16.1",
+  "version": "0.16.2",
   "description": "Shared React/Next.js UI components, hooks, and helpers for RUNESH projects",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -62,7 +62,9 @@
     "use-debounce": "^10.1.0"
   },
   "peerDependencies": {
+    "@base-ui/react": "^0.1.0",
     "@tanstack/react-query": "^5.0.0",
+    "@tauri-apps/api": "^2.0.0",
     "@tiptap/core": "^3.22.2",
     "@tiptap/extension-image": "^3.22.2",
     "@tiptap/extension-table": "^3.22.2",
