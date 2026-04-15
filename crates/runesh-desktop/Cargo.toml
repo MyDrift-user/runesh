@@ -2,6 +2,9 @@
 name = "runesh-desktop"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 description = "Cross-platform remote desktop sharing with screen capture, encoding, and input injection"
 
 [features]

@@ -2,6 +2,9 @@
 name = "runesh-remote"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 description = "Remote file explorer and CLI over WebSocket with enterprise security"
 
 [features]

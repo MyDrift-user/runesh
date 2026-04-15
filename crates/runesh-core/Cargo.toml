@@ -2,6 +2,9 @@
 name = "runesh-core"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 description = "Shared backend utilities: AppError, rate limiter, WebSocket broadcast, file upload, middleware, service installer"
 
 [features]

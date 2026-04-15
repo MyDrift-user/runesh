@@ -2,6 +2,9 @@
 name = "runesh-vfs"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 description = "Cross-platform virtual filesystem with cloud provider integration, overlay writes, and on-demand hydration"
 
 [features]

@@ -2,6 +2,9 @@
 name = "runesh-tun"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 description = "Cross-platform TUN device abstraction for virtual networking"
 
 [dependencies]

@@ -2,6 +2,9 @@
 name = "runesh-auth"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 description = "Shared OIDC authentication with extensible provider hooks"
 
 [features]
