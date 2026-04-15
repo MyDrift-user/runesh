@@ -47,6 +47,28 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace
 
+  # Required: @mydrift/runesh-ui must be buildable and publishable.
+  # Running npm publish --dry-run here catches packaging errors (missing peers,
+  # bad exports map, unresolved imports) on every PR instead of on release day.
+  ui:
+    name: "@mydrift/runesh-ui"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun run typecheck
+      - run: bun run build
+      - name: npm publish --dry-run
+        run: |
+          npm pack --dry-run
+          npm publish --dry-run --access public
+
   # Advisory: lints. Will be enforced once the codebase is clean.
   lint:
     name: fmt + clippy (advisory)
