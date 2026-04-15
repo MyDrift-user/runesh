@@ -1,6 +1,6 @@
 {
   "name": "@mydrift/runesh-ui",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "Shared React/Next.js UI components, hooks, and helpers for RUNESH projects",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -62,6 +62,7 @@
     "use-debounce": "^10.1.0"
   },
   "peerDependencies": {
+    "@tanstack/react-query": "^5.0.0",
     "@tiptap/core": "^3.22.2",
     "@tiptap/extension-image": "^3.22.2",
     "@tiptap/extension-table": "^3.22.2",
@@ -69,17 +70,20 @@
     "@tiptap/extension-table-header": "^3.22.2",
     "@tiptap/extension-table-row": "^3.22.2",
     "@tiptap/pm": "^3.22.2",
+    "cmdk": "^1.0.0",
     "lowlight": "^3.3.0",
     "lucide-react": "^1.7.0",
     "next": ">=16",
     "next-themes": "^0.4.6",
     "novel": "^1.0.2",
+    "radix-ui": "^1.0.0",
     "react": ">=19",
     "react-dom": ">=19",
     "tiptap-extension-global-drag-handle": "^0.1.18",
     "tiptap-markdown": "^0.9.0"
   },
   "devDependencies": {
+    "@tanstack/react-query": "^5.0.0",
     "@tiptap/core": "^3.22.2",
     "@tiptap/extension-image": "^3.22.2",
     "@tiptap/extension-table": "^3.22.2",
@@ -89,10 +93,12 @@
     "@tiptap/pm": "^3.22.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cmdk": "^1.0.0",
     "lowlight": "^3.3.0",
     "lucide-react": "^1.7.0",
     "next-themes": "^0.4.6",
     "novel": "^1.0.2",
+    "radix-ui": "^1.0.0",
     "tiptap-extension-global-drag-handle": "^0.1.18",
     "tiptap-markdown": "^0.9.0",
     "tsup": "^8.3.5",
