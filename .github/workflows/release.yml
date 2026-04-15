@@ -163,10 +163,18 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        working-directory: packages/ui
+        run: bun install --frozen-lockfile
 
       - name: Set version from release tag
         working-directory: packages/ui
@@ -174,8 +182,12 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           npm pkg set version="$VERSION"
 
+      - name: Build
+        working-directory: packages/ui
+        run: bun run build
+
       - name: Publish
         working-directory: packages/ui
-        run: npm publish --access public
+        run: npm publish --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
