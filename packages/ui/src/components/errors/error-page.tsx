@@ -216,9 +216,11 @@ export function ErrorPage({
               </Button>
             )}
             {homeHref && (
-              <Button variant="ghost" size="sm" render={<Link href={homeHref} />}>
-                <Home className="size-3.5" data-icon="inline-start" />
-                {homeLabel}
+              <Button variant="ghost" size="sm" asChild>
+                <Link href={homeHref}>
+                  <Home className="size-3.5" data-icon="inline-start" />
+                  {homeLabel}
+                </Link>
               </Button>
             )}
           </CardFooter>
