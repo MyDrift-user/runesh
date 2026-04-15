@@ -11,7 +11,7 @@ import {
     TextStyle,
     Color,
 } from "novel";
-import { Node, Extension } from "@tiptap/core";
+import { Node, Extension, type Extensions } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
@@ -242,7 +242,7 @@ const image = Image.configure({
     allowBase64: true,
 });
 
-export const defaultExtensions = [
+export const defaultExtensions: Extensions = [
     starterKit,
     tiptapLink,
     taskList,

@@ -26,6 +26,8 @@ export default defineConfig({
     "cmdk",
     /^@tiptap\//,
     /^@tanstack\//,
+    /^@tauri-apps\//,
+    /^@base-ui\//,
     "tiptap-extension-global-drag-handle",
     "tiptap-markdown",
   ],
