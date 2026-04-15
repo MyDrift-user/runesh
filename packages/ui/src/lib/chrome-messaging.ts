@@ -1,3 +1,4 @@
+/// <reference types="chrome" />
 /**
  * Type-safe Chrome extension messaging utilities.
  *
