@@ -1,12 +1,58 @@
 {
   "name": "@mydrift/runesh-ui",
   "version": "0.15.2",
+  "description": "Shared React/Next.js UI components, hooks, and helpers for RUNESH projects",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MyDrift-user/runesh.git",
+    "directory": "packages/ui"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org"
   },
   "type": "module",
   "sideEffects": ["**/*.css"],
+  "files": [
+    "dist",
+    "src/styles",
+    "README.md",
+    "LICENSE*"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./components": {
+      "types": "./dist/components.d.ts",
+      "import": "./dist/components.js"
+    },
+    "./lib": {
+      "types": "./dist/lib.d.ts",
+      "import": "./dist/lib.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks.d.ts",
+      "import": "./dist/hooks.js"
+    },
+    "./fonts": {
+      "types": "./dist/fonts.d.ts",
+      "import": "./dist/fonts.js"
+    },
+    "./styles/globals.css": "./src/styles/globals.css",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run build"
+  },
   "dependencies": {
     "@floating-ui/react": "^0.27.0",
     "auto-skeleton-react": "^1.0.5",
@@ -16,22 +62,22 @@
     "use-debounce": "^10.1.0"
   },
   "peerDependencies": {
-    "@tiptap/core": "^3.0.0",
-    "@tiptap/extension-image": "^3.0.0",
-    "@tiptap/extension-table": "^3.0.0",
-    "@tiptap/extension-table-cell": "^3.0.0",
-    "@tiptap/extension-table-header": "^3.0.0",
-    "@tiptap/extension-table-row": "^3.0.0",
-    "@tiptap/pm": "^3.0.0",
-    "lowlight": "^3.0.0",
-    "lucide-react": ">=1.0.0",
+    "@tiptap/core": "^3.22.2",
+    "@tiptap/extension-image": "^3.22.2",
+    "@tiptap/extension-table": "^3.22.2",
+    "@tiptap/extension-table-cell": "^3.22.2",
+    "@tiptap/extension-table-header": "^3.22.2",
+    "@tiptap/extension-table-row": "^3.22.2",
+    "@tiptap/pm": "^3.22.2",
+    "lowlight": "^3.3.0",
+    "lucide-react": "^1.7.0",
     "next": ">=16",
-    "next-themes": ">=0.4.0",
-    "novel": "^1.0.0",
+    "next-themes": "^0.4.6",
+    "novel": "^1.0.2",
     "react": ">=19",
     "react-dom": ">=19",
-    "tiptap-extension-global-drag-handle": ">=0.1.0",
-    "tiptap-markdown": ">=0.9.0"
+    "tiptap-extension-global-drag-handle": "^0.1.18",
+    "tiptap-markdown": "^0.9.0"
   },
   "devDependencies": {
     "@tiptap/core": "^3.22.2",
@@ -49,6 +95,7 @@
     "novel": "^1.0.2",
     "tiptap-extension-global-drag-handle": "^0.1.18",
     "tiptap-markdown": "^0.9.0",
+    "tsup": "^8.3.5",
     "typescript": "^6"
   }
 }

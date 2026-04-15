@@ -63,7 +63,7 @@ The `init` command scaffolds a full-stack app (Rust/Axum + Next.js + optional Ta
 | Crate / Package | What it provides |
 |----------------|-----------------|
 | **runesh-tauri** | Tauri v2 helpers — TOML config management, system tray, process control, Windows UAC elevation |
-| **@runesh/ui** | React/Next.js components — `AppSidebar`, `DashboardShell`, Novel WYSIWYG editor, `DataTable`, `AuthProvider`, `ThemeProvider`, API client with auto token refresh, PKCE utilities, WebSocket hooks, OKLCH theme with dark mode |
+| **@mydrift/runesh-ui** | React/Next.js components — `AppSidebar`, `DashboardShell`, Novel WYSIWYG editor, `DataTable`, `AuthProvider`, `ThemeProvider`, API client with auto token refresh, PKCE utilities, WebSocket hooks, OKLCH theme with dark mode |
 
 ### Templates
 
@@ -100,15 +100,13 @@ use runesh_vfs::{VfsConfig, WriteMode, OverlayProvider, MountRegistry};
 
 ### Frontend
 
-```json
-"@runesh/ui": "file:../RUNESH/packages/ui"
+```bash
+bun add @mydrift/runesh-ui
 ```
 
 ```tsx
-import { AppSidebar } from "@runesh/ui/components/layout/app-sidebar"
-import { DashboardShell } from "@runesh/ui/components/layout/dashboard-shell"
-import { DataTable } from "@runesh/ui/components/ui/data-table"
-import { api } from "@runesh/ui/lib/api-client"
+import { AppSidebar, DashboardShell, DataTable } from "@mydrift/runesh-ui/components"
+import { api } from "@mydrift/runesh-ui/lib"
 ```
 
 ## Consumer Projects

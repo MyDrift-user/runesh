@@ -189,7 +189,7 @@ pub fn run(
 
     // ── Write README.md ────────────────────────────────────────────────
 
-    let readme = format!("# {name}\n\n{description}\n\nBuilt with [RUNESH](https://github.com/mydrift-user/runesh).\n");
+    let readme = format!("# {name}\n\n{description}\n\nBuilt with [RUNESH](https://github.com/MyDrift-user/runesh).\n");
     fs::write(root.join("README.md"), readme)
         .map_err(|e| format!("write README.md: {e}"))?;
 
@@ -450,7 +450,7 @@ fn generate_claude_md(name: &str, description: &str, crates: &BTreeSet<String>) 
 
 ## RUNESH Integration
 
-This project uses [RUNESH](https://github.com/mydrift-user/runesh) shared crates:
+This project uses [RUNESH](https://github.com/MyDrift-user/runesh) shared crates:
 
 {crate_list}
 

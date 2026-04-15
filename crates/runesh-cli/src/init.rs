@@ -429,45 +429,6 @@ fn make_relative(from: &Path, to: &Path) -> Result<String, String> {
     Ok(rel)
 }
 
-#[allow(dead_code)]
-fn setup_local_dev(root: &Path, config: &ProjectConfig) -> Result<(), String> {
-    let frontends: Vec<&str> = [
-        if config.has_web { Some("web") } else { None },
-        if config.has_desktop_frontend { Some("desktop") } else { None },
-        if config.has_extension { Some("extension") } else { None },
-    ].into_iter().flatten().collect();
-
-    // For local dev: create .cargo/config.toml with path overrides + bun link
-    if let RuneshSource::Local(path) = &config.source {
-        if config.has_any_rust() {
-            let cargo_config = format!(
-                "# Local RUNESH path overrides (remove for CI/Docker builds)\n\
-                 [patch.'{repo}']\n\
-                 runesh-core = {{ path = \"{path}/crates/runesh-core\" }}\n\
-                 runesh-auth = {{ path = \"{path}/crates/runesh-auth\" }}\n",
-                repo = crate::DEFAULT_REPO,
-                path = path,
-            );
-            let cargo_dir = root.join(".cargo");
-            fs::create_dir_all(&cargo_dir)
-                .map_err(|e| format!("mkdir .cargo: {e}"))?;
-            fs::write(cargo_dir.join("config.toml"), cargo_config)
-                .map_err(|e| format!("write .cargo/config.toml: {e}"))?;
-        }
-
-        // Link @mydrift/runesh-ui for local dev
-        for dir in &frontends {
-            println!("  {} Linking @mydrift/runesh-ui in {dir}/...", console::style("->").green());
-            let _ = std::process::Command::new("bun")
-                .args(["link", "@mydrift/runesh-ui"])
-                .current_dir(root.join(dir))
-                .status();
-        }
-    }
-
-    Ok(())
-}
-
 fn run_bun_installs(root: &Path, config: &ProjectConfig) {
     for (dir, label) in [
         (config.has_web, "web"),

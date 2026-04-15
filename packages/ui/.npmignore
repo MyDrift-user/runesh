@@ -1,2 +1,11 @@
+src/components
+src/hooks
+src/lib
+src/fonts
+src/index.ts
+node_modules
 bun.lock
 tsconfig.json
+tsup.config.ts
+.turbo
+*.log
