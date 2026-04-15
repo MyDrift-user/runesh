@@ -1,6 +1,6 @@
 {
   "name": "@mydrift/runesh-ui",
-  "version": "0.16.3",
+  "version": "0.16.4",
   "description": "Shared React/Next.js UI components, hooks, and helpers for RUNESH projects",
   "license": "MIT OR Apache-2.0",
   "repository": {
