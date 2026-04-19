@@ -1,0 +1,17 @@
+[package]
+name = "runesh-relay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "DERP relay server for forwarding encrypted WireGuard packets between mesh peers that cannot connect directly"
+
+[dependencies]
+tokio = { workspace = true, features = ["net", "io-util", "sync", "macros", "rt-multi-thread", "time"] }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+bytes = { workspace = true }
+base64 = "0.22"
+dashmap = "6"
