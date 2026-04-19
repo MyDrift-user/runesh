@@ -5101,6 +5101,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "runesh-agent"
+version = "0.16.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "runesh-mesh",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "runesh-auth"
 version = "0.16.0"
 dependencies = [
