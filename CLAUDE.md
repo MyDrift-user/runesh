@@ -53,6 +53,7 @@ RUNESH/
 │   ├── runesh-core/                     # AppError, RateLimiter, WS broadcast, file upload, DB pool
 │   ├── runesh-desktop/                  # Remote desktop: screen capture, encoding, input injection (Win/Mac/Linux)
 │   ├── runesh-mesh/                     # WireGuard mesh: key management, peer maps, IP allocation, tunnel orchestration
+│   ├── runesh-relay/                    # DERP relay: forwards encrypted WireGuard packets between peers over TCP
 │   ├── runesh-inventory/                # Hardware/software inventory collection (cross-platform)
 │   ├── runesh-remote/                   # Remote file explorer + CLI over WebSocket with PTY
 │   ├── runesh-tauri/                    # Tauri helpers (tray, process mgmt, config, elevation)
