@@ -53,9 +53,9 @@ export function useWebSocket({
 }: UseWebSocketOptions): UseWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [lastMessage, setLastMessage] = useState<unknown | null>(null);
-  const [readyState, setReadyState] = useState(WebSocket.CLOSED);
+  const [readyState, setReadyState] = useState<number>(WebSocket.CLOSED);
 
   // Store callbacks in refs to avoid re-creating the connection on every render
   const onMessageRef = useRef(onMessage);
@@ -71,7 +71,7 @@ export function useWebSocket({
     if (typeof window === "undefined") return;
 
     // Enforce WSS in production
-    if (process.env.NODE_ENV === "production" && url.startsWith("ws://")) {
+    if (typeof globalThis !== "undefined" && (globalThis as any).process?.env?.NODE_ENV === "production" && url.startsWith("ws://")) {
       console.error("Refusing insecure WebSocket connection in production. Use wss://");
       return;
     }
