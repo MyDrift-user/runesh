@@ -1,0 +1,24 @@
+[package]
+name = "runesh-mesh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "WireGuard mesh network management: key lifecycle, peer maps, tunnel orchestration, and IP allocation"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ipnet = { version = "2", features = ["serde"] }
+base64 = "0.22"
+rand = "0.8"
+
+boringtun = "0.7"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+
+runesh-acl = { path = "../runesh-acl" }
