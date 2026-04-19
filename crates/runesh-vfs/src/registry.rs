@@ -46,10 +46,10 @@ impl MountRegistry {
         let mount_point = config.mount_point.clone();
         let mount = crate::platform::mount(config.clone(), provider, cache).await?;
 
-        self.mounts.write().await.insert(
-            id.to_string(),
-            MountEntry { config, mount },
-        );
+        self.mounts
+            .write()
+            .await
+            .insert(id.to_string(), MountEntry { config, mount });
 
         tracing::info!(id = %id, mount_point = %mount_point.display(), "VFS mounted");
         Ok(mount_point)

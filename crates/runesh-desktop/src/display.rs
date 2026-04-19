@@ -32,11 +32,16 @@ fn enumerate_displays_windows() -> Result<Vec<DisplayInfo>, DesktopError> {
         while let Ok(adapter) = factory.EnumAdapters1(adapter_idx) {
             let mut output_idx = 0u32;
             while let Ok(output) = adapter.EnumOutputs(output_idx) {
-                let desc = output.GetDesc()
+                let desc = output
+                    .GetDesc()
                     .map_err(|e| DesktopError::Capture(format!("GetDesc failed: {e}")))?;
 
                 let name = String::from_utf16_lossy(
-                    &desc.DeviceName[..desc.DeviceName.iter().position(|&c| c == 0).unwrap_or(desc.DeviceName.len())]
+                    &desc.DeviceName[..desc
+                        .DeviceName
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(desc.DeviceName.len())],
                 );
 
                 let rect = desc.DesktopCoordinates;
@@ -121,11 +126,15 @@ fn enumerate_displays_linux() -> Result<Vec<DisplayInfo>, DesktopError> {
     if let Ok(resources) = conn.randr_get_screen_resources_current(screen.root) {
         if let Ok(resources) = resources.reply() {
             for (i, &output) in resources.outputs.iter().enumerate() {
-                if let Ok(output_info) = conn.randr_get_output_info(output, resources.config_timestamp) {
+                if let Ok(output_info) =
+                    conn.randr_get_output_info(output, resources.config_timestamp)
+                {
                     if let Ok(info) = output_info.reply() {
                         if info.connection == x11rb::protocol::randr::Connection::CONNECTED {
                             if info.crtc != 0 {
-                                if let Ok(crtc_info) = conn.randr_get_crtc_info(info.crtc, resources.config_timestamp) {
+                                if let Ok(crtc_info) =
+                                    conn.randr_get_crtc_info(info.crtc, resources.config_timestamp)
+                                {
                                     if let Ok(crtc) = crtc_info.reply() {
                                         let name = String::from_utf8_lossy(&info.name).to_string();
                                         displays.push(DisplayInfo {

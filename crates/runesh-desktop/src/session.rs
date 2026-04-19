@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 
 use crate::capture;
 use crate::cursor::CursorTracker;
@@ -134,7 +134,13 @@ impl DesktopSessionManager {
         let capture_display_id = display_id;
 
         tokio::task::spawn_blocking(move || {
-            capture_loop(capture_display_id, quality, max_fps, frame_tx_clone, cancel_rx)
+            capture_loop(
+                capture_display_id,
+                quality,
+                max_fps,
+                frame_tx_clone,
+                cancel_rx,
+            )
         });
 
         self.sessions.write().await.insert(
@@ -234,24 +240,22 @@ fn capture_loop(
         let frame_start = Instant::now();
 
         match capturer.capture_frame() {
-            Ok(frame) => {
-                match encode::encode_frame(&frame, quality, encoding) {
-                    Ok(encoded) => {
-                        let update = FrameUpdate {
-                            data: encoded.data,
-                            encoding: encoded.encoding,
-                            width: encoded.width,
-                            height: encoded.height,
-                            is_key_frame: encoded.is_key_frame,
-                            timestamp: frame.timestamp,
-                        };
-                        let _ = frame_tx.send(update);
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Frame encoding failed");
-                    }
+            Ok(frame) => match encode::encode_frame(&frame, quality, encoding) {
+                Ok(encoded) => {
+                    let update = FrameUpdate {
+                        data: encoded.data,
+                        encoding: encoded.encoding,
+                        width: encoded.width,
+                        height: encoded.height,
+                        is_key_frame: encoded.is_key_frame,
+                        timestamp: frame.timestamp,
+                    };
+                    let _ = frame_tx.send(update);
                 }
-            }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Frame encoding failed");
+                }
+            },
             Err(e) => {
                 tracing::debug!(error = %e, "Frame capture failed (may be transient)");
             }

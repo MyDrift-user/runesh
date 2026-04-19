@@ -54,13 +54,9 @@ impl InputInjector for MacOsInputInjector {
             _ => return Ok(()),
         };
 
-        let event = CGEvent::new_mouse_event(
-            self.event_source.clone(),
-            event_type,
-            point,
-            cg_button,
-        )
-        .map_err(|_| DesktopError::Input("Failed to create mouse button event".into()))?;
+        let event =
+            CGEvent::new_mouse_event(self.event_source.clone(), event_type, point, cg_button)
+                .map_err(|_| DesktopError::Input("Failed to create mouse button event".into()))?;
 
         event.post(CGEventTapLocation::HID);
         Ok(())
@@ -72,12 +68,9 @@ impl InputInjector for MacOsInputInjector {
         pressed: bool,
         _modifiers: u8,
     ) -> Result<(), DesktopError> {
-        let event = CGEvent::new_keyboard_event(
-            self.event_source.clone(),
-            key_code as u16,
-            pressed,
-        )
-        .map_err(|_| DesktopError::Input("Failed to create keyboard event".into()))?;
+        let event =
+            CGEvent::new_keyboard_event(self.event_source.clone(), key_code as u16, pressed)
+                .map_err(|_| DesktopError::Input("Failed to create keyboard event".into()))?;
 
         event.post(CGEventTapLocation::HID);
         Ok(())

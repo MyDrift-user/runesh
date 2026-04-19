@@ -1,10 +1,10 @@
 pub mod error;
 pub mod pagination;
 pub mod rate_limit;
-pub mod shutdown;
-pub mod ws_broadcast;
-pub mod upload;
 pub mod service;
+pub mod shutdown;
+pub mod upload;
+pub mod ws_broadcast;
 
 #[cfg(feature = "axum")]
 pub mod middleware;
@@ -21,15 +21,15 @@ pub mod metrics;
 #[cfg(feature = "openapi")]
 pub mod openapi;
 
-pub use error::AppError;
-pub use pagination::{Pagination, PaginatedResponse};
-pub use rate_limit::{RateLimiter, InMemoryRateLimiter, RateLimiterBackend};
-#[cfg(feature = "redis")]
-pub use rate_limit::RedisRateLimiter;
 #[cfg(feature = "sqlx")]
 pub use db::PoolConfig;
-pub use shutdown::{shutdown_signal, graceful_shutdown, ShutdownRegistry};
+pub use error::AppError;
+pub use pagination::{PaginatedResponse, Pagination};
+#[cfg(feature = "redis")]
+pub use rate_limit::RedisRateLimiter;
+pub use rate_limit::{InMemoryRateLimiter, RateLimiter, RateLimiterBackend};
+pub use shutdown::{ShutdownRegistry, graceful_shutdown, shutdown_signal};
 pub use upload::validate_magic_bytes;
-pub use ws_broadcast::WsLimits;
 #[cfg(feature = "redis")]
 pub use ws_broadcast::RedisBroadcastRegistry;
+pub use ws_broadcast::WsLimits;

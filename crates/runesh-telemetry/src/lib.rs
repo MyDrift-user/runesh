@@ -9,7 +9,7 @@
 //! ## Usage (binary `main.rs`)
 //!
 //! ```no_run
-//! fn main() {
+//! # fn main() {
 //!     let _guard = runesh_telemetry::init(runesh_telemetry::Config::from_env(
 //!         env!("CARGO_PKG_NAME"),
 //!         env!("CARGO_PKG_VERSION"),
@@ -80,7 +80,9 @@ impl Config {
         let service = service.into();
         let version = version.into();
         Self {
-            dsn: std::env::var("RUNESH_SENTRY_DSN").ok().filter(|s| !s.is_empty()),
+            dsn: std::env::var("RUNESH_SENTRY_DSN")
+                .ok()
+                .filter(|s| !s.is_empty()),
             service,
             version,
             environment: std::env::var("RUNESH_ENV")
@@ -91,7 +93,10 @@ impl Config {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0),
-            debug: matches!(std::env::var("RUNESH_TELEMETRY_DEBUG").as_deref(), Ok("1") | Ok("true")),
+            debug: matches!(
+                std::env::var("RUNESH_TELEMETRY_DEBUG").as_deref(),
+                Ok("1") | Ok("true")
+            ),
         }
     }
 }

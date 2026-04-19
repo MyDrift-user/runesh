@@ -136,7 +136,10 @@ pub async fn graceful_shutdown(registry: ShutdownRegistry, drain_period: Duratio
     registry.run_hooks().await;
 
     // Drain period: allow in-flight requests to complete
-    tracing::info!(seconds = drain_period.as_secs(), "draining in-flight requests");
+    tracing::info!(
+        seconds = drain_period.as_secs(),
+        "draining in-flight requests"
+    );
     tokio::time::sleep(drain_period).await;
 
     tracing::info!("graceful shutdown complete");

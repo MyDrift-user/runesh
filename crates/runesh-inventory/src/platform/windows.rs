@@ -26,13 +26,19 @@ fn get_str(map: &HashMap<String, serde_json::Value>, key: &str) -> String {
 
 fn get_u64(map: &HashMap<String, serde_json::Value>, key: &str) -> u64 {
     map.get(key)
-        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
         .unwrap_or(0)
 }
 
 fn get_f32(map: &HashMap<String, serde_json::Value>, key: &str) -> f32 {
     map.get(key)
-        .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .and_then(|v| {
+            v.as_f64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
         .unwrap_or(0.0) as f32
 }
 
@@ -43,7 +49,10 @@ pub fn collect_gpus_wmi() -> Vec<GpuInfo> {
         return Vec::new();
     };
 
-    let results = wmi_query(&conn, "SELECT Name, AdapterCompatibility, DriverVersion, AdapterRAM FROM Win32_VideoController");
+    let results = wmi_query(
+        &conn,
+        "SELECT Name, AdapterCompatibility, DriverVersion, AdapterRAM FROM Win32_VideoController",
+    );
 
     results
         .iter()
@@ -62,9 +71,18 @@ pub fn collect_gpus_wmi() -> Vec<GpuInfo> {
 pub fn collect_bios_wmi() -> Option<BiosInfo> {
     let conn = wmi_connect()?;
 
-    let bios_results = wmi_query(&conn, "SELECT Manufacturer, SMBIOSBIOSVersion, ReleaseDate FROM Win32_BIOS");
-    let board_results = wmi_query(&conn, "SELECT Manufacturer, Product, SerialNumber FROM Win32_BaseBoard");
-    let system_results = wmi_query(&conn, "SELECT Manufacturer, Model, SerialNumber, UUID FROM Win32_ComputerSystemProduct");
+    let bios_results = wmi_query(
+        &conn,
+        "SELECT Manufacturer, SMBIOSBIOSVersion, ReleaseDate FROM Win32_BIOS",
+    );
+    let board_results = wmi_query(
+        &conn,
+        "SELECT Manufacturer, Product, SerialNumber FROM Win32_BaseBoard",
+    );
+    let system_results = wmi_query(
+        &conn,
+        "SELECT Manufacturer, Model, SerialNumber, UUID FROM Win32_ComputerSystemProduct",
+    );
 
     let bios = bios_results.first();
     let board = board_results.first();
@@ -72,14 +90,24 @@ pub fn collect_bios_wmi() -> Option<BiosInfo> {
 
     Some(BiosInfo {
         bios_vendor: bios.map(|b| get_str(b, "Manufacturer")).unwrap_or_default(),
-        bios_version: bios.map(|b| get_str(b, "SMBIOSBIOSVersion")).unwrap_or_default(),
+        bios_version: bios
+            .map(|b| get_str(b, "SMBIOSBIOSVersion"))
+            .unwrap_or_default(),
         bios_release_date: bios.map(|b| get_str(b, "ReleaseDate")).unwrap_or_default(),
-        motherboard_manufacturer: board.map(|b| get_str(b, "Manufacturer")).unwrap_or_default(),
+        motherboard_manufacturer: board
+            .map(|b| get_str(b, "Manufacturer"))
+            .unwrap_or_default(),
         motherboard_product: board.map(|b| get_str(b, "Product")).unwrap_or_default(),
-        motherboard_serial: board.map(|b| get_str(b, "SerialNumber")).unwrap_or_default(),
-        system_manufacturer: system.map(|s| get_str(s, "Manufacturer")).unwrap_or_default(),
+        motherboard_serial: board
+            .map(|b| get_str(b, "SerialNumber"))
+            .unwrap_or_default(),
+        system_manufacturer: system
+            .map(|s| get_str(s, "Manufacturer"))
+            .unwrap_or_default(),
         system_product: system.map(|s| get_str(s, "Model")).unwrap_or_default(),
-        system_serial: system.map(|s| get_str(s, "SerialNumber")).unwrap_or_default(),
+        system_serial: system
+            .map(|s| get_str(s, "SerialNumber"))
+            .unwrap_or_default(),
         system_uuid: system.map(|s| get_str(s, "UUID")).unwrap_or_default(),
     })
 }

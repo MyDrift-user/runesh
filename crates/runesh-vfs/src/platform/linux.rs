@@ -6,13 +6,13 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    Request,
+    Config, Errno, FileAttr, FileHandle, FileType, Filesystem, Generation, INodeNo, LockOwner,
+    MountOption, OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request, WriteFlags,
 };
 use tokio::sync::RwLock;
 
@@ -22,7 +22,7 @@ use crate::error::VfsError;
 use crate::provider::{FileProvider, VfsEntry};
 
 const TTL: Duration = Duration::from_secs(5);
-const ROOT_INO: u64 = 1;
+const ROOT_INO: INodeNo = INodeNo::ROOT;
 
 /// Linux FUSE mount handle.
 pub struct LinuxFuseMount {
@@ -44,24 +44,26 @@ impl LinuxFuseMount {
 
         let fs = VfsFuse::new(provider, cache, write_mode, runtime);
 
-        let mut options = vec![
+        let mut mount_options = vec![
             MountOption::FSName(config.display_name.clone()),
             MountOption::AutoUnmount,
-            MountOption::AllowOther,
+            MountOption::CUSTOM("allow_other".into()),
         ];
 
         if matches!(config.write_mode, WriteMode::ReadOnly) {
-            options.push(MountOption::RO);
+            mount_options.push(MountOption::RO);
         }
+
+        let mut fuse_config = Config::default();
+        fuse_config.mount_options = mount_options;
 
         let mount_point_clone = mount_point.clone();
         let session = tokio::task::spawn_blocking(move || {
-            fuser::spawn_mount2(fs, &mount_point_clone, &options)
+            fuser::spawn_mount2(fs, &mount_point_clone, &fuse_config)
                 .map_err(|e| VfsError::Platform(format!("FUSE mount failed: {e}")))
         })
         .await
-        .map_err(|e| VfsError::Platform(format!("Task join error: {e}")))?
-        ?;
+        .map_err(|e| VfsError::Platform(format!("Task join error: {e}")))??;
 
         tracing::info!(mount_point = %mount_point.display(), "FUSE: mounted");
 
@@ -91,10 +93,10 @@ struct VfsFuse {
     cache: Arc<CacheManager>,
     write_mode: WriteMode,
     runtime: tokio::runtime::Handle,
-    /// inode → path mapping
-    inodes: RwLock<HashMap<u64, String>>,
-    /// path → inode reverse mapping
-    paths: RwLock<HashMap<String, u64>>,
+    /// inode -> path mapping
+    inodes: RwLock<HashMap<INodeNo, String>>,
+    /// path -> inode reverse mapping
+    paths: RwLock<HashMap<String, INodeNo>>,
     /// Next inode number to assign
     next_ino: AtomicU64,
 }
@@ -121,14 +123,15 @@ impl VfsFuse {
     }
 
     /// Get or assign an inode for a path.
-    fn get_or_create_ino(&self, path: &str) -> u64 {
+    fn get_or_create_ino(&self, path: &str) -> INodeNo {
         // Try read lock first (fast path)
         if let Some(ino) = self.runtime.block_on(self.paths.read()).get(path) {
             return *ino;
         }
 
         // Assign new inode
-        let ino = self.next_ino.fetch_add(1, Ordering::Relaxed);
+        let raw = self.next_ino.fetch_add(1, Ordering::Relaxed);
+        let ino = INodeNo(raw);
         self.runtime.block_on(async {
             self.inodes.write().await.insert(ino, path.to_string());
             self.paths.write().await.insert(path.to_string(), ino);
@@ -137,24 +140,19 @@ impl VfsFuse {
     }
 
     /// Resolve an inode to a path.
-    fn ino_to_path(&self, ino: u64) -> Option<String> {
-        self.runtime
-            .block_on(self.inodes.read())
-            .get(&ino)
-            .cloned()
+    fn ino_to_path(&self, ino: INodeNo) -> Option<String> {
+        self.runtime.block_on(self.inodes.read()).get(&ino).cloned()
     }
 
     /// Convert a VfsEntry to FUSE FileAttr.
-    fn entry_to_attr(&self, entry: &VfsEntry, ino: u64) -> FileAttr {
+    fn entry_to_attr(&self, entry: &VfsEntry, ino: INodeNo) -> FileAttr {
         let kind = if entry.is_dir {
             FileType::Directory
         } else {
             FileType::RegularFile
         };
 
-        let mtime = entry
-            .modified
-            .unwrap_or(UNIX_EPOCH);
+        let mtime = entry.modified.unwrap_or(UNIX_EPOCH);
         let ctime = entry.created.unwrap_or(mtime);
         let atime = entry.accessed.unwrap_or(mtime);
 
@@ -181,11 +179,11 @@ impl VfsFuse {
 }
 
 impl Filesystem for VfsFuse {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         let parent_path = match self.ino_to_path(parent) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -201,19 +199,19 @@ impl Filesystem for VfsFuse {
             Ok(entry) => {
                 let ino = self.get_or_create_ino(&child_path);
                 let attr = self.entry_to_attr(&entry, ino);
-                reply.entry(&TTL, &attr, 0);
+                reply.entry(&TTL, &attr, Generation(0));
             }
             Err(_) => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
             }
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
         let path = match self.ino_to_path(ino) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -247,23 +245,23 @@ impl Filesystem for VfsFuse {
                 reply.attr(&TTL, &attr);
             }
             Err(_) => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
             }
         }
     }
 
     fn readdir(
-        &mut self,
+        &self,
         _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
+        ino: INodeNo,
+        _fh: FileHandle,
+        offset: u64,
         mut reply: ReplyDirectory,
     ) {
         let path = match self.ino_to_path(ino) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -271,13 +269,13 @@ impl Filesystem for VfsFuse {
         let entries = match self.runtime.block_on(self.provider.list_dir(&path)) {
             Ok(e) => e,
             Err(_) => {
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
                 return;
             }
         };
 
         // Standard . and .. entries
-        let mut all_entries: Vec<(u64, FileType, String)> = vec![
+        let mut all_entries: Vec<(INodeNo, FileType, String)> = vec![
             (ino, FileType::Directory, ".".into()),
             (ino, FileType::Directory, "..".into()),
         ];
@@ -293,7 +291,7 @@ impl Filesystem for VfsFuse {
         }
 
         for (i, (ino, kind, name)) in all_entries.iter().enumerate().skip(offset as usize) {
-            if reply.add(*ino, (i + 1) as i64, *kind, name) {
+            if reply.add(*ino, (i + 1) as u64, *kind, name) {
                 break; // Buffer full
             }
         }
@@ -302,20 +300,20 @@ impl Filesystem for VfsFuse {
     }
 
     fn read(
-        &mut self,
+        &self,
         _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
+        ino: INodeNo,
+        _fh: FileHandle,
+        offset: u64,
         size: u32,
-        _flags: i32,
-        _lock_owner: Option<u64>,
+        _flags: OpenFlags,
+        _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
         let path = match self.ino_to_path(ino) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -335,7 +333,7 @@ impl Filesystem for VfsFuse {
         // Fetch from provider and cache
         match self
             .runtime
-            .block_on(self.provider.read_file(&path, offset as u64, size as u64))
+            .block_on(self.provider.read_file(&path, offset, size as u64))
         {
             Ok(data) => {
                 // Cache the full file if this is a first read
@@ -345,39 +343,39 @@ impl Filesystem for VfsFuse {
                 reply.data(&data);
             }
             Err(_) => {
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
             }
         }
     }
 
     fn write(
-        &mut self,
+        &self,
         _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
+        ino: INodeNo,
+        _fh: FileHandle,
+        offset: u64,
         data: &[u8],
-        _write_flags: u32,
-        _flags: i32,
-        _lock_owner: Option<u64>,
+        _write_flags: WriteFlags,
+        _flags: OpenFlags,
+        _lock_owner: Option<LockOwner>,
         reply: fuser::ReplyWrite,
     ) {
         if matches!(self.write_mode, WriteMode::ReadOnly) {
-            reply.error(libc::EACCES);
+            reply.error(Errno::EACCES);
             return;
         }
 
         let path = match self.ino_to_path(ino) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
 
         match self
             .runtime
-            .block_on(self.provider.write_file(&path, data, offset as u64))
+            .block_on(self.provider.write_file(&path, data, offset))
         {
             Ok(()) => {
                 // Invalidate cache
@@ -385,29 +383,29 @@ impl Filesystem for VfsFuse {
                 reply.written(data.len() as u32);
             }
             Err(_) => {
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
             }
         }
     }
 
     fn mkdir(
-        &mut self,
+        &self,
         _req: &Request,
-        parent: u64,
+        parent: INodeNo,
         name: &OsStr,
         _mode: u32,
         _umask: u32,
         reply: ReplyEntry,
     ) {
         if matches!(self.write_mode, WriteMode::ReadOnly) {
-            reply.error(libc::EACCES);
+            reply.error(Errno::EACCES);
             return;
         }
 
         let parent_path = match self.ino_to_path(parent) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -424,24 +422,24 @@ impl Filesystem for VfsFuse {
                 let ino = self.get_or_create_ino(&child_path);
                 let entry = VfsEntry::directory(&name_str, &child_path);
                 let attr = self.entry_to_attr(&entry, ino);
-                reply.entry(&TTL, &attr, 0);
+                reply.entry(&TTL, &attr, Generation(0));
             }
             Err(_) => {
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
             }
         }
     }
 
-    fn unlink(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: fuser::ReplyEmpty) {
+    fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: fuser::ReplyEmpty) {
         if matches!(self.write_mode, WriteMode::ReadOnly) {
-            reply.error(libc::EACCES);
+            reply.error(Errno::EACCES);
             return;
         }
 
         let parent_path = match self.ino_to_path(parent) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -459,7 +457,7 @@ impl Filesystem for VfsFuse {
                 reply.ok();
             }
             Err(_) => {
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
             }
         }
     }

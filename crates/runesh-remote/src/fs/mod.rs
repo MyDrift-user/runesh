@@ -1,9 +1,9 @@
 //! Remote file system module: secure file explorer over WebSocket.
 
-pub mod security;
-pub mod explorer;
-pub mod transfer;
 pub mod archive;
+pub mod explorer;
+pub mod security;
+pub mod transfer;
 pub mod watch;
 
 pub use security::FsPolicy;

@@ -10,18 +10,36 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use console::style;
-use dialoguer::{Input, MultiSelect, Confirm};
+use dialoguer::{Confirm, Input, MultiSelect};
 
 /// All available RUNESH crates that can be included as dependencies.
 const AVAILABLE_CRATES: &[(&str, &str)] = &[
-    ("core",      "AppError, rate limiter, WS broadcast, file upload, middleware, metrics"),
-    ("auth",      "OIDC + JWT + RBAC + Axum middleware"),
-    ("inventory", "Cross-platform hardware/software inventory collection"),
-    ("remote",    "Remote file explorer + PTY terminal over WebSocket"),
-    ("desktop",   "Remote desktop with screen capture, input injection, multi-cursor"),
-    ("vfs",       "Virtual filesystem with cloud provider + overlay writes"),
-    ("tun",       "Cross-platform TUN device (WireGuard tunneling)"),
-    ("telemetry", "Sentry/GlitchTip error reporting (OPTIONAL — off by default; no-op without DSN)"),
+    (
+        "core",
+        "AppError, rate limiter, WS broadcast, file upload, middleware, metrics",
+    ),
+    ("auth", "OIDC + JWT + RBAC + Axum middleware"),
+    (
+        "inventory",
+        "Cross-platform hardware/software inventory collection",
+    ),
+    (
+        "remote",
+        "Remote file explorer + PTY terminal over WebSocket",
+    ),
+    (
+        "desktop",
+        "Remote desktop with screen capture, input injection, multi-cursor",
+    ),
+    (
+        "vfs",
+        "Virtual filesystem with cloud provider + overlay writes",
+    ),
+    ("tun", "Cross-platform TUN device (WireGuard tunneling)"),
+    (
+        "telemetry",
+        "Sentry/GlitchTip error reporting (OPTIONAL — off by default; no-op without DSN)",
+    ),
 ];
 
 pub fn run(
@@ -144,20 +162,35 @@ pub fn run(
 
     // ── Create directory structure ─────────────────────────────────────
 
-    fs::create_dir_all(root.join("crates").join(format!("{snake_name}-server")).join("src"))
-        .map_err(|e| format!("mkdir: {e}"))?;
-    fs::create_dir_all(root.join("docs"))
-        .map_err(|e| format!("mkdir docs: {e}"))?;
+    fs::create_dir_all(
+        root.join("crates")
+            .join(format!("{snake_name}-server"))
+            .join("src"),
+    )
+    .map_err(|e| format!("mkdir: {e}"))?;
+    fs::create_dir_all(root.join("docs")).map_err(|e| format!("mkdir docs: {e}"))?;
 
     // ── Write Cargo.toml (workspace) ───────────────────────────────────
 
-    let cargo_toml = generate_cargo_toml(&name, &snake_name, &description, &selected_crates, use_local, &runesh_rel_path);
-    fs::write(root.join("Cargo.toml"), cargo_toml)
-        .map_err(|e| format!("write Cargo.toml: {e}"))?;
+    let cargo_toml = generate_cargo_toml(
+        &name,
+        &snake_name,
+        &description,
+        &selected_crates,
+        use_local,
+        &runesh_rel_path,
+    );
+    fs::write(root.join("Cargo.toml"), cargo_toml).map_err(|e| format!("write Cargo.toml: {e}"))?;
 
     // ── Write server crate ─────────────────────────────────────────────
 
-    let server_cargo = generate_server_cargo(&name, &snake_name, &selected_crates, use_local, &runesh_rel_path);
+    let server_cargo = generate_server_cargo(
+        &name,
+        &snake_name,
+        &selected_crates,
+        use_local,
+        &runesh_rel_path,
+    );
     fs::write(
         root.join("crates")
             .join(format!("{snake_name}-server"))
@@ -178,20 +211,19 @@ pub fn run(
 
     // ── Write .gitignore ───────────────────────────────────────────────
 
-    fs::write(root.join(".gitignore"), GITIGNORE)
-        .map_err(|e| format!("write .gitignore: {e}"))?;
+    fs::write(root.join(".gitignore"), GITIGNORE).map_err(|e| format!("write .gitignore: {e}"))?;
 
     // ── Write CLAUDE.md ────────────────────────────────────────────────
 
     let claude_md = generate_claude_md(&name, &description, &selected_crates);
-    fs::write(root.join("CLAUDE.md"), claude_md)
-        .map_err(|e| format!("write CLAUDE.md: {e}"))?;
+    fs::write(root.join("CLAUDE.md"), claude_md).map_err(|e| format!("write CLAUDE.md: {e}"))?;
 
     // ── Write README.md ────────────────────────────────────────────────
 
-    let readme = format!("# {name}\n\n{description}\n\nBuilt with [RUNESH](https://github.com/MyDrift-user/runesh).\n");
-    fs::write(root.join("README.md"), readme)
-        .map_err(|e| format!("write README.md: {e}"))?;
+    let readme = format!(
+        "# {name}\n\n{description}\n\nBuilt with [RUNESH](https://github.com/MyDrift-user/runesh).\n"
+    );
+    fs::write(root.join("README.md"), readme).map_err(|e| format!("write README.md: {e}"))?;
 
     // ── Git init ───────────────────────────────────────────────────────
 
@@ -200,7 +232,11 @@ pub fn run(
     run_cmd("git", &["add", "."], &root)?;
     run_cmd(
         "git",
-        &["commit", "-m", "chore: initial project scaffold via runesh new"],
+        &[
+            "commit",
+            "-m",
+            "chore: initial project scaffold via runesh new",
+        ],
         &root,
     )?;
 
@@ -217,10 +253,7 @@ pub fn run(
             );
             println!("  {} Skipping GitHub repo creation.", style("!").yellow());
         } else {
-            let mut args = vec![
-                "repo".to_string(),
-                "create".to_string(),
-            ];
+            let mut args = vec!["repo".to_string(), "create".to_string()];
 
             // Repo name (with optional org prefix)
             let repo_name = if let Some(ref org) = org {
@@ -257,7 +290,10 @@ pub fn run(
                         style("!").yellow(),
                         e
                     );
-                    println!("  {} You can create it manually later.", style("!").yellow());
+                    println!(
+                        "  {} You can create it manually later.",
+                        style("!").yellow()
+                    );
                 }
             }
         }

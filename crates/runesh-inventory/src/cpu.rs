@@ -9,8 +9,14 @@ pub fn collect_cpu(sys: &System) -> CpuInfo {
     let cpus = sys.cpus();
     let global_usage = sys.global_cpu_usage();
 
-    let brand = cpus.first().map(|c| c.brand().to_string()).unwrap_or_default();
-    let vendor = cpus.first().map(|c| c.vendor_id().to_string()).unwrap_or_default();
+    let brand = cpus
+        .first()
+        .map(|c| c.brand().to_string())
+        .unwrap_or_default();
+    let vendor = cpus
+        .first()
+        .map(|c| c.vendor_id().to_string())
+        .unwrap_or_default();
     let frequency = cpus.first().map(|c| c.frequency()).unwrap_or(0);
 
     let per_core_usage: Vec<CoreUsage> = cpus

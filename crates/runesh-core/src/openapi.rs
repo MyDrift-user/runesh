@@ -52,8 +52,7 @@ impl SwaggerConfig {
             enabled: std::env::var("SWAGGER_ENABLED")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(true),
-            ui_path: std::env::var("SWAGGER_PATH")
-                .unwrap_or_else(|_| "/swagger-ui".into()),
+            ui_path: std::env::var("SWAGGER_PATH").unwrap_or_else(|_| "/swagger-ui".into()),
             spec_path: "/api/openapi.json".into(),
         }
     }

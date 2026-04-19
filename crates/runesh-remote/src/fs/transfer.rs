@@ -49,7 +49,8 @@ impl UploadManager {
         {
             let mut uploads = self.uploads.write().await;
             if !uploads.contains_key(&key) {
-                let temp_dir = std::env::temp_dir().join(format!("runesh-upload-{}", uuid::Uuid::new_v4()));
+                let temp_dir =
+                    std::env::temp_dir().join(format!("runesh-upload-{}", uuid::Uuid::new_v4()));
                 tokio::fs::create_dir_all(&temp_dir).await?;
 
                 uploads.insert(
@@ -68,9 +69,9 @@ impl UploadManager {
         // Write chunk to temp file
         let (is_complete, percent) = {
             let mut uploads = self.uploads.write().await;
-            let state = uploads.get_mut(&key).ok_or_else(|| {
-                RemoteError::Internal("Upload state lost".into())
-            })?;
+            let state = uploads
+                .get_mut(&key)
+                .ok_or_else(|| RemoteError::Internal("Upload state lost".into()))?;
 
             // Bounds check: reject invalid chunk indices
             if chunk_index >= state.total_chunks {
@@ -110,10 +111,14 @@ impl UploadManager {
     async fn assemble_file(&self, key: &str) -> Result<(), RemoteError> {
         let (path, temp_dir, total_chunks) = {
             let uploads = self.uploads.read().await;
-            let state = uploads.get(key).ok_or_else(|| {
-                RemoteError::Internal("Upload state not found".into())
-            })?;
-            (state.path.clone(), state.temp_dir.clone(), state.total_chunks)
+            let state = uploads
+                .get(key)
+                .ok_or_else(|| RemoteError::Internal("Upload state not found".into()))?;
+            (
+                state.path.clone(),
+                state.temp_dir.clone(),
+                state.total_chunks,
+            )
         };
 
         // Ensure parent directory exists

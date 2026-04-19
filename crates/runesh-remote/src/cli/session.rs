@@ -95,13 +95,14 @@ mod session_impl {
                 move || PtyHandle::spawn(shell.as_deref(), cols, rows, cwd.as_deref(), &env)
             })
             .await
-            .map_err(|e| RemoteError::Internal(format!("Spawn task failed: {e}")))?
-            ?;
+            .map_err(|e| RemoteError::Internal(format!("Spawn task failed: {e}")))??;
 
             let session_id = uuid::Uuid::new_v4().to_string();
             let shell_name = pty.shell.clone();
 
-            self.audit.log_session_open(&session_id, &shell_name, user).await;
+            self.audit
+                .log_session_open(&session_id, &shell_name, user)
+                .await;
 
             self.sessions.lock().await.insert(
                 session_id.clone(),
@@ -121,9 +122,9 @@ mod session_impl {
         /// Send input to a session.
         pub async fn input(&self, session_id: &str, data: &[u8]) -> Result<(), RemoteError> {
             let mut sessions = self.sessions.lock().await;
-            let session = sessions.get_mut(session_id).ok_or_else(|| {
-                RemoteError::SessionNotFound(session_id.into())
-            })?;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| RemoteError::SessionNotFound(session_id.into()))?;
             session.last_activity = Instant::now();
 
             // PTY write is a blocking I/O call; execute it immediately
@@ -139,9 +140,9 @@ mod session_impl {
             buf: &mut [u8],
         ) -> Result<usize, RemoteError> {
             let mut sessions = self.sessions.lock().await;
-            let session = sessions.get_mut(session_id).ok_or_else(|| {
-                RemoteError::SessionNotFound(session_id.into())
-            })?;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| RemoteError::SessionNotFound(session_id.into()))?;
             session.last_activity = Instant::now();
 
             // PTY read is non-blocking (reads whatever is available).
@@ -156,9 +157,9 @@ mod session_impl {
             rows: u16,
         ) -> Result<(), RemoteError> {
             let mut sessions = self.sessions.lock().await;
-            let session = sessions.get_mut(session_id).ok_or_else(|| {
-                RemoteError::SessionNotFound(session_id.into())
-            })?;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| RemoteError::SessionNotFound(session_id.into()))?;
 
             session.cols = cols;
             session.rows = rows;
@@ -166,16 +167,22 @@ mod session_impl {
         }
 
         /// Close a session.
-        pub async fn close(&self, session_id: &str, user: Option<&str>) -> Result<Option<u32>, RemoteError> {
+        pub async fn close(
+            &self,
+            session_id: &str,
+            user: Option<&str>,
+        ) -> Result<Option<u32>, RemoteError> {
             let mut sessions = self.sessions.lock().await;
-            let mut session = sessions.remove(session_id).ok_or_else(|| {
-                RemoteError::SessionNotFound(session_id.into())
-            })?;
+            let mut session = sessions
+                .remove(session_id)
+                .ok_or_else(|| RemoteError::SessionNotFound(session_id.into()))?;
 
             let exit_code = session.pty.try_wait();
             session.pty.kill();
 
-            self.audit.log_session_close(session_id, exit_code, user).await;
+            self.audit
+                .log_session_close(session_id, exit_code, user)
+                .await;
 
             Ok(exit_code)
         }

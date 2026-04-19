@@ -14,7 +14,11 @@ pub fn run(
     local_path: Option<String>,
     accept_defaults: bool,
 ) -> Result<(), String> {
-    println!("\n  {}  {}\n", style("RUNESH").bold().cyan(), style("Project Scaffolder").dim());
+    println!(
+        "\n  {}  {}\n",
+        style("RUNESH").bold().cyan(),
+        style("Project Scaffolder").dim()
+    );
 
     // ── Determine target directory ──────────────────────────────────────
 
@@ -43,9 +47,15 @@ pub fn run(
         has_tauri = false;
         has_desktop_frontend = false;
         has_extension = false;
-        println!("  {} Using defaults: Rust server + Web frontend\n", style("->").green());
+        println!(
+            "  {} Using defaults: Rust server + Web frontend\n",
+            style("->").green()
+        );
     } else {
-        println!("  {} Select the components for your project:\n", style("1/3").dim());
+        println!(
+            "  {} Select the components for your project:\n",
+            style("1/3").dim()
+        );
 
         let components = &[
             "Rust API server (Axum + PostgreSQL)",
@@ -217,7 +227,11 @@ pub fn run(
 
     // ── Done ────────────────────────────────────────────────────────────
 
-    println!("\n  {} Project '{}' ready!\n", style("OK").green().bold(), style(&project_name).cyan());
+    println!(
+        "\n  {} Project '{}' ready!\n",
+        style("OK").green().bold(),
+        style(&project_name).cyan()
+    );
     println!("  Next steps:");
     if name.is_some() {
         println!("    cd {project_name}");
@@ -248,7 +262,9 @@ pub fn run(
         println!();
         println!("    # Chrome extension:");
         println!("    cd extension && bun dev");
-        println!("    # Load: chrome://extensions -> Load unpacked -> extension/.output/chrome-mv3");
+        println!(
+            "    # Load: chrome://extensions -> Load unpacked -> extension/.output/chrome-mv3"
+        );
     }
     if with_docker {
         println!();
@@ -313,8 +329,15 @@ impl ProjectConfig {
     }
 
     pub fn cargo_dep_with_features(&self, crate_name: &str, features: &[&str]) -> String {
-        let feats = features.iter().map(|f| format!("\"{f}\"")).collect::<Vec<_>>().join(", ");
-        format!("{crate_name} = {{ git = \"{}\", features = [{feats}] }}", self.repo_url())
+        let feats = features
+            .iter()
+            .map(|f| format!("\"{f}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "{crate_name} = {{ git = \"{}\", features = [{feats}] }}",
+            self.repo_url()
+        )
     }
 
     /// npm dependency for @mydrift/runesh-ui.
@@ -360,10 +383,14 @@ fn resolve_target_dir(name: Option<&str>) -> Result<(PathBuf, String), String> {
             if dir.exists() {
                 let has_content = fs::read_dir(&dir)
                     .map_err(|e| format!("Cannot read {n}: {e}"))?
-                    .any(|e| e.ok().map(|e| {
-                        let s = e.file_name();
-                        s != ".git" && s != ".gitattributes" && s != ".gitignore"
-                    }).unwrap_or(false));
+                    .any(|e| {
+                        e.ok()
+                            .map(|e| {
+                                let s = e.file_name();
+                                s != ".git" && s != ".gitattributes" && s != ".gitignore"
+                            })
+                            .unwrap_or(false)
+                    });
                 if has_content {
                     return Err(format!("Directory '{n}' is not empty"));
                 }
@@ -374,14 +401,19 @@ fn resolve_target_dir(name: Option<&str>) -> Result<(PathBuf, String), String> {
             let cwd = std::env::current_dir().map_err(|e| format!("Cannot get cwd: {e}"))?;
             let has_content = fs::read_dir(&cwd)
                 .map_err(|e| format!("Cannot read cwd: {e}"))?
-                .any(|e| e.ok().map(|entry| {
-                    !entry.file_name().to_string_lossy().starts_with(".git")
-                }).unwrap_or(false));
+                .any(|e| {
+                    e.ok()
+                        .map(|entry| !entry.file_name().to_string_lossy().starts_with(".git"))
+                        .unwrap_or(false)
+                });
             if has_content {
                 return Err("Current directory is not empty. Use 'runesh init <name>' to create a subdirectory.".into());
             }
-            let dir_name = cwd.file_name().and_then(|n| n.to_str())
-                .map(|s| s.to_string()).unwrap_or_else(|| "my-app".into());
+            let dir_name = cwd
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "my-app".into());
             Ok((cwd, dir_name))
         }
     }
@@ -390,42 +422,70 @@ fn resolve_target_dir(name: Option<&str>) -> Result<(PathBuf, String), String> {
 fn resolve_local_path(target_dir: &Path, explicit: Option<String>) -> Result<String, String> {
     if let Some(p) = explicit {
         let path = PathBuf::from(&p);
-        if path.join("Cargo.toml").exists() { return make_relative(target_dir, &path); }
+        if path.join("Cargo.toml").exists() {
+            return make_relative(target_dir, &path);
+        }
         return Err(format!("RUNESH not found at '{p}'"));
     }
     if let Ok(p) = std::env::var("RUNESH_PATH") {
         let path = PathBuf::from(&p);
-        if path.join("Cargo.toml").exists() { return make_relative(target_dir, &path); }
+        if path.join("Cargo.toml").exists() {
+            return make_relative(target_dir, &path);
+        }
     }
     let sibling = if target_dir.is_absolute() {
         target_dir.parent().map(|p| p.join("RUNESH"))
     } else {
-        std::env::current_dir().ok()
+        std::env::current_dir()
+            .ok()
             .and_then(|cwd| cwd.join(target_dir).parent().map(|p| p.join("RUNESH")))
     };
     if let Some(ref path) = sibling {
-        if path.join("Cargo.toml").exists() { return make_relative(target_dir, path); }
+        if path.join("Cargo.toml").exists() {
+            return make_relative(target_dir, path);
+        }
     }
-    println!("  {} RUNESH not found locally. Defaulting to ../RUNESH", style("!").yellow());
+    println!(
+        "  {} RUNESH not found locally. Defaulting to ../RUNESH",
+        style("!").yellow()
+    );
     Ok("../RUNESH".into())
 }
 
 fn make_relative(from: &Path, to: &Path) -> Result<String, String> {
-    let from_abs = if from.is_absolute() { from.to_path_buf() }
-        else { std::env::current_dir().map_err(|e| e.to_string())?.join(from) };
-    let to_abs = if to.is_absolute() { to.to_path_buf() }
-        else { std::env::current_dir().map_err(|e| e.to_string())?.join(to) };
+    let from_abs = if from.is_absolute() {
+        from.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .join(from)
+    };
+    let to_abs = if to.is_absolute() {
+        to.to_path_buf()
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?.join(to)
+    };
     let from_parts: Vec<_> = from_abs.components().collect();
     let to_parts: Vec<_> = to_abs.components().collect();
-    let common = from_parts.iter().zip(to_parts.iter()).take_while(|(a, b)| a == b).count();
-    if common == 0 { return Ok(to_abs.to_string_lossy().replace('\\', "/")); }
+    let common = from_parts
+        .iter()
+        .zip(to_parts.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+    if common == 0 {
+        return Ok(to_abs.to_string_lossy().replace('\\', "/"));
+    }
     let mut rel = String::new();
-    for _ in 0..(from_parts.len() - common) { rel.push_str("../"); }
+    for _ in 0..(from_parts.len() - common) {
+        rel.push_str("../");
+    }
     for part in &to_parts[common..] {
         rel.push_str(&part.as_os_str().to_string_lossy());
         rel.push('/');
     }
-    if rel.ends_with('/') { rel.pop(); }
+    if rel.ends_with('/') {
+        rel.pop();
+    }
     Ok(rel)
 }
 
@@ -494,7 +554,10 @@ fn relink_runesh_ui(pkg_dir: &Path, runesh_relative: &str) {
 
     let result = create_dir_link(&runesh_abs, &target_link);
     if result.is_ok() {
-        println!("  {} Linked @mydrift/runesh-ui -> RUNESH/packages/ui", style("OK").green());
+        println!(
+            "  {} Linked @mydrift/runesh-ui -> RUNESH/packages/ui",
+            style("OK").green()
+        );
     } else {
         println!(
             "  {} Could not link runesh-ui (manual `bun install` needed): {}",
@@ -540,14 +603,20 @@ fn remove_dir_or_link(path: &Path) -> Result<(), String> {
 
 /// Copy a component from the RUNESH package source into the consumer project.
 /// The component uses @/ imports that resolve in the consumer's build context.
-fn copy_runesh_component(web_root: &Path, relative_path: &str, source: &RuneshSource) -> Result<(), String> {
+fn copy_runesh_component(
+    web_root: &Path,
+    relative_path: &str,
+    source: &RuneshSource,
+) -> Result<(), String> {
     let src_path = match source {
-        RuneshSource::Local(path) => {
-            PathBuf::from(path).join("packages/ui/src").join(relative_path)
-        }
+        RuneshSource::Local(path) => PathBuf::from(path)
+            .join("packages/ui/src")
+            .join(relative_path),
         RuneshSource::Git(_) => {
             // For git source, try to find the linked package in node_modules
-            web_root.join("node_modules/@mydrift/runesh-ui/src").join(relative_path)
+            web_root
+                .join("node_modules/@mydrift/runesh-ui/src")
+                .join(relative_path)
         }
     };
 
@@ -557,21 +626,33 @@ fn copy_runesh_component(web_root: &Path, relative_path: &str, source: &RuneshSo
     }
 
     if src_path.exists() {
-        fs::copy(&src_path, &dest_path)
-            .map_err(|e| format!("copy {relative_path}: {e}"))?;
+        fs::copy(&src_path, &dest_path).map_err(|e| format!("copy {relative_path}: {e}"))?;
     } else {
-        println!("  {} Could not find {} - skipping", console::style("!").yellow(), relative_path);
+        println!(
+            "  {} Could not find {} - skipping",
+            console::style("!").yellow(),
+            relative_path
+        );
     }
     Ok(())
 }
 
 fn run_bun_install(dir: &Path, label: &str) {
-    println!("  {} Installing {label} dependencies...", style("->").green());
+    println!(
+        "  {} Installing {label} dependencies...",
+        style("->").green()
+    );
     match Command::new("bun").arg("install").current_dir(dir).status() {
         Ok(s) if s.success() => {}
-        Ok(_) => println!("  {} bun install had warnings in {label}/ (non-fatal)", style("!").yellow()),
+        Ok(_) => println!(
+            "  {} bun install had warnings in {label}/ (non-fatal)",
+            style("!").yellow()
+        ),
         Err(_) => {
-            println!("  {} bun not found - run 'bun install' in {label}/ manually", style("!").yellow());
+            println!(
+                "  {} bun not found - run 'bun install' in {label}/ manually",
+                style("!").yellow()
+            );
             return;
         }
     }
@@ -587,7 +668,10 @@ fn run_bun_install(dir: &Path, label: &str) {
     // bun would handle them. Pre-install the known troublemakers via bun
     // so shadcn add never has to touch npm.
     let preinstall = ["cmdk"];
-    println!("  {} Pre-installing shadcn peer deps in {label}/...", style("->").green());
+    println!(
+        "  {} Pre-installing shadcn peer deps in {label}/...",
+        style("->").green()
+    );
     let _ = Command::new("bun")
         .arg("add")
         .args(&preinstall)
@@ -599,12 +683,34 @@ fn run_bun_install(dir: &Path, label: &str) {
     // internal package-install step warns, so we tolerate non-zero exits.
     // components.json is pre-written by write_files, so we don't run init.
     let shadcn_components = [
-        "alert-dialog", "avatar", "badge", "button", "card", "collapsible",
-        "command", "dialog", "dropdown-menu", "form", "input", "label",
-        "popover", "scroll-area", "select", "separator", "sheet", "sidebar",
-        "skeleton", "table", "textarea", "tooltip",
+        "alert-dialog",
+        "avatar",
+        "badge",
+        "button",
+        "card",
+        "collapsible",
+        "command",
+        "dialog",
+        "dropdown-menu",
+        "form",
+        "input",
+        "label",
+        "popover",
+        "scroll-area",
+        "select",
+        "separator",
+        "sheet",
+        "sidebar",
+        "skeleton",
+        "table",
+        "textarea",
+        "tooltip",
     ];
-    println!("  {} Adding {} shadcn components in {label}/...", style("->").green(), shadcn_components.len());
+    println!(
+        "  {} Adding {} shadcn components in {label}/...",
+        style("->").green(),
+        shadcn_components.len()
+    );
     match Command::new("bunx")
         .arg("--bun")
         .arg("shadcn@latest")
@@ -632,19 +738,37 @@ fn create_dirs(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         mk("migrations")?;
     }
     if c.has_web {
-        for d in &["web/src/app", "web/src/components", "web/src/lib", "web/public"] { mk(d)?; }
+        for d in &[
+            "web/src/app",
+            "web/src/components",
+            "web/src/lib",
+            "web/public",
+        ] {
+            mk(d)?;
+        }
     }
     if c.has_tauri {
-        for d in &["src-tauri/src", "src-tauri/icons", "src-tauri/capabilities"] { mk(d)?; }
+        for d in &["src-tauri/src", "src-tauri/icons", "src-tauri/capabilities"] {
+            mk(d)?;
+        }
     }
     if c.has_desktop_frontend {
-        for d in &["desktop/src/app", "desktop/src/components", "desktop/src/lib", "desktop/public"] { mk(d)?; }
+        for d in &[
+            "desktop/src/app",
+            "desktop/src/components",
+            "desktop/src/lib",
+            "desktop/public",
+        ] {
+            mk(d)?;
+        }
         if c.has_server {
             mk(&format!("crates/{}-desktop/src", c.name))?;
         }
     }
     if c.has_extension {
-        for d in &["extension/entrypoints/popup", "extension/public"] { mk(d)?; }
+        for d in &["extension/entrypoints/popup", "extension/public"] {
+            mk(d)?;
+        }
     }
     Ok(())
 }
@@ -670,7 +794,10 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         let sc = format!("crates/{}-server", c.name);
         w(&format!("{sc}/Cargo.toml"), &templates::server_cargo(c))?;
         w(&format!("{sc}/src/main.rs"), &templates::server_main(c))?;
-        w("migrations/001_initial.sql", &templates::initial_migration(c))?;
+        w(
+            "migrations/001_initial.sql",
+            &templates::initial_migration(c),
+        )?;
     }
 
     // ── Web frontend ────────────────────────────────────────────────────
@@ -684,16 +811,27 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
 
         // ── Sentry / GlitchTip frontend integration (optional) ──
         if c.with_telemetry_web {
-            w("web/sentry.client.config.ts", templates::SENTRY_CLIENT_CONFIG)?;
-            w("web/sentry.server.config.ts", templates::SENTRY_SERVER_CONFIG)?;
+            w(
+                "web/sentry.client.config.ts",
+                templates::SENTRY_CLIENT_CONFIG,
+            )?;
+            w(
+                "web/sentry.server.config.ts",
+                templates::SENTRY_SERVER_CONFIG,
+            )?;
             w("web/sentry.edge.config.ts", templates::SENTRY_EDGE_CONFIG)?;
-            w("web/src/instrumentation.ts", templates::SENTRY_INSTRUMENTATION)?;
+            w(
+                "web/src/instrumentation.ts",
+                templates::SENTRY_INSTRUMENTATION,
+            )?;
             w("web/.env.local.example", templates::sentry_web_env())?;
         }
         // Copy globals.css from RUNESH (includes theme + editor styles)
         {
             let css_src = match &c.source {
-                RuneshSource::Local(path) => std::path::PathBuf::from(path).join("packages/ui/src/styles/globals.css"),
+                RuneshSource::Local(path) => {
+                    std::path::PathBuf::from(path).join("packages/ui/src/styles/globals.css")
+                }
                 RuneshSource::Git(_) => std::path::PathBuf::new(),
             };
             let css_dest = root.join("web/src/app/globals.css");
@@ -712,12 +850,32 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         // Copy RUNESH layout components (they use @/ imports for shadcn)
         if c.with_dashboard {
             w("web/src/components/app-shell.tsx", &templates::app_shell(c))?;
-            copy_runesh_component(&root.join("web"), "components/layout/app-sidebar.tsx", &c.source)?;
-            copy_runesh_component(&root.join("web"), "components/layout/dashboard-shell.tsx", &c.source)?;
-            copy_runesh_component(&root.join("web"), "components/layout/page-header.tsx", &c.source)?;
-            copy_runesh_component(&root.join("web"), "components/layout/search-bar.tsx", &c.source)?;
+            copy_runesh_component(
+                &root.join("web"),
+                "components/layout/app-sidebar.tsx",
+                &c.source,
+            )?;
+            copy_runesh_component(
+                &root.join("web"),
+                "components/layout/dashboard-shell.tsx",
+                &c.source,
+            )?;
+            copy_runesh_component(
+                &root.join("web"),
+                "components/layout/page-header.tsx",
+                &c.source,
+            )?;
+            copy_runesh_component(
+                &root.join("web"),
+                "components/layout/search-bar.tsx",
+                &c.source,
+            )?;
             copy_runesh_component(&root.join("web"), "components/ui/data-table.tsx", &c.source)?;
-            copy_runesh_component(&root.join("web"), "components/ui/confirm-dialog.tsx", &c.source)?;
+            copy_runesh_component(
+                &root.join("web"),
+                "components/ui/confirm-dialog.tsx",
+                &c.source,
+            )?;
         }
 
         // Novel WYSIWYG editor
@@ -728,7 +886,10 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
 
         // Data table example page
         if c.with_data_table {
-            w("web/src/app/examples/page.tsx", &templates::data_table_page(c))?;
+            w(
+                "web/src/app/examples/page.tsx",
+                &templates::data_table_page(c),
+            )?;
         }
     }
 
@@ -746,41 +907,80 @@ fn write_files(root: &Path, c: &ProjectConfig) -> Result<(), String> {
         if c.has_desktop_frontend {
             if c.has_server {
                 let dc = format!("crates/{}-desktop", c.name);
-                w(&format!("{dc}/Cargo.toml"), &templates::desktop_backend_cargo(c))?;
-                w(&format!("{dc}/src/lib.rs"), &templates::desktop_backend_lib(c))?;
+                w(
+                    &format!("{dc}/Cargo.toml"),
+                    &templates::desktop_backend_cargo(c),
+                )?;
+                w(
+                    &format!("{dc}/src/lib.rs"),
+                    &templates::desktop_backend_lib(c),
+                )?;
             }
             w("desktop/package.json", &templates::desktop_package_json(c))?;
             w("desktop/tsconfig.json", templates::TSCONFIG)?;
             w("desktop/next.config.ts", templates::NEXT_CONFIG_STATIC)?;
             w("desktop/postcss.config.mjs", templates::POSTCSS_CONFIG)?;
             w("desktop/src/app/globals.css", templates::GLOBALS_CSS_IMPORT)?;
-            w("desktop/src/app/layout.tsx", &templates::layout_tsx(c, true))?;
+            w(
+                "desktop/src/app/layout.tsx",
+                &templates::layout_tsx(c, true),
+            )?;
             w("desktop/src/app/page.tsx", &templates::desktop_home_page(c))?;
             w("desktop/src/lib/utils.ts", templates::UTILS_TS)?;
             w("src-tauri/Cargo.toml", &templates::tauri_cargo_separate(c))?;
-            w("src-tauri/tauri.conf.json", &templates::tauri_conf_separate(c))?;
+            w(
+                "src-tauri/tauri.conf.json",
+                &templates::tauri_conf_separate(c),
+            )?;
         } else {
             w("src-tauri/Cargo.toml", &templates::tauri_cargo(c))?;
             w("src-tauri/tauri.conf.json", &templates::tauri_conf(c))?;
         }
-        w("src-tauri/build.rs", "fn main() { tauri_build::build(); }\n")?;
+        w(
+            "src-tauri/build.rs",
+            "fn main() { tauri_build::build(); }\n",
+        )?;
         w("src-tauri/src/main.rs", &templates::tauri_main(c))?;
         w("src-tauri/src/lib.rs", &templates::tauri_lib(c))?;
-        w("src-tauri/capabilities/default.json", templates::TAURI_CAPABILITIES)?;
+        w(
+            "src-tauri/capabilities/default.json",
+            templates::TAURI_CAPABILITIES,
+        )?;
     }
 
     // ── Chrome Extension ────────────────────────────────────────────────
 
     if c.has_extension {
-        w("extension/package.json", &templates::extension_package_json(c))?;
-        w("extension/wxt.config.ts", &templates::extension_wxt_config(c))?;
+        w(
+            "extension/package.json",
+            &templates::extension_package_json(c),
+        )?;
+        w(
+            "extension/wxt.config.ts",
+            &templates::extension_wxt_config(c),
+        )?;
         w("extension/tsconfig.json", templates::EXTENSION_TSCONFIG)?;
         w("extension/postcss.config.js", templates::EXTENSION_POSTCSS)?;
-        w("extension/entrypoints/popup/index.html", &templates::extension_popup_html(c))?;
-        w("extension/entrypoints/popup/main.tsx", templates::EXTENSION_POPUP_MAIN)?;
-        w("extension/entrypoints/popup/App.tsx", &templates::extension_popup_app(c))?;
-        w("extension/entrypoints/popup/style.css", templates::EXTENSION_POPUP_CSS)?;
-        w("extension/entrypoints/background.ts", templates::EXTENSION_BACKGROUND)?;
+        w(
+            "extension/entrypoints/popup/index.html",
+            &templates::extension_popup_html(c),
+        )?;
+        w(
+            "extension/entrypoints/popup/main.tsx",
+            templates::EXTENSION_POPUP_MAIN,
+        )?;
+        w(
+            "extension/entrypoints/popup/App.tsx",
+            &templates::extension_popup_app(c),
+        )?;
+        w(
+            "extension/entrypoints/popup/style.css",
+            templates::EXTENSION_POPUP_CSS,
+        )?;
+        w(
+            "extension/entrypoints/background.ts",
+            templates::EXTENSION_BACKGROUND,
+        )?;
     }
 
     // ── CLAUDE.md ───────────────────────────────────────────────────────

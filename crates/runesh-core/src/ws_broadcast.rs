@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 
 /// A registry of broadcast channels keyed by room/topic string.
 ///
@@ -81,7 +81,7 @@ impl BroadcastRegistry {
 mod redis_broadcast {
     use std::collections::HashMap;
     use std::sync::Arc;
-    use tokio::sync::{broadcast, RwLock};
+    use tokio::sync::{RwLock, broadcast};
 
     /// A broadcast registry backed by Redis pub/sub for cross-pod delivery.
     ///
@@ -167,9 +167,7 @@ mod redis_broadcast {
             let room_owned = room.to_string();
 
             tokio::spawn(async move {
-                if let Err(e) =
-                    Self::subscribe_loop(&redis_url, &redis_channel, &tx_clone).await
-                {
+                if let Err(e) = Self::subscribe_loop(&redis_url, &redis_channel, &tx_clone).await {
                     tracing::error!(
                         room = %room_owned,
                         error = %e,
@@ -257,8 +255,7 @@ mod redis_broadcast {
             tracing::debug!(channel = %channel, "Redis subscription started");
 
             loop {
-                let msg: Option<deadpool_redis::redis::Msg> =
-                    pubsub.on_message().next().await;
+                let msg: Option<deadpool_redis::redis::Msg> = pubsub.on_message().next().await;
 
                 match msg {
                     Some(msg) => {
@@ -398,7 +395,14 @@ pub async fn ws_broadcast_loop(
     room: &str,
     on_client_message: impl Fn(String),
 ) {
-    ws_broadcast_loop_with_limits(socket, registry, room, on_client_message, WsLimits::default()).await;
+    ws_broadcast_loop_with_limits(
+        socket,
+        registry,
+        room,
+        on_client_message,
+        WsLimits::default(),
+    )
+    .await;
 }
 
 /// WebSocket broadcast loop with configurable message size, rate, and idle limits.

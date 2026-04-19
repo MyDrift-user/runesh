@@ -23,9 +23,10 @@ use crate::error::DesktopError;
 
 /// Check if we're running under Wayland.
 pub fn is_wayland() -> bool {
-    std::env::var("WAYLAND_DISPLAY").is_ok() || std::env::var("XDG_SESSION_TYPE")
-        .map(|v| v == "wayland")
-        .unwrap_or(false)
+    std::env::var("WAYLAND_DISPLAY").is_ok()
+        || std::env::var("XDG_SESSION_TYPE")
+            .map(|v| v == "wayland")
+            .unwrap_or(false)
 }
 
 /// Information about a Wayland ScreenCast session.

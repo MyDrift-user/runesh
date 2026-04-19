@@ -71,7 +71,10 @@ impl OidcVerifier {
     /// Build a verifier by fetching the IdP's `.well-known/openid-configuration`
     /// to discover the JWKS endpoint. Issuer should be the canonical issuer
     /// URL (no trailing slash, no `/.well-known/...` suffix).
-    pub async fn discover(issuer: impl Into<String>, audience: Option<String>) -> Result<Self, AuthError> {
+    pub async fn discover(
+        issuer: impl Into<String>,
+        audience: Option<String>,
+    ) -> Result<Self, AuthError> {
         let issuer = issuer.into();
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
@@ -112,7 +115,9 @@ impl OidcVerifier {
         let Some(issuer) = std::env::var("OIDC_ISSUER").ok().filter(|s| !s.is_empty()) else {
             return Ok(None);
         };
-        let audience = std::env::var("OIDC_AUDIENCE").ok().filter(|s| !s.is_empty());
+        let audience = std::env::var("OIDC_AUDIENCE")
+            .ok()
+            .filter(|s| !s.is_empty());
         Ok(Some(Self::discover(issuer, audience).await?))
     }
 
@@ -236,20 +241,37 @@ fn is_asymmetric(alg: Algorithm) -> bool {
 fn decoding_key_from_jwk(jwk: &Jwk) -> Result<DecodingKey, AuthError> {
     match jwk.kty.as_str() {
         "RSA" => {
-            let n = jwk.n.as_deref().ok_or_else(|| AuthError::TokenInvalid("RSA jwk missing n".into()))?;
-            let e = jwk.e.as_deref().ok_or_else(|| AuthError::TokenInvalid("RSA jwk missing e".into()))?;
+            let n = jwk
+                .n
+                .as_deref()
+                .ok_or_else(|| AuthError::TokenInvalid("RSA jwk missing n".into()))?;
+            let e = jwk
+                .e
+                .as_deref()
+                .ok_or_else(|| AuthError::TokenInvalid("RSA jwk missing e".into()))?;
             DecodingKey::from_rsa_components(n, e).map_err(AuthError::Jwt)
         }
         "EC" => {
-            let x = jwk.x.as_deref().ok_or_else(|| AuthError::TokenInvalid("EC jwk missing x".into()))?;
-            let y = jwk.y.as_deref().ok_or_else(|| AuthError::TokenInvalid("EC jwk missing y".into()))?;
+            let x = jwk
+                .x
+                .as_deref()
+                .ok_or_else(|| AuthError::TokenInvalid("EC jwk missing x".into()))?;
+            let y = jwk
+                .y
+                .as_deref()
+                .ok_or_else(|| AuthError::TokenInvalid("EC jwk missing y".into()))?;
             DecodingKey::from_ec_components(x, y).map_err(AuthError::Jwt)
         }
         "OKP" => {
-            let x = jwk.x.as_deref().ok_or_else(|| AuthError::TokenInvalid("OKP jwk missing x".into()))?;
+            let x = jwk
+                .x
+                .as_deref()
+                .ok_or_else(|| AuthError::TokenInvalid("OKP jwk missing x".into()))?;
             DecodingKey::from_ed_components(x).map_err(AuthError::Jwt)
         }
-        other => Err(AuthError::TokenInvalid(format!("unsupported JWK kty: {other}"))),
+        other => Err(AuthError::TokenInvalid(format!(
+            "unsupported JWK kty: {other}"
+        ))),
     }
 }
 
@@ -314,15 +336,16 @@ impl OidcClaims {
             .and_then(|ra| {
                 ra.roles
                     .iter()
-                    .find(|r| !r.starts_with("default-roles-") && !r.starts_with("offline_") && !r.starts_with("uma_"))
+                    .find(|r| {
+                        !r.starts_with("default-roles-")
+                            && !r.starts_with("offline_")
+                            && !r.starts_with("uma_")
+                    })
                     .cloned()
             })
             .unwrap_or_else(|| "user".to_string());
 
-        let permissions = self
-            .realm_access
-            .map(|ra| ra.roles)
-            .unwrap_or_default();
+        let permissions = self.realm_access.map(|ra| ra.roles).unwrap_or_default();
 
         Claims {
             sub: self.sub,

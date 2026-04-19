@@ -2,7 +2,7 @@
 
 #[cfg(feature = "cli")]
 mod pty_impl {
-    use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+    use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
     use crate::error::RemoteError;
 
@@ -40,14 +40,11 @@ mod pty_impl {
                 })
                 .map_err(|e| RemoteError::Internal(format!("Failed to open PTY: {e}")))?;
 
-            let shell_path = shell
-                .map(String::from)
-                .unwrap_or_else(default_shell);
+            let shell_path = shell.map(String::from).unwrap_or_else(default_shell);
 
             // Validate shell path: only allow safe filesystem characters
             if !shell_path.chars().all(|c| {
-                c.is_ascii_alphanumeric()
-                    || matches!(c, '/' | '\\' | '.' | ':' | '_' | '-')
+                c.is_ascii_alphanumeric() || matches!(c, '/' | '\\' | '.' | ':' | '_' | '-')
             }) {
                 return Err(RemoteError::NotAllowed(
                     "Shell path contains invalid characters".into(),
@@ -106,12 +103,12 @@ mod pty_impl {
         /// Write input data to the PTY.
         pub fn write_input(&mut self, data: &[u8]) -> Result<(), RemoteError> {
             use std::io::Write;
-            self.writer.write_all(data).map_err(|e| {
-                RemoteError::Internal(format!("Failed to write to PTY: {e}"))
-            })?;
-            self.writer.flush().map_err(|e| {
-                RemoteError::Internal(format!("Failed to flush PTY: {e}"))
-            })
+            self.writer
+                .write_all(data)
+                .map_err(|e| RemoteError::Internal(format!("Failed to write to PTY: {e}")))?;
+            self.writer
+                .flush()
+                .map_err(|e| RemoteError::Internal(format!("Failed to flush PTY: {e}")))
         }
 
         /// Read output from the PTY. Non-blocking: reads whatever is available.

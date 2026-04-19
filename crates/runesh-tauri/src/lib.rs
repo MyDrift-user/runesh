@@ -1,6 +1,6 @@
 pub mod config;
-pub mod tray;
 pub mod process;
+pub mod tray;
 
 #[cfg(windows)]
 pub mod elevation;

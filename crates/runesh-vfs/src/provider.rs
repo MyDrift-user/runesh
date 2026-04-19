@@ -105,21 +105,11 @@ pub trait FileProvider: Send + Sync + 'static {
 
     /// Read file content with optional byte range.
     /// `offset` = 0, `length` = 0 means read the entire file.
-    async fn read_file(
-        &self,
-        path: &str,
-        offset: u64,
-        length: u64,
-    ) -> Result<Vec<u8>, VfsError>;
+    async fn read_file(&self, path: &str, offset: u64, length: u64) -> Result<Vec<u8>, VfsError>;
 
     /// Write file content at the given offset.
     /// Called only in WriteThrough mode or for Admin roles.
-    async fn write_file(
-        &self,
-        path: &str,
-        data: &[u8],
-        offset: u64,
-    ) -> Result<(), VfsError> {
+    async fn write_file(&self, path: &str, data: &[u8], offset: u64) -> Result<(), VfsError> {
         let _ = (path, data, offset);
         Err(VfsError::ReadOnly)
     }

@@ -1,6 +1,6 @@
-use std::net::Ipv4Addr;
-use bytes::Bytes;
 use crate::error::TunError;
+use bytes::Bytes;
+use std::net::Ipv4Addr;
 
 /// Configuration for creating a TUN device.
 pub struct TunConfig {
@@ -18,9 +18,15 @@ impl TunConfig {
     /// Validate the interface name to prevent command injection.
     fn validate(&self) -> Result<(), TunError> {
         if self.name.is_empty() || self.name.len() > 15 {
-            return Err(TunError::Network("Interface name must be 1-15 characters".into()));
+            return Err(TunError::Network(
+                "Interface name must be 1-15 characters".into(),
+            ));
         }
-        if !self.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        if !self
+            .name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
             return Err(TunError::Network(
                 "Interface name must contain only alphanumeric characters and hyphens".into(),
             ));
@@ -36,7 +42,7 @@ mod platform {
     use super::*;
     use std::os::windows::process::CommandExt;
     use std::sync::Arc;
-    use tracing::{info, error};
+    use tracing::{error, info};
 
     pub struct TunDevice {
         name: String,
@@ -64,17 +70,20 @@ mod platform {
             } else {
                 unsafe { wintun::load() }
             }
-            .map_err(|e| TunError::Network(
-                format!("Failed to load wintun.dll: {e}. Place wintun.dll next to the executable.")
-            ))?;
+            .map_err(|e| {
+                TunError::Network(format!(
+                    "Failed to load wintun.dll: {e}. Place wintun.dll next to the executable."
+                ))
+            })?;
 
             // Create adapter with a fixed GUID so it persists across restarts
             let adapter = match wintun::Adapter::create(&wintun, &config.name, "RUNESH", None) {
                 Ok(a) => a,
                 Err(e) => {
-                    return Err(TunError::Network(
-                        format!("Failed to create TUN adapter '{}': {e}. Run as Administrator.", config.name)
-                    ));
+                    return Err(TunError::Network(format!(
+                        "Failed to create TUN adapter '{}': {e}. Run as Administrator.",
+                        config.name
+                    )));
                 }
             };
 
@@ -83,7 +92,11 @@ mod platform {
             let mask_str = config.netmask.to_string();
             let out = std::process::Command::new("netsh")
                 .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .args(["interface", "ip", "set", "address",
+                .args([
+                    "interface",
+                    "ip",
+                    "set",
+                    "address",
                     &format!("name={}", config.name),
                     "source=static",
                     &format!("addr={ip_str}"),
@@ -98,7 +111,11 @@ mod platform {
                     // Try alternative command
                     let _ = std::process::Command::new("netsh")
                         .creation_flags(0x08000000)
-                        .args(["interface", "ip", "add", "address",
+                        .args([
+                            "interface",
+                            "ip",
+                            "add",
+                            "address",
                             &format!("name={}", config.name),
                             &format!("addr={ip_str}"),
                             &format!("mask={mask_str}"),
@@ -115,10 +132,9 @@ mod platform {
             }
 
             // Start session
-            let session = adapter.start_session(wintun::MAX_RING_CAPACITY)
-                .map_err(|e| TunError::Network(
-                    format!("Failed to start Wintun session: {e}")
-                ))?;
+            let session = adapter
+                .start_session(wintun::MAX_RING_CAPACITY)
+                .map_err(|e| TunError::Network(format!("Failed to start Wintun session: {e}")))?;
 
             info!(
                 name = %config.name,
@@ -148,17 +164,21 @@ mod platform {
 
         /// Write a packet to the TUN device.
         pub fn write(&self, data: &[u8]) -> Result<(), TunError> {
-            let mut packet = self.session.allocate_send_packet(data.len() as u16)
-                .map_err(|e| TunError::Network(
-                    format!("TUN allocate failed: {e}")
-                ))?;
+            let mut packet = self
+                .session
+                .allocate_send_packet(data.len() as u16)
+                .map_err(|e| TunError::Network(format!("TUN allocate failed: {e}")))?;
             packet.bytes_mut().copy_from_slice(data);
             self.session.send_packet(packet);
             Ok(())
         }
 
-        pub fn name(&self) -> &str { &self.name }
-        pub fn mtu(&self) -> u16 { self.mtu }
+        pub fn name(&self) -> &str {
+            &self.name
+        }
+        pub fn mtu(&self) -> u16 {
+            self.mtu
+        }
     }
 
     impl Drop for TunDevice {
@@ -199,9 +219,10 @@ mod platform {
                 .map_err(|e| TunError::Network(format!("ip tuntap add failed: {e}")))?;
 
             if !out.status.success() {
-                return Err(TunError::Network(
-                    format!("Failed to create TUN: {}", String::from_utf8_lossy(&out.stderr))
-                ));
+                return Err(TunError::Network(format!(
+                    "Failed to create TUN: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                )));
             }
 
             // Set IP
@@ -244,7 +265,8 @@ mod platform {
                 let len = name_bytes.len().min(15);
                 req.ifr_name[..len].copy_from_slice(&name_bytes[..len]);
 
-                if libc::ioctl(fd, 0x400454CA, &req) < 0 { // TUNSETIFF
+                if libc::ioctl(fd, 0x400454CA, &req) < 0 {
+                    // TUNSETIFF
                     libc::close(fd);
                     return Err(TunError::Network("TUNSETIFF ioctl failed".into()));
                 }
@@ -280,13 +302,19 @@ mod platform {
             }
         }
 
-        pub fn name(&self) -> &str { &self.name }
-        pub fn mtu(&self) -> u16 { self.mtu }
+        pub fn name(&self) -> &str {
+            &self.name
+        }
+        pub fn mtu(&self) -> u16 {
+            self.mtu
+        }
     }
 
     impl Drop for TunDevice {
         fn drop(&mut self) {
-            unsafe { libc::close(self.fd); }
+            unsafe {
+                libc::close(self.fd);
+            }
             let _ = std::process::Command::new("ip")
                 .args(["link", "delete", &self.name])
                 .output();
@@ -300,7 +328,7 @@ mod platform {
     }
 
     mod libc {
-        extern "C" {
+        unsafe extern "C" {
             pub fn open(path: *const i8, flags: i32) -> i32;
             pub fn close(fd: i32) -> i32;
             pub fn read(fd: i32, buf: *mut std::ffi::c_void, count: usize) -> isize;

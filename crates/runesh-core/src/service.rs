@@ -10,9 +10,14 @@ use crate::error::AppError;
 /// Validate a service name contains only safe characters.
 fn validate_name(name: &str) -> Result<(), AppError> {
     if name.is_empty() || name.len() > 64 {
-        return Err(AppError::BadRequest("Service name must be 1-64 characters".into()));
+        return Err(AppError::BadRequest(
+            "Service name must be 1-64 characters".into(),
+        ));
     }
-    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
         return Err(AppError::BadRequest(
             "Service name must contain only alphanumeric, dash, underscore, or dot".into(),
         ));
@@ -23,7 +28,9 @@ fn validate_name(name: &str) -> Result<(), AppError> {
 /// Validate display name has no control characters or newlines.
 fn validate_display_name(name: &str) -> Result<(), AppError> {
     if name.chars().any(|c| c.is_control()) {
-        return Err(AppError::BadRequest("Display name must not contain control characters".into()));
+        return Err(AppError::BadRequest(
+            "Display name must not contain control characters".into(),
+        ));
     }
     Ok(())
 }
@@ -54,7 +61,9 @@ pub fn install_service(
     // Validate args contain no control characters or newlines
     for arg in args {
         if arg.chars().any(|c| c.is_control()) {
-            return Err(AppError::BadRequest("Arguments must not contain control characters".into()));
+            return Err(AppError::BadRequest(
+                "Arguments must not contain control characters".into(),
+            ));
         }
     }
     #[cfg(target_os = "windows")]
@@ -76,7 +85,9 @@ pub fn uninstall_service(name: &str) -> Result<(), AppError> {
     #[cfg(target_os = "windows")]
     {
         let _ = Command::new("sc").args(["stop", name]).output();
-        let out = Command::new("sc").args(["delete", name]).output()
+        let out = Command::new("sc")
+            .args(["delete", name])
+            .output()
             .map_err(|e| AppError::Internal(format!("sc delete failed: {e}")))?;
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -108,7 +119,12 @@ pub fn uninstall_service(name: &str) -> Result<(), AppError> {
 }
 
 #[cfg(target_os = "windows")]
-fn install_windows(name: &str, display_name: &str, binary: &Path, args: &[&str]) -> Result<(), AppError> {
+fn install_windows(
+    name: &str,
+    display_name: &str,
+    binary: &Path,
+    args: &[&str],
+) -> Result<(), AppError> {
     let bin_path = binary.to_string_lossy();
     let full_args = if args.is_empty() {
         format!("\"{}\"", bin_path)
@@ -118,10 +134,12 @@ fn install_windows(name: &str, display_name: &str, binary: &Path, args: &[&str])
 
     let out = Command::new("sc")
         .args([
-            "create", name,
+            "create",
+            name,
             &format!("binPath= {full_args}"),
             &format!("DisplayName= {display_name}"),
-            "start=", "auto",
+            "start=",
+            "auto",
         ])
         .output()
         .map_err(|e| AppError::Internal(format!("sc create failed: {e}")))?;
@@ -135,7 +153,14 @@ fn install_windows(name: &str, display_name: &str, binary: &Path, args: &[&str])
 
     // Configure restart on failure
     let _ = Command::new("sc")
-        .args(["failure", name, "reset=", "86400", "actions=", "restart/5000/restart/10000/restart/30000"])
+        .args([
+            "failure",
+            name,
+            "reset=",
+            "86400",
+            "actions=",
+            "restart/5000/restart/10000/restart/30000",
+        ])
         .output();
 
     let _ = Command::new("sc").args(["start", name]).output();
@@ -145,7 +170,12 @@ fn install_windows(name: &str, display_name: &str, binary: &Path, args: &[&str])
 }
 
 #[cfg(target_os = "linux")]
-fn install_linux(name: &str, display_name: &str, binary: &Path, args: &[&str]) -> Result<(), AppError> {
+fn install_linux(
+    name: &str,
+    display_name: &str,
+    binary: &Path,
+    args: &[&str],
+) -> Result<(), AppError> {
     let bin_path = binary.to_string_lossy();
     let exec_start = if args.is_empty() {
         bin_path.to_string()
@@ -170,7 +200,12 @@ fn install_linux(name: &str, display_name: &str, binary: &Path, args: &[&str]) -
 }
 
 #[cfg(target_os = "macos")]
-fn install_macos(name: &str, display_name: &str, binary: &Path, args: &[&str]) -> Result<(), AppError> {
+fn install_macos(
+    name: &str,
+    display_name: &str,
+    binary: &Path,
+    args: &[&str],
+) -> Result<(), AppError> {
     let bin_path = xml_escape(&binary.to_string_lossy());
     let args_xml = args
         .iter()
@@ -202,7 +237,9 @@ fn install_macos(name: &str, display_name: &str, binary: &Path, args: &[&str]) -
     std::fs::write(&plist_path, &plist)
         .map_err(|e| AppError::Internal(format!("Failed to write plist: {e}")))?;
 
-    let _ = Command::new("launchctl").args(["load", &plist_path]).output();
+    let _ = Command::new("launchctl")
+        .args(["load", &plist_path])
+        .output();
 
     tracing::info!(name, "launchd daemon installed");
     Ok(())

@@ -26,24 +26,24 @@
 //!     .route("/api/inventory/quick", get(handlers::get_quick_inventory));
 //! ```
 
-pub mod error;
-pub mod models;
+pub mod battery;
+pub mod bios;
 pub mod collector;
 pub mod cpu;
-pub mod memory;
 pub mod disk;
-pub mod network;
+pub mod error;
 pub mod gpu;
+pub mod memory;
+pub mod models;
+pub mod network;
 pub mod os;
-pub mod bios;
-pub mod battery;
-pub mod software;
-pub mod process;
 pub mod platform;
+pub mod process;
+pub mod software;
 
 #[cfg(feature = "axum")]
 pub mod handlers;
 
-pub use collector::{collect_inventory, collect_quick_inventory, CollectorConfig};
+pub use collector::{CollectorConfig, collect_inventory, collect_quick_inventory};
 pub use error::InventoryError;
 pub use models::SystemInventory;

@@ -14,7 +14,7 @@ use crate::provider::FileProvider;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod linux;
 
 #[cfg(target_os = "macos")]

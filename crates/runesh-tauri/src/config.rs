@@ -5,7 +5,7 @@
 //! - Linux: `~/.config/<app_name>/config.toml`
 //! - macOS: `~/Library/Application Support/<app_name>/config.toml`
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::path::PathBuf;
 
 /// Get the config directory for an app.
@@ -30,11 +30,10 @@ pub fn load_config<T: DeserializeOwned>(app_name: &str) -> Option<T> {
 /// Save a config to disk. Creates the directory if needed.
 pub fn save_config<T: Serialize>(app_name: &str, config: &T) -> Result<(), String> {
     let dir = config_dir(app_name);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create config dir: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create config dir: {e}"))?;
 
-    let content = toml::to_string_pretty(config)
-        .map_err(|e| format!("Failed to serialize config: {e}"))?;
+    let content =
+        toml::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
 
     std::fs::write(config_path(app_name), content)
         .map_err(|e| format!("Failed to write config: {e}"))?;

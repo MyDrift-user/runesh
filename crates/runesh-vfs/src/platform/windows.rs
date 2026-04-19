@@ -46,8 +46,7 @@ impl WindowsCloudFilter {
             register_sync_root(&config_clone, &mount_point_clone)
         })
         .await
-        .map_err(|e| VfsError::Platform(format!("Task join error: {e}")))?
-        ?;
+        .map_err(|e| VfsError::Platform(format!("Task join error: {e}")))??;
 
         tracing::info!(
             mount_point = %mount_point.display(),

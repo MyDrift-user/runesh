@@ -1,7 +1,8 @@
 use super::ProjectConfig;
 
 pub fn cargo_workspace(c: &ProjectConfig) -> String {
-    let mut content = format!(r#"[workspace]
+    let mut content = format!(
+        r#"[workspace]
 members = ["crates/*"]
 resolver = "2"
 
@@ -27,11 +28,13 @@ clap = {{ version = "4", features = ["derive", "env"] }}
 
 # RUNESH shared crates
 {core_dep}
-"#, core_dep = if c.with_openapi {
-        c.cargo_dep_with_features("runesh-core", &["openapi"])
-    } else {
-        c.cargo_dep("runesh-core")
-    });
+"#,
+        core_dep = if c.with_openapi {
+            c.cargo_dep_with_features("runesh-core", &["openapi"])
+        } else {
+            c.cargo_dep("runesh-core")
+        }
+    );
 
     if c.with_auth {
         content.push_str(&c.cargo_dep("runesh-auth"));
@@ -41,7 +44,8 @@ clap = {{ version = "4", features = ["derive", "env"] }}
         content.push_str("\n# Optional: error reporting (Sentry/GlitchTip-compatible).\n");
         content.push_str("# At runtime this is a no-op unless RUNESH_SENTRY_DSN is set,\n");
         content.push_str("# so deploying without telemetry requires no code changes.\n");
-        content.push_str(&c.cargo_dep_with_features("runesh-telemetry", &["tracing-layer", "axum"]));
+        content
+            .push_str(&c.cargo_dep_with_features("runesh-telemetry", &["tracing-layer", "axum"]));
         content.push('\n');
     }
 
@@ -49,7 +53,8 @@ clap = {{ version = "4", features = ["derive", "env"] }}
 }
 
 pub fn server_cargo(c: &ProjectConfig) -> String {
-    let mut deps = format!(r#"[package]
+    let mut deps = format!(
+        r#"[package]
 name = "{name}-server"
 version.workspace = true
 edition.workspace = true
@@ -69,13 +74,17 @@ chrono.workspace = true
 dotenvy.workspace = true
 clap = {{ version = "4", features = ["derive", "env"] }}
 runesh-core.workspace = true
-"#, name = c.name);
+"#,
+        name = c.name
+    );
 
     if c.with_auth {
         deps.push_str("runesh-auth.workspace = true\n");
     }
     if c.with_openapi {
-        deps.push_str("utoipa = { version = \"5\", features = [\"chrono\", \"uuid\", \"axum_extras\"] }\n");
+        deps.push_str(
+            "utoipa = { version = \"5\", features = [\"chrono\", \"uuid\", \"axum_extras\"] }\n",
+        );
         deps.push_str("utoipa-axum = \"0.2\"\n");
     }
     if c.with_upload || c.with_editor {
@@ -105,7 +114,7 @@ pub fn server_main(c: &ProjectConfig) -> String {
         // calls can be reported when telemetry is enabled.
         extra_imports.push_str("use tracing_subscriber::prelude::*;\n");
         telemetry_init.push_str(
-r#"    // ── Optional error reporting (Sentry / GlitchTip) ──
+            r#"    // ── Optional error reporting (Sentry / GlitchTip) ──
     // No-op unless RUNESH_SENTRY_DSN is set, so this is safe in every env.
     let _telemetry_guard = runesh_telemetry::init(runesh_telemetry::Config::from_env(
         env!("CARGO_PKG_NAME"),
@@ -114,7 +123,7 @@ r#"    // ── Optional error reporting (Sentry / GlitchTip) ──
 "#,
         );
         telemetry_middleware.push_str(
-r#"        .layer(runesh_telemetry::axum::layer())
+            r#"        .layer(runesh_telemetry::axum::layer())
         .layer(runesh_telemetry::axum::NewSentryLayer::new_from_top())
 "#,
         );
@@ -122,25 +131,34 @@ r#"        .layer(runesh_telemetry::axum::layer())
 
     if c.with_rate_limit {
         extra_imports.push_str("use runesh_core::rate_limit::{RateLimiter, rate_limit_layer};\n");
-        extra_middleware.push_str(r#"        .layer(middleware::from_fn(move |req, next| {
+        extra_middleware.push_str(
+            r#"        .layer(middleware::from_fn(move |req, next| {
             let limiter = RateLimiter::new(100, 60);
             rate_limit_layer(runesh_core::RateLimiterBackend::InMemory(limiter), true, req, next)
         }))
-"#);
+"#,
+        );
     }
     if c.with_auth {
-        extra_imports.push_str("use runesh_auth::axum_middleware::{auth_middleware, JwtSecret, AuthExemptPaths};\n");
-        extra_cli_fields.push_str(r#"
+        extra_imports.push_str(
+            "use runesh_auth::axum_middleware::{auth_middleware, JwtSecret, AuthExemptPaths};\n",
+        );
+        extra_cli_fields.push_str(
+            r#"
     /// JWT signing secret (min 32 chars)
     #[arg(long, env = "JWT_SECRET")]
     jwt_secret: String,
-"#);
-        extra_cli_fields.push_str(r#"
+"#,
+        );
+        extra_cli_fields.push_str(
+            r#"
     /// Require authentication for uploads
     #[arg(long, env = "UPLOAD_AUTH_REQUIRED", default_value = "false")]
     upload_auth_required: bool,
-"#);
-        extra_middleware.push_str(r#"        .layer(middleware::from_fn(auth_middleware))
+"#,
+        );
+        extra_middleware.push_str(
+            r#"        .layer(middleware::from_fn(auth_middleware))
         .layer(axum::Extension(JwtSecret(cli.jwt_secret.clone())))
         .layer(axum::Extension(AuthExemptPaths({
             let mut paths = vec![
@@ -154,11 +172,13 @@ r#"        .layer(runesh_telemetry::axum::layer())
             }
             paths
         })))
-"#);
+"#,
+        );
         // OIDC bearer validation (Keycloak / Azure EntraID / Auth0 / …).
         // Active only when OIDC_ISSUER is set in the environment, otherwise
         // the auth middleware uses the local HS256 JwtSecret path.
-        extra_setup.push_str(r#"
+        extra_setup.push_str(
+            r#"
     // OIDC bearer-token verification. No-op unless OIDC_ISSUER is set.
     let oidc_verifier = runesh_auth::OidcVerifier::from_env()
         .await
@@ -169,16 +189,20 @@ r#"        .layer(runesh_telemetry::axum::layer())
     } else {
         app
     };
-"#);
+"#,
+        );
     }
     if c.with_openapi {
         extra_imports.push_str("use utoipa::OpenApi;\nuse runesh_core::openapi::{setup_swagger, SwaggerConfig, add_bearer_security};\n");
-        extra_cli_fields.push_str(r#"
+        extra_cli_fields.push_str(
+            r#"
     /// Enable Swagger UI
     #[arg(long, env = "SWAGGER_ENABLED", default_value = "true")]
     swagger: bool,
-"#);
-        extra_setup.push_str(r#"
+"#,
+        );
+        extra_setup.push_str(
+            r#"
     // OpenAPI / Swagger UI
     let app = if cli.swagger {
         let mut doc = ApiDoc::openapi();
@@ -187,7 +211,8 @@ r#"        .layer(runesh_telemetry::axum::layer())
     } else {
         app
     };
-"#);
+"#,
+        );
     }
 
     let mut extra_routes = String::new();
@@ -195,11 +220,13 @@ r#"        .layer(runesh_telemetry::axum::layer())
 
     if c.with_upload || c.with_editor {
         extra_imports.push_str("use axum::extract::Multipart;\n");
-        extra_cli_fields.push_str(r#"
+        extra_cli_fields.push_str(
+            r#"
     /// Max upload size in MB
     #[arg(long, env = "MAX_UPLOAD_MB", default_value = "50")]
     max_upload_mb: usize,
-"#);
+"#,
+        );
         extra_routes.push_str("        .route(\"/api/uploads\", post(upload_file))\n        .route(\"/api/uploads/{filename}\", get(serve_upload))\n        .layer(axum::extract::DefaultBodyLimit::max(cli.max_upload_mb * 1024 * 1024))\n");
         extra_handlers.push_str(r#"
 async fn upload_file(mut multipart: Multipart) -> Result<Json<serde_json::Value>, runesh_core::AppError> {
@@ -246,7 +273,8 @@ async fn serve_upload(axum::extract::Path(filename): axum::extract::Path<String>
 "#);
     }
 
-    format!(r#"use std::net::SocketAddr;
+    format!(
+        r#"use std::net::SocketAddr;
 
 use axum::{{routing::{{get, post}}, Router, Json, middleware}};
 use clap::Parser;
@@ -347,7 +375,7 @@ async fn main() {{
         tracing_init = if c.with_telemetry_server {
             // Compose the fmt layer with the Sentry layer so tracing events
             // flow to both stdout and (when DSN is set) Sentry/GlitchTip.
-r#"    use tracing_subscriber::Layer;
+            r#"    use tracing_subscriber::Layer;
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(&cli.log_level));
     tracing_subscriber::registry()
@@ -356,7 +384,7 @@ r#"    use tracing_subscriber::Layer;
         .init();
 "#
         } else {
-r#"    tracing_subscriber::fmt()
+            r#"    tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| EnvFilter::new(&cli.log_level))
@@ -368,9 +396,12 @@ r#"    tracing_subscriber::fmt()
         extra_handlers = extra_handlers,
         health_annotation = if c.with_openapi {
             "#[utoipa::path(get, path = \"/api/v1/health\", tag = \"System\", responses((status = 200, description = \"Health check\")))]\n"
-        } else { "" },
+        } else {
+            ""
+        },
         openapi_struct = if c.with_openapi {
-            format!(r#"
+            format!(
+                r#"
 /// OpenAPI documentation.
 /// Add your routes and schemas here as you build them.
 #[derive(OpenApi)]
@@ -383,7 +414,9 @@ r#"    tracing_subscriber::fmt()
     ),
 )]
 struct ApiDoc;
-"#, name = c.name)
+"#,
+                name = c.name
+            )
         } else {
             String::new()
         },
@@ -391,7 +424,8 @@ struct ApiDoc;
 }
 
 pub fn initial_migration(c: &ProjectConfig) -> String {
-    let mut sql = String::from(r#"CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+    let mut sql = String::from(
+        r#"CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -402,10 +436,12 @@ CREATE TABLE users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-"#);
+"#,
+    );
 
     if c.with_auth {
-        sql.push_str(r#"
+        sql.push_str(
+            r#"
 ALTER TABLE users ADD COLUMN oidc_sub VARCHAR(255) UNIQUE;
 ALTER TABLE users ADD COLUMN password_hash TEXT;
 ALTER TABLE users ADD COLUMN last_login_at TIMESTAMPTZ;
@@ -417,7 +453,8 @@ CREATE TABLE refresh_tokens (
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-"#);
+"#,
+        );
     }
 
     sql
@@ -435,10 +472,12 @@ pub fn web_package_json(c: &ProjectConfig) -> String {
     "tiptap-extension-global-drag-handle": "^0.1.18",
     "lowlight": "^3.3.0",
     "use-debounce": "^10.1.0",
-    "@tailwindcss/typography": "^0.5.19""#.into();
+    "@tailwindcss/typography": "^0.5.19""#
+            .into();
     }
 
-    format!(r#"{{
+    format!(
+        r#"{{
   "name": "{name}",
   "version": "0.1.0",
   "private": true,
@@ -591,7 +630,8 @@ export default withSentryConfig(nextConfig, {
     disable: !process.env.SENTRY_AUTH_TOKEN,
   },
 });
-"#.to_string()
+"#
+    .to_string()
 }
 
 // ── Sentry / GlitchTip frontend templates ────────────────────────────────────
@@ -747,7 +787,11 @@ export function useIsMobile() {
 "#;
 
 pub fn layout_tsx(c: &ProjectConfig, is_desktop: bool) -> String {
-    let title = if is_desktop { format!("{} Desktop", c.name) } else { c.name.clone() };
+    let title = if is_desktop {
+        format!("{} Desktop", c.name)
+    } else {
+        c.name.clone()
+    };
 
     let mut extra_imports = String::new();
     let mut inner_before = String::new();
@@ -764,7 +808,8 @@ pub fn layout_tsx(c: &ProjectConfig, is_desktop: bool) -> String {
         inner_after.push_str("              </AppShell>\n");
     }
 
-    format!(r#""use client";
+    format!(
+        r#""use client";
 
 import "./globals.css";
 import {{ Toaster }} from "sonner";
@@ -793,11 +838,17 @@ export default function RootLayout({{ children }}: {{ children: React.ReactNode 
     </html>
   );
 }}
-"#, title = title, extra_imports = extra_imports, inner_before = inner_before, inner_after = inner_after)
+"#,
+        title = title,
+        extra_imports = extra_imports,
+        inner_before = inner_before,
+        inner_after = inner_after
+    )
 }
 
 pub fn home_page(c: &ProjectConfig) -> String {
-    format!(r#"import {{ PageHeader }} from "@/components/layout/page-header";
+    format!(
+        r#"import {{ PageHeader }} from "@/components/layout/page-header";
 
 export default function Home() {{
   return (
@@ -806,7 +857,9 @@ export default function Home() {{
     </div>
   );
 }}
-"#, name = c.name)
+"#,
+        name = c.name
+    )
 }
 
 pub const UTILS_TS: &str = r#"export { cn } from "@mydrift/runesh-ui/src/lib/utils";
@@ -815,7 +868,8 @@ pub const UTILS_TS: &str = r#"export { cn } from "@mydrift/runesh-ui/src/lib/uti
 // ── Dashboard shell template ────────────────────────────────────────────────
 
 pub fn app_shell(c: &ProjectConfig) -> String {
-    format!(r#""use client";
+    format!(
+        r#""use client";
 
 import {{ usePathname }} from "next/navigation";
 import {{ Home, Settings, FileText, Table2 }} from "lucide-react";
@@ -876,7 +930,10 @@ export function AppShell({{ children }}: {{ children: React.ReactNode }}) {{
     </DashboardShell>
   );
 }}
-"#, name = c.name, initial = c.name.chars().next().unwrap_or('R').to_uppercase())
+"#,
+        name = c.name,
+        initial = c.name.chars().next().unwrap_or('R').to_uppercase()
+    )
 }
 
 // ── Data table example page ─────────────────────────────────────────────────
@@ -974,7 +1031,8 @@ export default function ExamplesPage() {
 // ── Novel WYSIWYG Editor templates ──────────────────────────────────────────
 
 pub fn editor_page(c: &ProjectConfig) -> String {
-    format!(r#""use client";
+    format!(
+        r#""use client";
 
 import {{ useState }} from "react";
 import dynamic from "next/dynamic";
@@ -998,7 +1056,8 @@ export default function EditorPage() {{
     </div>
   );
 }}
-"#)
+"#
+    )
 }
 
 pub const EDITOR_COMPONENT: &str = r#""use client";
@@ -1216,27 +1275,34 @@ function replacePlaceholder(editor: any, id: string, nodeType: string, attrs: Re
 "#;
 
 pub fn dot_env(c: &ProjectConfig) -> String {
-    let mut env = format!(r#"# ── Server ─────────────────────────────────────────────────────────────────
+    let mut env = format!(
+        r#"# ── Server ─────────────────────────────────────────────────────────────────
 DATABASE_URL=postgres://{db}:{db}@localhost:5432/{db}
 JWT_SECRET=change-this-to-a-random-64-char-string-in-production!!
 PORT={port}
 RUST_LOG=info
-"#, db = c.db_name, port = c.port);
+"#,
+        db = c.db_name,
+        port = c.port
+    );
 
     if c.with_openapi {
         env.push_str("SWAGGER_ENABLED=true\n");
     }
 
     if c.with_docker {
-        env.push_str(&format!(r#"
+        env.push_str(&format!(
+            r#"
 # ── Docker ─────────────────────────────────────────────────────────────────
 POSTGRES_PASSWORD=changeme
 APP_PORT=8080
-"#));
+"#
+        ));
     }
 
     if c.with_auth {
-        env.push_str(r#"
+        env.push_str(
+            r#"
 # ── OIDC (uncomment to enable SSO + bearer-token validation) ──────────────
 # Setting OIDC_ISSUER does TWO things:
 #   1. Enables the redirect-based login flow at /auth/login (cookie session,
@@ -1251,11 +1317,13 @@ APP_PORT=8080
 # OIDC_REDIRECT_URI=http://localhost:8080/api/auth/callback
 # OIDC_SCOPE=openid profile email offline_access
 # OIDC_AUDIENCE=          # optional: enforce `aud` claim if your IdP sets one
-"#);
+"#,
+        );
     }
 
     if c.with_telemetry_server {
-        env.push_str(r#"
+        env.push_str(
+            r#"
 # ── Error reporting (OPTIONAL — Sentry / GlitchTip) ───────────────────────
 # Telemetry is wired into the binary but stays a no-op until you set
 # RUNESH_SENTRY_DSN. Leave these commented out to deploy without reporting.
@@ -1263,7 +1331,8 @@ APP_PORT=8080
 # RUNESH_ENV=production
 # RUNESH_SAMPLE_RATE=0.0      # 0.0 = errors only, 1.0 = full perf traces
 # RUNESH_TELEMETRY_DEBUG=0
-"#);
+"#,
+        );
     }
 
     env
@@ -1327,7 +1396,8 @@ dist/
 "#;
 
 pub fn dockerfile(c: &ProjectConfig) -> String {
-    format!(r#"# ── Stage 1: Build Next.js frontend ─────────────────────────────────────────
+    format!(
+        r#"# ── Stage 1: Build Next.js frontend ─────────────────────────────────────────
 # Pinned to a specific major.minor for reproducibility. Bump deliberately.
 FROM oven/bun:1.3-alpine AS web-builder
 WORKDIR /build
@@ -1403,11 +1473,15 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 ENTRYPOINT ["tini", "--"]
 CMD ["/app/start.sh"]
-"#, name = c.name, port = c.port)
+"#,
+        name = c.name,
+        port = c.port
+    )
 }
 
 pub fn compose_yaml(c: &ProjectConfig) -> String {
-    format!(r#"# Production compose. Required env vars (no defaults — fail fast if unset):
+    format!(
+        r#"# Production compose. Required env vars (no defaults — fail fast if unset):
 #   POSTGRES_PASSWORD   strong random password for the app database
 #   JWT_SECRET          >=32 chars, random, never reused across environments
 # Optional:
@@ -1504,11 +1578,15 @@ volumes:
 networks:
   internal:
     driver: bridge
-"#, db = c.db_name, port = c.port)
+"#,
+        db = c.db_name,
+        port = c.port
+    )
 }
 
 pub fn tauri_cargo(c: &ProjectConfig) -> String {
-    format!(r#"[package]
+    format!(
+        r#"[package]
 name = "{name}-desktop"
 version = "0.1.0"
 edition = "2024"
@@ -1527,20 +1605,28 @@ tokio = {{ version = "1", features = ["full"] }}
 serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
 {tauri_dep}
-"#, name = c.name, snake = c.snake_name, tauri_dep = c.cargo_dep("runesh-tauri"))
+"#,
+        name = c.name,
+        snake = c.snake_name,
+        tauri_dep = c.cargo_dep("runesh-tauri")
+    )
 }
 
 pub fn tauri_main(c: &ProjectConfig) -> String {
-    format!(r#"#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+    format!(
+        r#"#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {{
     {snake}_desktop::run();
 }}
-"#, snake = c.snake_name)
+"#,
+        snake = c.snake_name
+    )
 }
 
 pub fn tauri_lib(c: &ProjectConfig) -> String {
-    format!(r#"use std::sync::Mutex;
+    format!(
+        r#"use std::sync::Mutex;
 use serde::{{Deserialize, Serialize}};
 use tauri::Manager;
 
@@ -1577,11 +1663,14 @@ pub fn run() {{
         .run(tauri::generate_context!())
         .expect("error running tauri app");
 }}
-"#, name = c.name)
+"#,
+        name = c.name
+    )
 }
 
 pub fn tauri_conf(c: &ProjectConfig) -> String {
-    format!(r#"{{
+    format!(
+        r#"{{
   "productName": "{name}",
   "version": "0.1.0",
   "identifier": "com.runesh.{name}",
@@ -1616,7 +1705,9 @@ pub fn tauri_conf(c: &ProjectConfig) -> String {
       "icons/icon.png"
     ]
   }}
-}}"#, name = c.name)
+}}"#,
+        name = c.name
+    )
 }
 
 pub const TAURI_CAPABILITIES: &str = r#"{
@@ -1633,12 +1724,22 @@ pub const TAURI_CAPABILITIES: &str = r#"{
 pub fn claude_md(c: &ProjectConfig) -> String {
     // ── Stack ────────────────────────────────────────────────────────────
     let mut stack = Vec::new();
-    if c.has_server { stack.push("Rust (Axum) + PostgreSQL (SQLx)".into()); }
-    if c.has_web { stack.push("Next.js 16 + React 19 + shadcn/ui v4 + Tailwind CSS v4".into()); }
-    if c.has_tauri { stack.push("Tauri v2 desktop".into()); }
-    if c.has_extension { stack.push("Chrome extension (WXT)".into()); }
+    if c.has_server {
+        stack.push("Rust (Axum) + PostgreSQL (SQLx)".into());
+    }
+    if c.has_web {
+        stack.push("Next.js 16 + React 19 + shadcn/ui v4 + Tailwind CSS v4".into());
+    }
+    if c.has_tauri {
+        stack.push("Tauri v2 desktop".into());
+    }
+    if c.has_extension {
+        stack.push("Chrome extension (WXT)".into());
+    }
     stack.push("Package manager: bun (never npm/yarn)".into());
-    stack.push(format!("Shared code: @mydrift/runesh-ui + runesh-core/runesh-auth crates"));
+    stack.push(format!(
+        "Shared code: @mydrift/runesh-ui + runesh-core/runesh-auth crates"
+    ));
 
     // ── Structure ────────────────────────────────────────────────────────
     let mut structure = Vec::new();
@@ -1648,8 +1749,10 @@ pub fn claude_md(c: &ProjectConfig) -> String {
     }
     if c.has_web {
         structure.push("web/                     # Next.js frontend".into());
-        structure.push("web/src/components/      # App components (editor, app-shell, etc.)".into());
-        structure.push("web/src/components/ui/   # shadcn/ui components (local, not shared)".into());
+        structure
+            .push("web/src/components/      # App components (editor, app-shell, etc.)".into());
+        structure
+            .push("web/src/components/ui/   # shadcn/ui components (local, not shared)".into());
     }
     if c.has_desktop_frontend {
         structure.push("desktop/                 # Desktop Next.js frontend".into());
@@ -1663,27 +1766,58 @@ pub fn claude_md(c: &ProjectConfig) -> String {
 
     // ── Commands ─────────────────────────────────────────────────────────
     let mut dev_cmds = Vec::new();
-    if c.has_server { dev_cmds.push(format!("cargo run -p {}-server  # Start backend", c.name)); }
-    if c.has_web { dev_cmds.push("cd web && bun dev            # Start frontend".into()); }
-    if c.has_desktop_frontend { dev_cmds.push("cd desktop && bun dev        # Start desktop frontend".into()); }
-    if c.has_tauri { dev_cmds.push("cd src-tauri && cargo tauri dev  # Start Tauri app".into()); }
-    if c.has_extension { dev_cmds.push("cd extension && bun dev      # Start extension dev".into()); }
-    if c.with_docker { dev_cmds.push("docker compose up -d         # Start full stack".into()); }
+    if c.has_server {
+        dev_cmds.push(format!("cargo run -p {}-server  # Start backend", c.name));
+    }
+    if c.has_web {
+        dev_cmds.push("cd web && bun dev            # Start frontend".into());
+    }
+    if c.has_desktop_frontend {
+        dev_cmds.push("cd desktop && bun dev        # Start desktop frontend".into());
+    }
+    if c.has_tauri {
+        dev_cmds.push("cd src-tauri && cargo tauri dev  # Start Tauri app".into());
+    }
+    if c.has_extension {
+        dev_cmds.push("cd extension && bun dev      # Start extension dev".into());
+    }
+    if c.with_docker {
+        dev_cmds.push("docker compose up -d         # Start full stack".into());
+    }
     dev_cmds.push("docker compose build --no-cache app  # Rebuild Docker image".into());
 
     // ── Features ─────────────────────────────────────────────────────────
     let mut features = Vec::new();
-    if c.with_auth { features.push("OIDC auth via runesh-auth (JWT + cookie sessions)"); }
-    if c.with_rate_limit { features.push("Rate limiting (sliding window per IP)"); }
-    if c.with_ws { features.push("WebSocket broadcast (per-room pub/sub)"); }
-    if c.with_upload { features.push("File upload with magic bytes validation"); }
-    if c.with_dashboard { features.push("Dashboard shell (sidebar, toolbar, search via Ctrl+K)"); }
-    if c.with_editor { features.push("Novel WYSIWYG editor (slash commands, tables, media uploads, markdown paste, source toggle)"); }
-    if c.with_data_table { features.push("Data table (sortable, paginated, searchable)"); }
-    if c.with_openapi { features.push("OpenAPI spec + Swagger UI at /swagger-ui/"); }
-    if c.with_docker { features.push("Docker multi-stage deployment (Caddy + Node + Rust)"); }
+    if c.with_auth {
+        features.push("OIDC auth via runesh-auth (JWT + cookie sessions)");
+    }
+    if c.with_rate_limit {
+        features.push("Rate limiting (sliding window per IP)");
+    }
+    if c.with_ws {
+        features.push("WebSocket broadcast (per-room pub/sub)");
+    }
+    if c.with_upload {
+        features.push("File upload with magic bytes validation");
+    }
+    if c.with_dashboard {
+        features.push("Dashboard shell (sidebar, toolbar, search via Ctrl+K)");
+    }
+    if c.with_editor {
+        features.push("Novel WYSIWYG editor (slash commands, tables, media uploads, markdown paste, source toggle)");
+    }
+    if c.with_data_table {
+        features.push("Data table (sortable, paginated, searchable)");
+    }
+    if c.with_openapi {
+        features.push("OpenAPI spec + Swagger UI at /swagger-ui/");
+    }
+    if c.with_docker {
+        features.push("Docker multi-stage deployment (Caddy + Node + Rust)");
+    }
 
-    format!(r#"# {name}
+    format!(
+        r#"# {name}
 
 Always use `bun` -- never npm or yarn.
 Never add Claude/AI as co-author or attribution in commits, PRs, or code.
@@ -1750,17 +1884,33 @@ Every issue and PR must have a label: `bug`, `enhancement`, `feature`, `refactor
 - `HOSTNAME=0.0.0.0` for Next.js, `127.0.0.1` for Caddy reverse proxy
 "#,
         name = c.name,
-        stack = stack.iter().map(|s| format!("- {s}")).collect::<Vec<_>>().join("\n"),
-        features = features.iter().map(|f| format!("- {f}")).collect::<Vec<_>>().join("\n"),
-        structure = structure.iter().map(|s| format!("├── {s}")).collect::<Vec<_>>().join("\n"),
+        stack = stack
+            .iter()
+            .map(|s| format!("- {s}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        features = features
+            .iter()
+            .map(|f| format!("- {f}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        structure = structure
+            .iter()
+            .map(|s| format!("├── {s}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
         dev_cmds = dev_cmds.join("\n"),
     )
 }
 
 pub fn serena_config(c: &ProjectConfig) -> String {
     let mut languages = Vec::new();
-    if c.has_any_rust() { languages.push("rust"); }
-    if c.has_web || c.has_desktop_frontend || c.has_extension { languages.push("typescript"); }
+    if c.has_any_rust() {
+        languages.push("rust");
+    }
+    if c.has_web || c.has_desktop_frontend || c.has_extension {
+        languages.push("typescript");
+    }
 
     let mut ignored = vec![
         "target".to_string(),
@@ -1769,9 +1919,12 @@ pub fn serena_config(c: &ProjectConfig) -> String {
         "**/dist".to_string(),
         "**/.output".to_string(),
     ];
-    if c.has_tauri { ignored.push(".tauri".to_string()); }
+    if c.has_tauri {
+        ignored.push(".tauri".to_string());
+    }
 
-    format!(r#"project_name: "{name}"
+    format!(
+        r#"project_name: "{name}"
 
 languages:
 {langs}
@@ -1788,15 +1941,24 @@ included_optional_tools: []
 initial_prompt: ""
 "#,
         name = c.name,
-        langs = languages.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n"),
-        ignored = ignored.iter().map(|p| format!("- \"{}\"", p)).collect::<Vec<_>>().join("\n"),
+        langs = languages
+            .iter()
+            .map(|l| format!("- {l}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        ignored = ignored
+            .iter()
+            .map(|p| format!("- \"{}\"", p))
+            .collect::<Vec<_>>()
+            .join("\n"),
     )
 }
 
 // ── Separate desktop templates ──────────────────────────────────────────────
 
 pub fn desktop_package_json(c: &ProjectConfig) -> String {
-    format!(r#"{{
+    format!(
+        r#"{{
   "name": "{name}-desktop",
   "version": "0.1.0",
   "private": true,
@@ -1833,7 +1995,11 @@ pub fn desktop_package_json(c: &ProjectConfig) -> String {
         name = c.name,
         ui_dep_line = {
             let dep = c.npm_ui_dep();
-            if dep.is_empty() { String::new() } else { format!("{dep},\n    ") }
+            if dep.is_empty() {
+                String::new()
+            } else {
+                format!("{dep},\n    ")
+            }
         },
     )
 }
@@ -1851,7 +2017,8 @@ export default nextConfig;
 "#;
 
 pub fn desktop_home_page(c: &ProjectConfig) -> String {
-    format!(r#"import {{ PageHeader }} from "@/components/layout/page-header";
+    format!(
+        r#"import {{ PageHeader }} from "@/components/layout/page-header";
 
 export default function Home() {{
   return (
@@ -1860,11 +2027,14 @@ export default function Home() {{
     </div>
   );
 }}
-"#, name = c.name)
+"#,
+        name = c.name
+    )
 }
 
 pub fn desktop_backend_cargo(c: &ProjectConfig) -> String {
-    format!(r#"[package]
+    format!(
+        r#"[package]
 name = "{name}-desktop"
 version.workspace = true
 edition.workspace = true
@@ -1875,11 +2045,14 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 runesh-core.workspace = true
-"#, name = c.name)
+"#,
+        name = c.name
+    )
 }
 
 pub fn desktop_backend_lib(c: &ProjectConfig) -> String {
-    format!(r#"//! Desktop-specific backend logic for {name}.
+    format!(
+        r#"//! Desktop-specific backend logic for {name}.
 //!
 //! This crate contains Tauri commands and business logic that is
 //! specific to the desktop app and not shared with the web server.
@@ -1898,11 +2071,14 @@ pub fn get_status() -> DesktopStatus {{
         connected: false,
     }}
 }}
-"#, name = c.name)
+"#,
+        name = c.name
+    )
 }
 
 pub fn tauri_cargo_separate(c: &ProjectConfig) -> String {
-    format!(r#"[package]
+    format!(
+        r#"[package]
 name = "{name}-tauri"
 version = "0.1.0"
 edition = "2024"
@@ -1922,11 +2098,16 @@ serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
 {name}-desktop = {{ path = "../crates/{name}-desktop" }}
 {tauri_dep}
-"#, name = c.name, snake = c.snake_name, tauri_dep = c.cargo_dep("runesh-tauri"))
+"#,
+        name = c.name,
+        snake = c.snake_name,
+        tauri_dep = c.cargo_dep("runesh-tauri")
+    )
 }
 
 pub fn tauri_conf_separate(c: &ProjectConfig) -> String {
-    format!(r#"{{
+    format!(
+        r#"{{
   "productName": "{name}",
   "version": "0.1.0",
   "identifier": "com.runesh.{name}",
@@ -1961,13 +2142,16 @@ pub fn tauri_conf_separate(c: &ProjectConfig) -> String {
       "icons/icon.png"
     ]
   }}
-}}"#, name = c.name)
+}}"#,
+        name = c.name
+    )
 }
 
 // ── Chrome Extension templates (WXT + React) ────────────────────────────────
 
 pub fn extension_package_json(c: &ProjectConfig) -> String {
-    format!(r#"{{
+    format!(
+        r#"{{
   "name": "{name}-extension",
   "version": "0.1.0",
   "private": true,
@@ -1999,11 +2183,15 @@ pub fn extension_package_json(c: &ProjectConfig) -> String {
     "autoprefixer": "^10",
     "postcss": "^8"
   }}
-}}"#, name = c.name, ui_dep = c.npm_ui_dep())
+}}"#,
+        name = c.name,
+        ui_dep = c.npm_ui_dep()
+    )
 }
 
 pub fn extension_wxt_config(c: &ProjectConfig) -> String {
-    format!(r#"import {{ defineConfig }} from "wxt";
+    format!(
+        r#"import {{ defineConfig }} from "wxt";
 
 export default defineConfig({{
   modules: ["@wxt-dev/module-react"],
@@ -2013,7 +2201,9 @@ export default defineConfig({{
     permissions: ["storage"],
   }},
 }});
-"#, name = c.name)
+"#,
+        name = c.name
+    )
 }
 
 pub const EXTENSION_TSCONFIG: &str = r#"{
@@ -2043,7 +2233,8 @@ pub const EXTENSION_POSTCSS: &str = r#"export default {
 "#;
 
 pub fn extension_popup_html(c: &ProjectConfig) -> String {
-    format!(r#"<!doctype html>
+    format!(
+        r#"<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -2055,7 +2246,9 @@ pub fn extension_popup_html(c: &ProjectConfig) -> String {
     <script type="module" src="./main.tsx"></script>
   </body>
 </html>
-"#, name = c.name)
+"#,
+        name = c.name
+    )
 }
 
 pub const EXTENSION_POPUP_MAIN: &str = r#"import React from "react";
@@ -2071,7 +2264,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 "#;
 
 pub fn extension_popup_app(c: &ProjectConfig) -> String {
-    format!(r#"import {{ useChromeStorage }} from "@mydrift/runesh-ui/src/hooks/use-chrome-storage";
+    format!(
+        r#"import {{ useChromeStorage }} from "@mydrift/runesh-ui/src/hooks/use-chrome-storage";
 
 export function App() {{
   const [count, setCount] = useChromeStorage("popup_count", 0);
@@ -2089,7 +2283,9 @@ export function App() {{
     </div>
   );
 }}
-"#, name = c.name)
+"#,
+        name = c.name
+    )
 }
 
 pub const EXTENSION_POPUP_CSS: &str = r#"@import "tailwindcss";

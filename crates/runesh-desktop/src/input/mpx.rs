@@ -82,19 +82,20 @@ mod mpx_impl {
             // XIWarpPointer for the specific device
             self.conn
                 .xinput_xi_warp_pointer(
-                    x11rb::NONE,       // src_window
-                    self.root,         // dst_window
-                    0.into(),          // src_x (fixed-point)
-                    0.into(),          // src_y
-                    0,                 // src_width
-                    0,                 // src_height
-                    to_fp1616(x),      // dst_x (fixed-point 16.16)
-                    to_fp1616(y),      // dst_y
+                    x11rb::NONE,  // src_window
+                    self.root,    // dst_window
+                    0.into(),     // src_x (fixed-point)
+                    0.into(),     // src_y
+                    0,            // src_width
+                    0,            // src_height
+                    to_fp1616(x), // dst_x (fixed-point 16.16)
+                    to_fp1616(y), // dst_y
                     xinput::DeviceId::from(self.pointer_id),
                 )
                 .map_err(|e| DesktopError::Input(format!("XIWarpPointer failed: {e}")))?;
 
-            self.conn.flush()
+            self.conn
+                .flush()
                 .map_err(|e| DesktopError::Input(format!("Flush failed: {e}")))?;
 
             Ok(())
@@ -123,10 +124,19 @@ mod mpx_impl {
 
             // Use XTest with device specification
             self.conn
-                .xtest_fake_input(event_type, x11_button, 0, self.root, 0, 0, self.pointer_id as u8)
+                .xtest_fake_input(
+                    event_type,
+                    x11_button,
+                    0,
+                    self.root,
+                    0,
+                    0,
+                    self.pointer_id as u8,
+                )
                 .map_err(|e| DesktopError::Input(format!("FakeInput button failed: {e}")))?;
 
-            self.conn.flush()
+            self.conn
+                .flush()
                 .map_err(|e| DesktopError::Input(format!("Flush failed: {e}")))?;
 
             Ok(())
@@ -148,8 +158,8 @@ mod mpx_impl {
             let _ = self.conn.xinput_remove_master_device(
                 self.pointer_id,
                 xinput::ChangeMode::FLOAT, // float slave devices
-                0, // return_pointer (unused when floating)
-                0, // return_keyboard (unused when floating)
+                0,                         // return_pointer (unused when floating)
+                0,                         // return_keyboard (unused when floating)
             );
             let _ = self.conn.flush();
             tracing::info!(name = %self.name, "MPX: Destroyed virtual cursor");
@@ -219,4 +229,4 @@ mod mpx_impl {
 }
 
 #[cfg(target_os = "linux")]
-pub use mpx_impl::{is_mpx_available, MpxCursor};
+pub use mpx_impl::{MpxCursor, is_mpx_available};
