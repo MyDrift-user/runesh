@@ -50,6 +50,7 @@ RUNESH/
 │   ├── runesh-acl/                      # Tailscale-compatible HuJSON ACL parser + evaluator + diff
 │   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
+│   ├── runesh-coord/                    # Tailscale-compatible coordination: Noise IK handshake, node registry, map builder
 │   ├── runesh-core/                     # AppError, RateLimiter, WS broadcast, file upload, DB pool
 │   ├── runesh-desktop/                  # Remote desktop: screen capture, encoding, input injection (Win/Mac/Linux)
 │   ├── runesh-mesh/                     # WireGuard mesh: key management, peer maps, IP allocation, tunnel orchestration
