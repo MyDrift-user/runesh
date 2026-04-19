@@ -4896,6 +4896,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "runesh-acl"
+version = "0.16.0"
+dependencies = [
+ "ipnet",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "runesh-auth"
 version = "0.16.0"
 dependencies = [
