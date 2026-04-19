@@ -47,6 +47,7 @@ RUNESH/
 │           ├── lib/                     # api-client, token-store, auth-pkce, utils (cn)
 │           └── styles/                  # globals.css (OKLCH theme, dark mode, editor styles)
 ├── crates/
+│   ├── runesh-acl/                      # Tailscale-compatible HuJSON ACL parser + evaluator + diff
 │   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
 │   ├── runesh-core/                     # AppError, RateLimiter, WS broadcast, file upload, DB pool
