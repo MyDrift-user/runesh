@@ -158,6 +158,9 @@ jobs:
     name: Publish @mydrift/runesh-ui to npmjs.com
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -172,15 +175,19 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Install dependencies
-        working-directory: packages/ui
-        run: bun install --frozen-lockfile
-
-      - name: Set version from release tag
+      - name: Verify tag version matches package.json
         working-directory: packages/ui
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          npm pkg set version="$VERSION"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        working-directory: packages/ui
+        run: bun install
 
       - name: Build
         working-directory: packages/ui
@@ -188,6 +195,6 @@ jobs:
 
       - name: Publish
         working-directory: packages/ui
-        run: npm publish --access public --ignore-scripts
+        run: npm publish --access public --provenance --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
