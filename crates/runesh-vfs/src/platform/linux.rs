@@ -54,10 +54,8 @@ impl LinuxFuseMount {
             mount_options.push(MountOption::RO);
         }
 
-        let fuse_config = Config {
-            mount_options,
-            ..Config::default()
-        };
+        let mut fuse_config = Config::default();
+        fuse_config.mount_options = mount_options;
 
         let mount_point_clone = mount_point.clone();
         let session = tokio::task::spawn_blocking(move || {

@@ -49,6 +49,9 @@ jobs:
             libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev librsvg2-dev \
             libfuse3-dev \
             libx11-dev libxtst-dev libxrandr-dev libxi-dev libxdo-dev
+      - name: Install macOS deps
+        if: runner.os == 'macOS'
+        run: brew install macfuse
       - uses: Swatinem/rust-cache@v2
         with:
           key: workspace-${{ matrix.os }}
