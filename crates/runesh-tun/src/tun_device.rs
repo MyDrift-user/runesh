@@ -328,7 +328,7 @@ mod platform {
     }
 
     mod libc {
-        extern "C" {
+        unsafe extern "C" {
             pub fn open(path: *const i8, flags: i32) -> i32;
             pub fn close(fd: i32) -> i32;
             pub fn read(fd: i32, buf: *mut std::ffi::c_void, count: usize) -> isize;
