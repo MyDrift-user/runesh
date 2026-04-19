@@ -48,6 +48,7 @@ RUNESH/
 │           └── styles/                  # globals.css (OKLCH theme, dark mode, editor styles)
 ├── crates/
 │   ├── runesh-acl/                      # Tailscale-compatible HuJSON ACL parser + evaluator + diff
+│   ├── runesh-agent/                    # Endpoint daemon: enrollment, identity, task queue, heartbeat
 │   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
 │   ├── runesh-coord/                    # Tailscale-compatible coordination: Noise IK handshake, node registry, map builder
