@@ -5241,6 +5241,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "runesh-proxy"
+version = "0.16.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "runesh-acl",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "runesh-relay"
 version = "0.16.0"
 dependencies = [
