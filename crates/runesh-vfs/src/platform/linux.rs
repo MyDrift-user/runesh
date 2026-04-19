@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use fuser::{
-    FileAttr, FileHandle, FileType, Filesystem, INodeNo, LockOwner, MountOption, OpenFlags,
-    ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request, WriteFlags,
+    Config, Errno, FileAttr, FileHandle, FileType, Filesystem, Generation, INodeNo, LockOwner,
+    MountOption, OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request, WriteFlags,
 };
 use tokio::sync::RwLock;
 
@@ -44,19 +44,24 @@ impl LinuxFuseMount {
 
         let fs = VfsFuse::new(provider, cache, write_mode, runtime);
 
-        let mut options = vec![
+        let mut mount_options = vec![
             MountOption::FSName(config.display_name.clone()),
             MountOption::AutoUnmount,
             MountOption::CUSTOM("allow_other".into()),
         ];
 
         if matches!(config.write_mode, WriteMode::ReadOnly) {
-            options.push(MountOption::RO);
+            mount_options.push(MountOption::RO);
         }
+
+        let fuse_config = Config {
+            mount_options,
+            ..Config::default()
+        };
 
         let mount_point_clone = mount_point.clone();
         let session = tokio::task::spawn_blocking(move || {
-            fuser::spawn_mount2(fs, &mount_point_clone, &options)
+            fuser::spawn_mount2(fs, &mount_point_clone, &fuse_config)
                 .map_err(|e| VfsError::Platform(format!("FUSE mount failed: {e}")))
         })
         .await
@@ -180,7 +185,7 @@ impl Filesystem for VfsFuse {
         let parent_path = match self.ino_to_path(parent) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -196,10 +201,10 @@ impl Filesystem for VfsFuse {
             Ok(entry) => {
                 let ino = self.get_or_create_ino(&child_path);
                 let attr = self.entry_to_attr(&entry, ino);
-                reply.entry(&TTL, &attr, 0);
+                reply.entry(&TTL, &attr, Generation(0));
             }
             Err(_) => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
             }
         }
     }
@@ -208,7 +213,7 @@ impl Filesystem for VfsFuse {
         let path = match self.ino_to_path(ino) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -242,7 +247,7 @@ impl Filesystem for VfsFuse {
                 reply.attr(&TTL, &attr);
             }
             Err(_) => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
             }
         }
     }
@@ -258,7 +263,7 @@ impl Filesystem for VfsFuse {
         let path = match self.ino_to_path(ino) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -266,7 +271,7 @@ impl Filesystem for VfsFuse {
         let entries = match self.runtime.block_on(self.provider.list_dir(&path)) {
             Ok(e) => e,
             Err(_) => {
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
                 return;
             }
         };
@@ -310,7 +315,7 @@ impl Filesystem for VfsFuse {
         let path = match self.ino_to_path(ino) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -340,7 +345,7 @@ impl Filesystem for VfsFuse {
                 reply.data(&data);
             }
             Err(_) => {
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
             }
         }
     }
@@ -358,14 +363,14 @@ impl Filesystem for VfsFuse {
         reply: fuser::ReplyWrite,
     ) {
         if matches!(self.write_mode, WriteMode::ReadOnly) {
-            reply.error(libc::EACCES);
+            reply.error(Errno::EACCES);
             return;
         }
 
         let path = match self.ino_to_path(ino) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -380,7 +385,7 @@ impl Filesystem for VfsFuse {
                 reply.written(data.len() as u32);
             }
             Err(_) => {
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
             }
         }
     }
@@ -395,14 +400,14 @@ impl Filesystem for VfsFuse {
         reply: ReplyEntry,
     ) {
         if matches!(self.write_mode, WriteMode::ReadOnly) {
-            reply.error(libc::EACCES);
+            reply.error(Errno::EACCES);
             return;
         }
 
         let parent_path = match self.ino_to_path(parent) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -419,24 +424,24 @@ impl Filesystem for VfsFuse {
                 let ino = self.get_or_create_ino(&child_path);
                 let entry = VfsEntry::directory(&name_str, &child_path);
                 let attr = self.entry_to_attr(&entry, ino);
-                reply.entry(&TTL, &attr, 0);
+                reply.entry(&TTL, &attr, Generation(0));
             }
             Err(_) => {
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
             }
         }
     }
 
     fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: fuser::ReplyEmpty) {
         if matches!(self.write_mode, WriteMode::ReadOnly) {
-            reply.error(libc::EACCES);
+            reply.error(Errno::EACCES);
             return;
         }
 
         let parent_path = match self.ino_to_path(parent) {
             Some(p) => p,
             None => {
-                reply.error(libc::ENOENT);
+                reply.error(Errno::ENOENT);
                 return;
             }
         };
@@ -454,7 +459,7 @@ impl Filesystem for VfsFuse {
                 reply.ok();
             }
             Err(_) => {
-                reply.error(libc::EIO);
+                reply.error(Errno::EIO);
             }
         }
     }
