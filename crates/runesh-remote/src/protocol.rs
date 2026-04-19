@@ -119,10 +119,7 @@ pub enum FsResponse {
         checksum: String,
     },
     /// Write confirmation.
-    WriteOk {
-        path: String,
-        bytes_written: u64,
-    },
+    WriteOk { path: String, bytes_written: u64 },
     /// Operation success.
     Ok { message: String },
     /// Progress update for long-running operations.
@@ -146,10 +143,7 @@ pub enum FsResponse {
         matches: Vec<FileEntry>,
     },
     /// File system watch event.
-    WatchEvent {
-        path: String,
-        kind: WatchEventKind,
-    },
+    WatchEvent { path: String, kind: WatchEventKind },
     /// Error response.
     Error { code: String, message: String },
 }
@@ -206,10 +200,7 @@ pub enum CliRequest {
         cwd: Option<String>,
     },
     /// Send input to a terminal session (base64-encoded).
-    Input {
-        session_id: String,
-        data: String,
-    },
+    Input { session_id: String, data: String },
     /// Resize terminal.
     Resize {
         session_id: String,
@@ -227,29 +218,18 @@ pub enum CliRequest {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CliResponse {
     /// Session opened successfully.
-    Opened {
-        session_id: String,
-        shell: String,
-    },
+    Opened { session_id: String, shell: String },
     /// Terminal output (base64-encoded).
-    Output {
-        session_id: String,
-        data: String,
-    },
+    Output { session_id: String, data: String },
     /// Session closed.
     Closed {
         session_id: String,
         exit_code: Option<u32>,
     },
     /// Active sessions list.
-    Sessions {
-        sessions: Vec<SessionInfo>,
-    },
+    Sessions { sessions: Vec<SessionInfo> },
     /// Error response.
-    Error {
-        code: String,
-        message: String,
-    },
+    Error { code: String, message: String },
 }
 
 /// Active session metadata.

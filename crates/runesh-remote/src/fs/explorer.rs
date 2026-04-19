@@ -130,11 +130,7 @@ pub async fn write_file(
 }
 
 /// Create a directory.
-pub async fn mkdir(
-    policy: &FsPolicy,
-    path: &str,
-    recursive: bool,
-) -> Result<(), RemoteError> {
+pub async fn mkdir(policy: &FsPolicy, path: &str, recursive: bool) -> Result<(), RemoteError> {
     policy.check_write()?;
     let resolved = policy.resolve_path(path)?;
 
@@ -148,11 +144,7 @@ pub async fn mkdir(
 }
 
 /// Delete a file or directory.
-pub async fn delete(
-    policy: &FsPolicy,
-    path: &str,
-    recursive: bool,
-) -> Result<(), RemoteError> {
+pub async fn delete(policy: &FsPolicy, path: &str, recursive: bool) -> Result<(), RemoteError> {
     policy.check_delete()?;
     let resolved = policy.resolve_path(path)?;
 
@@ -170,11 +162,7 @@ pub async fn delete(
 }
 
 /// Copy a file or directory.
-pub async fn copy(
-    policy: &FsPolicy,
-    src: &str,
-    dst: &str,
-) -> Result<(), RemoteError> {
+pub async fn copy(policy: &FsPolicy, src: &str, dst: &str) -> Result<(), RemoteError> {
     policy.check_write()?;
     let src_path = policy.resolve_path(src)?;
     let dst_path = policy.resolve_path(dst)?;
@@ -189,11 +177,7 @@ pub async fn copy(
 }
 
 /// Move/rename a file or directory.
-pub async fn rename(
-    policy: &FsPolicy,
-    src: &str,
-    dst: &str,
-) -> Result<(), RemoteError> {
+pub async fn rename(policy: &FsPolicy, src: &str, dst: &str) -> Result<(), RemoteError> {
     policy.check_write()?;
     let src_path = policy.resolve_path(src)?;
     let dst_path = policy.resolve_path(dst)?;

@@ -7,7 +7,7 @@ mod file_watcher {
     use std::sync::Arc;
 
     use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
-    use tokio::sync::{broadcast, RwLock};
+    use tokio::sync::{RwLock, broadcast};
 
     use crate::error::RemoteError;
     use crate::fs::security::FsPolicy;

@@ -1,5 +1,5 @@
-mod tun_device;
 mod error;
+mod tun_device;
 
-pub use tun_device::{TunDevice, TunConfig};
 pub use error::TunError;
+pub use tun_device::{TunConfig, TunDevice};

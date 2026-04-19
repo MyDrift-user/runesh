@@ -29,7 +29,13 @@ impl WindowsInputInjector {
         (abs_x, abs_y)
     }
 
-    fn send_mouse(&self, dx: i32, dy: i32, mouse_data: u32, flags: MOUSE_EVENT_FLAGS) -> Result<(), DesktopError> {
+    fn send_mouse(
+        &self,
+        dx: i32,
+        dy: i32,
+        mouse_data: u32,
+        flags: MOUSE_EVENT_FLAGS,
+    ) -> Result<(), DesktopError> {
         let mut input = INPUT::default();
         input.r#type = INPUT_MOUSE;
         input.Anonymous.mi = MOUSEINPUT {
@@ -107,13 +113,7 @@ impl InputInjector for WindowsInputInjector {
         self.send_key(key_code as u16, flags)
     }
 
-    fn scroll(
-        &mut self,
-        x: i32,
-        y: i32,
-        _delta_x: f32,
-        delta_y: f32,
-    ) -> Result<(), DesktopError> {
+    fn scroll(&mut self, x: i32, y: i32, _delta_x: f32, delta_y: f32) -> Result<(), DesktopError> {
         self.mouse_move(x, y)?;
         let wheel_delta = (delta_y * 120.0) as u32;
         self.send_mouse(0, 0, wheel_delta, MOUSEEVENTF_WHEEL)

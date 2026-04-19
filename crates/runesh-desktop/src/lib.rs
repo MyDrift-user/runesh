@@ -25,13 +25,13 @@
 //!     .with_state(state);
 //! ```
 
-pub mod error;
-pub mod protocol;
-pub mod display;
 pub mod capture;
-pub mod encode;
-pub mod input;
 pub mod cursor;
+pub mod display;
+pub mod encode;
+pub mod error;
+pub mod input;
+pub mod protocol;
 pub mod session;
 
 #[cfg(feature = "clipboard")]

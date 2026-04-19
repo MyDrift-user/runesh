@@ -26,13 +26,7 @@ pub trait InputInjector: Send {
     ) -> Result<(), DesktopError>;
 
     /// Scroll the mouse wheel.
-    fn scroll(
-        &mut self,
-        x: i32,
-        y: i32,
-        delta_x: f32,
-        delta_y: f32,
-    ) -> Result<(), DesktopError>;
+    fn scroll(&mut self, x: i32, y: i32, delta_x: f32, delta_y: f32) -> Result<(), DesktopError>;
 }
 
 /// Create an input injector for the current platform.
@@ -54,7 +48,9 @@ pub fn create_injector() -> Result<Box<dyn InputInjector>, DesktopError> {
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
-        Err(DesktopError::Unsupported("Input injection not available".into()))
+        Err(DesktopError::Unsupported(
+            "Input injection not available".into(),
+        ))
     }
 }
 

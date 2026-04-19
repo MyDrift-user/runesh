@@ -1,15 +1,15 @@
 //! Axum middleware for JWT authentication.
 
 use axum::{
+    Json,
     body::Body,
     extract::Request,
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
 
-use crate::token::{validate_access_token, Claims};
+use crate::token::{Claims, validate_access_token};
 
 /// JWT secret wrapper for Axum extension injection.
 #[derive(Clone)]
@@ -25,10 +25,7 @@ impl Default for AuthExemptPaths {
         // NOTE: /ws/ is NOT exempt by default -- WebSocket auth should be
         // handled by validating the token in the first message or query param
         // at the handler level, not by skipping middleware.
-        Self(vec![
-            "/auth/".into(),
-            "/health".into(),
-        ])
+        Self(vec!["/auth/".into(), "/health".into()])
     }
 }
 
@@ -115,15 +112,14 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     // rule: any path under `/api/` ALWAYS goes through full authentication, and
     // static-asset bypass only applies to well-known framework asset directories.
     let is_api = path.starts_with("/api/");
-    let is_static_asset = !is_api && (
-        path.starts_with("/_next/")
+    let is_static_asset = !is_api
+        && (path.starts_with("/_next/")
             || path.starts_with("/static/")
             || path.starts_with("/assets/")
             || path == "/favicon.ico"
             || path == "/robots.txt"
             || path == "/sitemap.xml"
-            || path == "/manifest.webmanifest"
-    );
+            || path == "/manifest.webmanifest");
 
     if is_static_asset || method == axum::http::Method::OPTIONS {
         return next.run(req).await;
@@ -197,7 +193,9 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     };
 
     // Extract token: try Authorization header first (API clients), then cookie (sessions)
-    let cookie_str = req.headers().get(header::COOKIE)
+    let cookie_str = req
+        .headers()
+        .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
@@ -209,11 +207,14 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
         .map(|h| h[7..].to_string());
 
     // Try both cookie name formats (with and without __Host- prefix)
-    let cookie_token = cookie_str.split(';').find_map(|c| {
-        let c = c.trim();
-        c.strip_prefix("__Host-access=")
-            .or_else(|| c.strip_prefix("access="))
-    }).map(|s| s.to_string());
+    let cookie_token = cookie_str
+        .split(';')
+        .find_map(|c| {
+            let c = c.trim();
+            c.strip_prefix("__Host-access=")
+                .or_else(|| c.strip_prefix("access="))
+        })
+        .map(|s| s.to_string());
 
     let is_cookie_auth = bearer_token.is_none() && cookie_token.is_some();
 
@@ -231,20 +232,31 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     // CSRF check for state-changing methods when using cookie auth
     if is_cookie_auth {
         let method = req.method().clone();
-        if matches!(method, axum::http::Method::POST | axum::http::Method::PUT | axum::http::Method::PATCH | axum::http::Method::DELETE) {
+        if matches!(
+            method,
+            axum::http::Method::POST
+                | axum::http::Method::PUT
+                | axum::http::Method::PATCH
+                | axum::http::Method::DELETE
+        ) {
             // Verify X-CSRF-Token header matches CSRF cookie
             let csrf_cookie = cookie_str.split(';').find_map(|c| {
                 let c = c.trim();
                 c.strip_prefix("__Host-csrf=")
                     .or_else(|| c.strip_prefix("csrf="))
             });
-            let csrf_header = req.headers().get("x-csrf-token")
+            let csrf_header = req
+                .headers()
+                .get("x-csrf-token")
                 .and_then(|v| v.to_str().ok());
 
             let csrf_valid = match (csrf_cookie, csrf_header) {
                 (Some(c), Some(h)) if !c.is_empty() && c.len() == h.len() => {
-                    c.as_bytes().iter().zip(h.as_bytes().iter())
-                        .fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+                    c.as_bytes()
+                        .iter()
+                        .zip(h.as_bytes().iter())
+                        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+                        == 0
                 }
                 _ => false,
             };
@@ -253,7 +265,8 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
                 return (
                     StatusCode::FORBIDDEN,
                     Json(serde_json::json!({"error": "invalid CSRF token"})),
-                ).into_response();
+                )
+                    .into_response();
             }
         }
     }
@@ -268,13 +281,20 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     // but no verifier is installed, we fail closed with 401 rather than
     // accidentally accepting an unsigned token.
     let alg_is_asymmetric = jsonwebtoken::decode_header(&token)
-        .map(|h| matches!(
-            h.alg,
-            jsonwebtoken::Algorithm::RS256 | jsonwebtoken::Algorithm::RS384 | jsonwebtoken::Algorithm::RS512
-            | jsonwebtoken::Algorithm::ES256 | jsonwebtoken::Algorithm::ES384
-            | jsonwebtoken::Algorithm::PS256 | jsonwebtoken::Algorithm::PS384 | jsonwebtoken::Algorithm::PS512
-            | jsonwebtoken::Algorithm::EdDSA
-        ))
+        .map(|h| {
+            matches!(
+                h.alg,
+                jsonwebtoken::Algorithm::RS256
+                    | jsonwebtoken::Algorithm::RS384
+                    | jsonwebtoken::Algorithm::RS512
+                    | jsonwebtoken::Algorithm::ES256
+                    | jsonwebtoken::Algorithm::ES384
+                    | jsonwebtoken::Algorithm::PS256
+                    | jsonwebtoken::Algorithm::PS384
+                    | jsonwebtoken::Algorithm::PS512
+                    | jsonwebtoken::Algorithm::EdDSA
+            )
+        })
         .unwrap_or(false);
 
     if alg_is_asymmetric {

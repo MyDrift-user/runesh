@@ -16,8 +16,8 @@
 mod axum_handlers {
     use std::sync::Arc;
 
-    use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
     use axum::extract::State;
+    use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
     use axum::response::IntoResponse;
     use futures_util::{SinkExt, StreamExt};
 
@@ -37,7 +37,10 @@ mod axum_handlers {
     }
 
     impl RemoteState {
-        pub fn new(fs_policy: FsPolicy, _session_config: crate::cli::session::SessionConfig) -> Self {
+        pub fn new(
+            fs_policy: FsPolicy,
+            _session_config: crate::cli::session::SessionConfig,
+        ) -> Self {
             let fs_policy = Arc::new(fs_policy);
             let audit = Arc::new(AuditLogger::new());
 
@@ -95,26 +98,16 @@ mod axum_handlers {
             };
 
             let response = match serde_json::from_str::<WsMessage>(&msg) {
-                Ok(WsMessage::Fs { payload }) => {
-                    handle_fs_message(&state, payload).await
-                }
-                Ok(WsMessage::Cli { payload }) => {
-                    handle_cli_message(&state, payload).await
-                }
-                Err(e) => {
-                    serde_json::to_string(&FsResponse::Error {
-                        code: "parse_error".into(),
-                        message: format!("Invalid message: {e}"),
-                    })
-                    .unwrap_or_default()
-                }
+                Ok(WsMessage::Fs { payload }) => handle_fs_message(&state, payload).await,
+                Ok(WsMessage::Cli { payload }) => handle_cli_message(&state, payload).await,
+                Err(e) => serde_json::to_string(&FsResponse::Error {
+                    code: "parse_error".into(),
+                    message: format!("Invalid message: {e}"),
+                })
+                .unwrap_or_default(),
             };
 
-            if ws_tx
-                .send(Message::Text(response.into()))
-                .await
-                .is_err()
-            {
+            if ws_tx.send(Message::Text(response.into())).await.is_err() {
                 break;
             }
         }
@@ -171,27 +164,19 @@ mod axum_handlers {
                     explorer::read_file(&state.fs_policy, &path, offset, length).await?;
                 Ok(FsResponse::FileContent {
                     path,
-                    data: base64::Engine::encode(
-                        &base64::engine::general_purpose::STANDARD,
-                        &data,
-                    ),
+                    data: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data),
                     offset,
                     total_size,
                     checksum,
                 })
             }
             FsRequest::Write {
-                path,
-                data,
-                append,
-                ..
+                path, data, append, ..
             } => {
                 state.audit.log_fs_operation("write", &path, None).await;
-                let decoded = base64::Engine::decode(
-                    &base64::engine::general_purpose::STANDARD,
-                    &data,
-                )
-                .map_err(|e| RemoteError::BadRequest(format!("Invalid base64: {e}")))?;
+                let decoded =
+                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data)
+                        .map_err(|e| RemoteError::BadRequest(format!("Invalid base64: {e}")))?;
                 let bytes_written =
                     explorer::write_file(&state.fs_policy, &path, &decoded, append).await?;
                 Ok(FsResponse::WriteOk {
@@ -252,17 +237,18 @@ mod axum_handlers {
                 total_chunks,
                 data,
             } => {
-                let decoded = base64::Engine::decode(
-                    &base64::engine::general_purpose::STANDARD,
-                    &data,
-                )
-                .map_err(|e| RemoteError::BadRequest(format!("Invalid base64: {e}")))?;
+                let decoded =
+                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data)
+                        .map_err(|e| RemoteError::BadRequest(format!("Invalid base64: {e}")))?;
                 let (is_complete, percent) = state
                     .upload_manager
                     .handle_chunk(&path, chunk_index, total_chunks, &decoded)
                     .await?;
                 if is_complete {
-                    state.audit.log_fs_operation("upload_complete", &path, None).await;
+                    state
+                        .audit
+                        .log_fs_operation("upload_complete", &path, None)
+                        .await;
                 }
                 Ok(FsResponse::Progress {
                     operation: "upload".into(),
@@ -276,10 +262,7 @@ mod axum_handlers {
                     explorer::read_file(&state.fs_policy, &path, 0, 0).await?;
                 Ok(FsResponse::FileContent {
                     path,
-                    data: base64::Engine::encode(
-                        &base64::engine::general_purpose::STANDARD,
-                        &data,
-                    ),
+                    data: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data),
                     offset: 0,
                     total_size,
                     checksum,
@@ -292,21 +275,16 @@ mod axum_handlers {
                 let _ = tokio::fs::remove_file(&zip_path).await;
                 Ok(FsResponse::FileContent {
                     path: "archive.zip".into(),
-                    data: base64::Engine::encode(
-                        &base64::engine::general_purpose::STANDARD,
-                        &data,
-                    ),
+                    data: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data),
                     offset: 0,
                     total_size: data.len() as u64,
                     checksum: String::new(),
                 })
             }
             #[cfg(feature = "watch")]
-            FsRequest::Watch { path } | FsRequest::Unwatch { path } => {
-                Ok(FsResponse::Ok {
-                    message: format!("Watch operation on {path}"),
-                })
-            }
+            FsRequest::Watch { path } | FsRequest::Unwatch { path } => Ok(FsResponse::Ok {
+                message: format!("Watch operation on {path}"),
+            }),
         }
     }
 
@@ -371,11 +349,9 @@ mod axum_handlers {
                 })
             }
             CliRequest::Input { session_id, data } => {
-                let decoded = base64::Engine::decode(
-                    &base64::engine::general_purpose::STANDARD,
-                    &data,
-                )
-                .map_err(|e| RemoteError::BadRequest(format!("Invalid base64: {e}")))?;
+                let decoded =
+                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data)
+                        .map_err(|e| RemoteError::BadRequest(format!("Invalid base64: {e}")))?;
                 state.session_manager.input(&session_id, &decoded).await?;
                 Ok(CliResponse::Sessions {
                     sessions: Vec::new(),
@@ -386,7 +362,10 @@ mod axum_handlers {
                 cols,
                 rows,
             } => {
-                state.session_manager.resize(&session_id, cols, rows).await?;
+                state
+                    .session_manager
+                    .resize(&session_id, cols, rows)
+                    .await?;
                 Ok(CliResponse::Sessions {
                     sessions: Vec::new(),
                 })

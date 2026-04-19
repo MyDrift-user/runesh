@@ -35,14 +35,17 @@ impl InputInjector for X11InputInjector {
             .warp_pointer(
                 x11rb::NONE, // src_window
                 screen.root,
-                0, 0,        // src position (ignored)
-                0, 0,        // src size (ignored)
+                0,
+                0, // src position (ignored)
+                0,
+                0, // src size (ignored)
                 x as i16,
                 y as i16,
             )
             .map_err(|e| DesktopError::Input(format!("WarpPointer failed: {e}")))?;
 
-        self.conn.flush()
+        self.conn
+            .flush()
             .map_err(|e| DesktopError::Input(format!("Flush failed: {e}")))?;
 
         Ok(())
@@ -76,7 +79,8 @@ impl InputInjector for X11InputInjector {
             .xtest_fake_input(event_type, x11_button, 0, x11rb::NONE, 0, 0, 0)
             .map_err(|e| DesktopError::Input(format!("FakeInput button failed: {e}")))?;
 
-        self.conn.flush()
+        self.conn
+            .flush()
             .map_err(|e| DesktopError::Input(format!("Flush failed: {e}")))?;
 
         Ok(())
@@ -98,19 +102,14 @@ impl InputInjector for X11InputInjector {
             .xtest_fake_input(event_type, key_code as u8, 0, x11rb::NONE, 0, 0, 0)
             .map_err(|e| DesktopError::Input(format!("FakeInput key failed: {e}")))?;
 
-        self.conn.flush()
+        self.conn
+            .flush()
             .map_err(|e| DesktopError::Input(format!("Flush failed: {e}")))?;
 
         Ok(())
     }
 
-    fn scroll(
-        &mut self,
-        x: i32,
-        y: i32,
-        _delta_x: f32,
-        delta_y: f32,
-    ) -> Result<(), DesktopError> {
+    fn scroll(&mut self, x: i32, y: i32, _delta_x: f32, delta_y: f32) -> Result<(), DesktopError> {
         self.mouse_move(x, y)?;
 
         // X11 scroll is button 4 (up) and 5 (down)
@@ -133,7 +132,8 @@ impl InputInjector for X11InputInjector {
                 .map_err(|e| DesktopError::Input(format!("FakeInput scroll release: {e}")))?;
         }
 
-        self.conn.flush()
+        self.conn
+            .flush()
             .map_err(|e| DesktopError::Input(format!("Flush failed: {e}")))?;
 
         Ok(())

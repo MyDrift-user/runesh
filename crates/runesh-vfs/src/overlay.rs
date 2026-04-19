@@ -223,12 +223,7 @@ impl FileProvider for OverlayProvider {
         self.lower.stat(path).await
     }
 
-    async fn read_file(
-        &self,
-        path: &str,
-        offset: u64,
-        length: u64,
-    ) -> Result<Vec<u8>, VfsError> {
+    async fn read_file(&self, path: &str, offset: u64, length: u64) -> Result<Vec<u8>, VfsError> {
         if self.is_deleted(path).await {
             return Err(VfsError::NotFound(path.into()));
         }
@@ -243,12 +238,7 @@ impl FileProvider for OverlayProvider {
         self.lower.read_file(path, offset, length).await
     }
 
-    async fn write_file(
-        &self,
-        path: &str,
-        data: &[u8],
-        offset: u64,
-    ) -> Result<(), VfsError> {
+    async fn write_file(&self, path: &str, data: &[u8], offset: u64) -> Result<(), VfsError> {
         // Copy-on-write: ensure file exists in upper layer
         if !self.has_upper(path).await {
             // Try to copy from lower; if not found, create new
@@ -274,7 +264,13 @@ impl FileProvider for OverlayProvider {
 
         // Write to upper layer
         let upper_file = self.upper_file(path)?;
-        if offset == 0 && data.len() as u64 >= tokio::fs::metadata(&upper_file).await.map(|m| m.len()).unwrap_or(0) {
+        if offset == 0
+            && data.len() as u64
+                >= tokio::fs::metadata(&upper_file)
+                    .await
+                    .map(|m| m.len())
+                    .unwrap_or(0)
+        {
             // Full overwrite
             tokio::fs::write(&upper_file, data).await?;
         } else {

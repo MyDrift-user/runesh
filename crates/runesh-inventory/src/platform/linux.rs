@@ -140,9 +140,7 @@ pub fn collect_battery_linux() -> Option<BatteryInfo> {
             .ok();
 
         let health = match (energy_full, energy_full_design) {
-            (Some(full), Some(design)) if design > 0 => {
-                Some((full as f32 / design as f32) * 100.0)
-            }
+            (Some(full), Some(design)) if design > 0 => Some((full as f32 / design as f32) * 100.0),
             _ => None,
         };
 
@@ -167,7 +165,11 @@ pub fn collect_battery_linux() -> Option<BatteryInfo> {
 pub fn collect_software_linux() -> Vec<InstalledSoftware> {
     // Try dpkg first (Debian/Ubuntu)
     if let Ok(output) = Command::new("dpkg-query")
-        .args(["-W", "-f", "${Package}\t${Version}\t${Maintainer}\t${Installed-Size}\n"])
+        .args([
+            "-W",
+            "-f",
+            "${Package}\t${Version}\t${Maintainer}\t${Installed-Size}\n",
+        ])
         .output()
     {
         if output.status.success() {
@@ -197,7 +199,11 @@ pub fn collect_software_linux() -> Vec<InstalledSoftware> {
 
     // Try rpm (RHEL/Fedora/SUSE)
     if let Ok(output) = Command::new("rpm")
-        .args(["-qa", "--queryformat", "%{NAME}\t%{VERSION}-%{RELEASE}\t%{VENDOR}\t%{INSTALLTIME}\t%{SIZE}\n"])
+        .args([
+            "-qa",
+            "--queryformat",
+            "%{NAME}\t%{VERSION}-%{RELEASE}\t%{VENDOR}\t%{INSTALLTIME}\t%{SIZE}\n",
+        ])
         .output()
     {
         if output.status.success() {

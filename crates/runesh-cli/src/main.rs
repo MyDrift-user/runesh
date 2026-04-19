@@ -11,7 +11,11 @@ pub const DEFAULT_REPO: &str = "https://github.com/MyDrift-user/runesh";
 pub const DEFAULT_NPM_SCOPE: &str = "@mydrift";
 
 #[derive(Parser)]
-#[command(name = "runesh", version, about = "Scaffold and manage RUNESH-based projects")]
+#[command(
+    name = "runesh",
+    version,
+    about = "Scaffold and manage RUNESH-based projects"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -103,14 +107,31 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Init { name, repo, local, runesh_path, yes } => {
+        Commands::Init {
+            name,
+            repo,
+            local,
+            runesh_path,
+            yes,
+        } => {
             if let Err(e) = init::run(name, repo, local, runesh_path, yes) {
                 eprintln!("\x1b[31merror:\x1b[0m {e}");
                 std::process::exit(1);
             }
         }
-        Commands::New { name, description, crates, github, private, org, local, yes } => {
-            if let Err(e) = new_project::run(name, description, crates, github, private, org, local, yes) {
+        Commands::New {
+            name,
+            description,
+            crates,
+            github,
+            private,
+            org,
+            local,
+            yes,
+        } => {
+            if let Err(e) =
+                new_project::run(name, description, crates, github, private, org, local, yes)
+            {
                 eprintln!("\x1b[31merror:\x1b[0m {e}");
                 std::process::exit(1);
             }

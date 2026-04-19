@@ -95,12 +95,7 @@ impl AuditLogger {
     }
 
     /// Log a file system operation.
-    pub async fn log_fs_operation(
-        &self,
-        operation: &str,
-        path: &str,
-        user: Option<&str>,
-    ) {
+    pub async fn log_fs_operation(&self, operation: &str, path: &str, user: Option<&str>) {
         self.log(&AuditEntry {
             timestamp: chrono::Utc::now().to_rfc3339(),
             event: format!("fs_{operation}"),

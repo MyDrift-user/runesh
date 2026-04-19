@@ -3,11 +3,7 @@
 #[cfg(feature = "axum")]
 pub mod request_id {
     use axum::{
-        body::Body,
-        extract::Request,
-        http::HeaderValue,
-        middleware::Next,
-        response::Response,
+        body::Body, extract::Request, http::HeaderValue, middleware::Next, response::Response,
     };
     use uuid::Uuid;
 
@@ -42,12 +38,7 @@ pub mod request_id {
 
 #[cfg(feature = "axum")]
 pub mod logging {
-    use axum::{
-        body::Body,
-        extract::Request,
-        middleware::Next,
-        response::Response,
-    };
+    use axum::{body::Body, extract::Request, middleware::Next, response::Response};
     use std::time::Instant;
 
     /// Middleware that logs each request with method, path, status, and latency.
@@ -76,10 +67,7 @@ pub mod logging {
             ];
             metrics::counter!("http_requests_total", &labels).increment(1);
 
-            let hist_labels = [
-                ("method", method.clone()),
-                ("path", path.clone()),
-            ];
+            let hist_labels = [("method", method.clone()), ("path", path.clone())];
             metrics::histogram!("http_request_duration_seconds", &hist_labels)
                 .record(duration.as_secs_f64());
         }
@@ -123,30 +111,22 @@ pub mod cors {
             .max_age(std::time::Duration::from_secs(3600));
 
         if origins.contains(&"*") {
-            tracing::warn!("CORS configured with wildcard origin -- do not use in production with credentials");
+            tracing::warn!(
+                "CORS configured with wildcard origin -- do not use in production with credentials"
+            );
             layer
                 .allow_origin(tower_http::cors::Any)
                 .allow_credentials(false)
         } else {
-            let parsed: Vec<HeaderValue> = origins
-                .iter()
-                .filter_map(|o| o.parse().ok())
-                .collect();
-            layer
-                .allow_origin(parsed)
-                .allow_credentials(true)
+            let parsed: Vec<HeaderValue> = origins.iter().filter_map(|o| o.parse().ok()).collect();
+            layer.allow_origin(parsed).allow_credentials(true)
         }
     }
 }
 
 #[cfg(feature = "axum")]
 pub mod security_headers {
-    use axum::{
-        body::Body,
-        extract::Request,
-        middleware::Next,
-        response::Response,
-    };
+    use axum::{body::Body, extract::Request, middleware::Next, response::Response};
 
     /// Middleware that sets recommended security headers on every response.
     ///
@@ -197,10 +177,10 @@ pub mod security_headers {
 
 #[cfg(feature = "axum")]
 pub mod health {
-    use axum::{extract::State, http::StatusCode, Json};
-    use serde_json::{json, Value};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use axum::{Json, extract::State, http::StatusCode};
+    use serde_json::{Value, json};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     /// Build version, set at compile time via CARGO_PKG_VERSION.
     const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -225,9 +205,7 @@ pub mod health {
     ///     .with_state(pool);
     /// ```
     #[cfg(feature = "sqlx")]
-    pub async fn health_handler(
-        State(pool): State<sqlx::PgPool>,
-    ) -> (StatusCode, Json<Value>) {
+    pub async fn health_handler(State(pool): State<sqlx::PgPool>) -> (StatusCode, Json<Value>) {
         let db_check = match sqlx::query("SELECT 1").execute(&pool).await {
             Ok(_) => "ok".to_string(),
             Err(e) => format!("error: {e}"),
@@ -305,9 +283,7 @@ pub mod health {
     /// Mount at `/ready` or `/readyz`. Kubernetes uses this to decide whether
     /// to send traffic to the pod.
     #[cfg(feature = "sqlx")]
-    pub async fn readiness_handler(
-        State(pool): State<sqlx::PgPool>,
-    ) -> (StatusCode, Json<Value>) {
+    pub async fn readiness_handler(State(pool): State<sqlx::PgPool>) -> (StatusCode, Json<Value>) {
         let db_check = match sqlx::query("SELECT 1").execute(&pool).await {
             Ok(_) => "ok".to_string(),
             Err(e) => format!("error: {e}"),
@@ -345,11 +321,12 @@ pub mod health {
     /// Returns 200 once the application has finished initialization.
     /// Returns 503 while still starting up. Kubernetes uses this to avoid
     /// killing slow-starting containers.
-    pub async fn startup_handler(
-        State(flag): State<StartupFlag>,
-    ) -> (StatusCode, Json<Value>) {
+    pub async fn startup_handler(State(flag): State<StartupFlag>) -> (StatusCode, Json<Value>) {
         if flag.load(Ordering::Relaxed) {
-            (StatusCode::OK, Json(json!({ "status": "started", "version": VERSION })))
+            (
+                StatusCode::OK,
+                Json(json!({ "status": "started", "version": VERSION })),
+            )
         } else {
             (
                 StatusCode::SERVICE_UNAVAILABLE,

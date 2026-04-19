@@ -16,8 +16,8 @@
 mod axum_handlers {
     use std::sync::Arc;
 
-    use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
     use axum::extract::State;
+    use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
     use axum::response::IntoResponse;
     use base64::Engine;
     use futures_util::{SinkExt, StreamExt};
@@ -230,15 +230,13 @@ mod axum_handlers {
                 }
             }
 
-            DesktopRequest::ListDisplays => {
-                match crate::display::enumerate_displays() {
-                    Ok(displays) => DesktopResponse::Displays { displays },
-                    Err(e) => DesktopResponse::Error {
-                        code: e.error_code().into(),
-                        message: e.to_string(),
-                    },
-                }
-            }
+            DesktopRequest::ListDisplays => match crate::display::enumerate_displays() {
+                Ok(displays) => DesktopResponse::Displays { displays },
+                Err(e) => DesktopResponse::Error {
+                    code: e.error_code().into(),
+                    message: e.to_string(),
+                },
+            },
 
             DesktopRequest::SetQuality { quality } => {
                 if let Some(session_id) = active_session_id {
@@ -250,7 +248,6 @@ mod axum_handlers {
             }
 
             // ── Single-cursor input (backward-compatible) ─────────────
-
             DesktopRequest::MouseMove { x, y, .. } => {
                 handle_mouse_move(state, cursor_id, x, y, injector).await
             }
@@ -260,12 +257,9 @@ mod axum_handlers {
                 pressed,
                 x,
                 y,
-            } => {
-                handle_mouse_button(state, cursor_id, button, pressed, x, y, injector).await
-            }
+            } => handle_mouse_button(state, cursor_id, button, pressed, x, y, injector).await,
 
             // ── Multi-cursor input ────────────────────────────────────
-
             DesktopRequest::MouseMoveCursor {
                 cursor_id: cid,
                 x,
@@ -282,18 +276,11 @@ mod axum_handlers {
                 pressed,
                 x,
                 y,
-            } => {
-                handle_mouse_button(state, &cid, button, pressed, x, y, injector).await
-            }
+            } => handle_mouse_button(state, &cid, button, pressed, x, y, injector).await,
 
             DesktopRequest::SetCursorMode { mode } => {
                 if state.session_manager.multi_cursor_enabled() {
-                    state
-                        .session_manager
-                        .cursor_tracker()
-                        .write()
-                        .await
-                        .mode = mode;
+                    state.session_manager.cursor_tracker().write().await.mode = mode;
                     tracing::info!(mode = ?mode, "Multi-cursor mode changed");
                 }
                 DesktopResponse::SessionStopped {
@@ -302,7 +289,6 @@ mod axum_handlers {
             }
 
             // ── Other events ──────────────────────────────────────────
-
             DesktopRequest::KeyEvent {
                 key_code,
                 pressed,
@@ -375,17 +361,13 @@ mod axum_handlers {
                 DesktopResponse::ClipboardUpdate { content }
             }
 
-            DesktopRequest::SelectDisplay { display_id } => {
-                DesktopResponse::SessionStopped {
-                    session_id: format!("display_{display_id}_selected"),
-                }
-            }
+            DesktopRequest::SelectDisplay { display_id } => DesktopResponse::SessionStopped {
+                session_id: format!("display_{display_id}_selected"),
+            },
 
-            DesktopRequest::RequestKeyFrame => {
-                DesktopResponse::SessionStopped {
-                    session_id: "keyframe_requested".into(),
-                }
-            }
+            DesktopRequest::RequestKeyFrame => DesktopResponse::SessionStopped {
+                session_id: "keyframe_requested".into(),
+            },
         }
     }
 

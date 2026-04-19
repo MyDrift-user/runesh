@@ -33,8 +33,12 @@ pub struct Pagination {
     pub search: Option<String>,
 }
 
-fn default_page() -> i64 { 0 }
-fn default_page_size() -> i64 { 25 }
+fn default_page() -> i64 {
+    0
+}
+fn default_page_size() -> i64 {
+    25
+}
 
 impl Pagination {
     pub fn limit(&self) -> i64 {

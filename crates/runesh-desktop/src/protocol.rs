@@ -15,15 +15,9 @@ pub enum DesktopRequest {
         max_fps: u32,
     },
     /// Stop a desktop sharing session.
-    StopSession {
-        session_id: String,
-    },
+    StopSession { session_id: String },
     /// Mouse move event (single cursor, backward-compatible).
-    MouseMove {
-        x: i32,
-        y: i32,
-        display_id: u32,
-    },
+    MouseMove { x: i32, y: i32, display_id: u32 },
     /// Mouse move with cursor ID (multi-cursor support).
     MouseMoveCursor {
         cursor_id: String,
@@ -40,9 +34,7 @@ pub enum DesktopRequest {
         y: i32,
     },
     /// Set the multi-cursor control mode.
-    SetCursorMode {
-        mode: MultiCursorMode,
-    },
+    SetCursorMode { mode: MultiCursorMode },
     /// Mouse button event.
     MouseButton {
         button: MouseButton,
@@ -66,17 +58,11 @@ pub enum DesktopRequest {
         delta_y: f32,
     },
     /// Set clipboard content.
-    SetClipboard {
-        content: String,
-    },
+    SetClipboard { content: String },
     /// Select which display to capture.
-    SelectDisplay {
-        display_id: u32,
-    },
+    SelectDisplay { display_id: u32 },
     /// Change quality settings.
-    SetQuality {
-        quality: Quality,
-    },
+    SetQuality { quality: Quality },
     /// Request an immediate key frame.
     RequestKeyFrame,
     /// List available displays.
@@ -106,32 +92,17 @@ pub enum DesktopResponse {
         display: DisplayInfo,
     },
     /// Session stopped.
-    SessionStopped {
-        session_id: String,
-    },
+    SessionStopped { session_id: String },
     /// Available displays.
-    Displays {
-        displays: Vec<DisplayInfo>,
-    },
+    Displays { displays: Vec<DisplayInfo> },
     /// Clipboard update from the remote side.
-    ClipboardUpdate {
-        content: String,
-    },
+    ClipboardUpdate { content: String },
     /// Single cursor position update (backward-compatible).
-    CursorUpdate {
-        x: i32,
-        y: i32,
-        visible: bool,
-    },
+    CursorUpdate { x: i32, y: i32, visible: bool },
     /// Multi-cursor position update — all active cursors in one message.
-    CursorPositions {
-        cursors: Vec<CursorState>,
-    },
+    CursorPositions { cursors: Vec<CursorState> },
     /// Error response.
-    Error {
-        code: String,
-        message: String,
-    },
+    Error { code: String, message: String },
 }
 
 /// Display information.

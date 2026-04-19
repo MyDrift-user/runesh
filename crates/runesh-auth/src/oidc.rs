@@ -135,11 +135,7 @@ impl OidcProvider {
             params.push(("client_secret", &secret_val));
         }
 
-        let resp = http
-            .post(&self.token_endpoint)
-            .form(&params)
-            .send()
-            .await?;
+        let resp = http.post(&self.token_endpoint).form(&params).send().await?;
 
         if !resp.status().is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -239,10 +235,7 @@ struct IdTokenClaims {
 ///
 /// We still validate: audience, issuer presence, and enforce a maximum age of
 /// 5 minutes to limit replay window.
-fn decode_id_token_unverified(
-    id_token: &str,
-    audience: &str,
-) -> Result<IdTokenClaims, AuthError> {
+fn decode_id_token_unverified(id_token: &str, audience: &str) -> Result<IdTokenClaims, AuthError> {
     let mut validation = jsonwebtoken::Validation::default();
     validation.insecure_disable_signature_validation();
     validation.set_audience(&[audience]);
@@ -358,8 +351,7 @@ impl OidcSessionStore {
 
         // PKCE
         let verifier_bytes = rand::random::<[u8; 32]>();
-        let code_verifier =
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
+        let code_verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
 
         let mut hasher = Sha256::new();
         hasher.update(code_verifier.as_bytes());
@@ -574,9 +566,10 @@ mod redis_session {
             let json = serde_json::to_string(&stored)
                 .map_err(|e| AuthError::Internal(format!("Failed to serialize session: {e}")))?;
 
-            let mut conn = self.pool.get().await.map_err(|e| {
-                AuthError::Internal(format!("Failed to get Redis connection: {e}"))
-            })?;
+            let mut conn =
+                self.pool.get().await.map_err(|e| {
+                    AuthError::Internal(format!("Failed to get Redis connection: {e}"))
+                })?;
 
             // Store session by ID with TTL
             deadpool_redis::redis::cmd("SET")

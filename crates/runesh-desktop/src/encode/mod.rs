@@ -69,16 +69,20 @@ fn encode_png(frame: &CapturedFrame) -> Result<EncodedFrame, DesktopError> {
 
     let mut png_data = Vec::new();
     {
-        let encoder =
-            image::codecs::png::PngEncoder::new_with_quality(
-                &mut png_data,
-                image::codecs::png::CompressionType::Fast,
-                image::codecs::png::FilterType::Sub,
-            );
+        let encoder = image::codecs::png::PngEncoder::new_with_quality(
+            &mut png_data,
+            image::codecs::png::CompressionType::Fast,
+            image::codecs::png::FilterType::Sub,
+        );
 
         use image::ImageEncoder;
         encoder
-            .write_image(&rgba_data, frame.width, frame.height, image::ExtendedColorType::Rgba8)
+            .write_image(
+                &rgba_data,
+                frame.width,
+                frame.height,
+                image::ExtendedColorType::Rgba8,
+            )
             .map_err(|e| DesktopError::Encoding(format!("PNG encoding failed: {e}")))?;
     }
 
@@ -110,14 +114,17 @@ fn encode_jpeg(frame: &CapturedFrame, quality: Quality) -> Result<EncodedFrame, 
 
     let mut jpeg_data = Vec::new();
     {
-        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
-            &mut jpeg_data,
-            jpeg_quality,
-        );
+        let encoder =
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_data, jpeg_quality);
 
         use image::ImageEncoder;
         encoder
-            .write_image(&rgb_data, frame.width, frame.height, image::ExtendedColorType::Rgb8)
+            .write_image(
+                &rgb_data,
+                frame.width,
+                frame.height,
+                image::ExtendedColorType::Rgb8,
+            )
             .map_err(|e| DesktopError::Encoding(format!("JPEG encoding failed: {e}")))?;
     }
 

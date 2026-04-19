@@ -26,10 +26,7 @@ pub fn run() -> Result<(), String> {
     fs::write(&claude_path, &updated)
         .map_err(|e| format!("Failed to write {}: {e}", claude_path.display()))?;
 
-    println!(
-        "\x1b[32mupdated\x1b[0m {}",
-        claude_path.display()
-    );
+    println!("\x1b[32mupdated\x1b[0m {}", claude_path.display());
     Ok(())
 }
 

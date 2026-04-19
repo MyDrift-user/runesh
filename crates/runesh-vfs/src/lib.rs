@@ -60,17 +60,17 @@
 //! registry.mount("cs101", config, Arc::new(overlay), cache).await?;
 //! ```
 
-pub mod error;
-pub mod config;
-pub mod provider;
-pub mod overlay;
 pub mod cache;
+pub mod config;
+pub mod error;
+pub mod overlay;
 pub mod platform;
+pub mod provider;
 pub mod registry;
 
+pub use cache::CacheManager;
 pub use config::{ProviderRole, VfsConfig, WriteMode};
 pub use error::VfsError;
-pub use provider::{FileProvider, VfsEntry};
-pub use cache::CacheManager;
-pub use registry::MountRegistry;
 pub use overlay::OverlayProvider;
+pub use provider::{FileProvider, VfsEntry};
+pub use registry::MountRegistry;

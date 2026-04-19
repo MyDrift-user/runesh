@@ -17,16 +17,17 @@ pub async fn create_zip_archive(
         resolved_paths.push(policy.resolve_path(p)?);
     }
 
-    let root = policy.root.canonicalize().map_err(|e| {
-        RemoteError::Internal(format!("Failed to canonicalize root: {e}"))
-    })?;
+    let root = policy
+        .root
+        .canonicalize()
+        .map_err(|e| RemoteError::Internal(format!("Failed to canonicalize root: {e}")))?;
 
-    let output_path = std::env::temp_dir().join(format!("runesh-archive-{}.zip", uuid::Uuid::new_v4()));
+    let output_path =
+        std::env::temp_dir().join(format!("runesh-archive-{}.zip", uuid::Uuid::new_v4()));
     let output_path_clone = output_path.clone();
 
     tokio::task::spawn_blocking(move || {
-        let file = std::fs::File::create(&output_path_clone)
-            .map_err(|e| RemoteError::Io(e))?;
+        let file = std::fs::File::create(&output_path_clone).map_err(|e| RemoteError::Io(e))?;
         let mut zip = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated)
@@ -54,8 +55,7 @@ pub async fn create_zip_archive(
         Ok::<_, RemoteError>(())
     })
     .await
-    .map_err(|e| RemoteError::Internal(format!("Archive task failed: {e}")))?
-    ?;
+    .map_err(|e| RemoteError::Internal(format!("Archive task failed: {e}")))??;
 
     Ok(output_path)
 }
@@ -67,7 +67,10 @@ fn add_dir_to_zip(
     root: &Path,
     options: zip::write::SimpleFileOptions,
 ) -> Result<(), RemoteError> {
-    for entry in walkdir::WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         let path = entry.path();
         let relative = path
             .strip_prefix(root)

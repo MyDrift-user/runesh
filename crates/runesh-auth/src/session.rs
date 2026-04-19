@@ -90,7 +90,13 @@ impl SessionConfig {
 
     /// Build a Set-Cookie header value for the refresh token.
     pub fn refresh_cookie(&self, token: &str, max_age_secs: i64) -> String {
-        self.build_cookie(&self.refresh_cookie_name(), token, max_age_secs, true, "Strict")
+        self.build_cookie(
+            &self.refresh_cookie_name(),
+            token,
+            max_age_secs,
+            true,
+            "Strict",
+        )
     }
 
     /// Build a Set-Cookie header value for the CSRF token.
@@ -155,8 +161,8 @@ pub fn generate_csrf_token(secret: &str, access_token: &str) -> String {
     let token_hash = hex::encode(token_hasher.finalize());
 
     // HMAC-SHA256(secret, random + token_hash)
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .expect("HMAC accepts any key length");
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
     mac.update(random.as_bytes());
     mac.update(token_hash.as_bytes());
     let hmac_result = hex::encode(mac.finalize().into_bytes());
@@ -182,8 +188,8 @@ pub fn verify_csrf_token(csrf_token: &str, secret: &str, access_token: &str) -> 
     token_hasher.update(access_token.as_bytes());
     let token_hash = hex::encode(token_hasher.finalize());
 
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .expect("HMAC accepts any key length");
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
     mac.update(random.as_bytes());
     mac.update(token_hash.as_bytes());
     let expected_hmac = hex::encode(mac.finalize().into_bytes());
@@ -258,14 +264,24 @@ pub fn clear_session_cookies(
 
 /// Extract the access token from cookies in an Axum request.
 #[cfg(feature = "axum")]
-pub fn extract_access_token(cookies: &axum_extra::extract::CookieJar, config: &SessionConfig) -> Option<String> {
-    cookies.get(&config.access_cookie_name()).map(|c| c.value().to_string())
+pub fn extract_access_token(
+    cookies: &axum_extra::extract::CookieJar,
+    config: &SessionConfig,
+) -> Option<String> {
+    cookies
+        .get(&config.access_cookie_name())
+        .map(|c| c.value().to_string())
 }
 
 /// Extract the refresh token from cookies in an Axum request.
 #[cfg(feature = "axum")]
-pub fn extract_refresh_token(cookies: &axum_extra::extract::CookieJar, config: &SessionConfig) -> Option<String> {
-    cookies.get(&config.refresh_cookie_name()).map(|c| c.value().to_string())
+pub fn extract_refresh_token(
+    cookies: &axum_extra::extract::CookieJar,
+    config: &SessionConfig,
+) -> Option<String> {
+    cookies
+        .get(&config.refresh_cookie_name())
+        .map(|c| c.value().to_string())
 }
 
 /// Validate CSRF token: compare the cookie value with the X-CSRF-Token header.
@@ -276,7 +292,9 @@ pub fn validate_csrf(
     headers: &axum::http::HeaderMap,
     config: &SessionConfig,
 ) -> bool {
-    let cookie_csrf = cookies.get(&config.csrf_cookie_name()).map(|c| c.value().to_string());
+    let cookie_csrf = cookies
+        .get(&config.csrf_cookie_name())
+        .map(|c| c.value().to_string());
     let header_csrf = headers
         .get("x-csrf-token")
         .and_then(|v| v.to_str().ok())

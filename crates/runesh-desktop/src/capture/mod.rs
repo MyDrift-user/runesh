@@ -40,7 +40,9 @@ pub fn create_capturer(display_id: u32) -> Result<Box<dyn ScreenCapture>, Deskto
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         let _ = display_id;
-        Err(DesktopError::Unsupported("No screen capture on this platform".into()))
+        Err(DesktopError::Unsupported(
+            "No screen capture on this platform".into(),
+        ))
     }
 }
 

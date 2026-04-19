@@ -2,10 +2,10 @@
 //!
 //! Find, start, and stop companion processes (agents, services, etc.).
 
-use std::path::PathBuf;
-use std::process::Command;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
+use std::process::Command;
 
 /// Find a binary by name, checking:
 /// 1. Same directory as the current executable
@@ -66,10 +66,7 @@ pub fn is_process_running(name: &str) -> bool {
 
     #[cfg(not(windows))]
     {
-        let output = Command::new("pgrep")
-            .arg("-x")
-            .arg(name)
-            .output();
+        let output = Command::new("pgrep").arg("-x").arg(name).output();
         matches!(output, Ok(out) if out.status.success())
     }
 }

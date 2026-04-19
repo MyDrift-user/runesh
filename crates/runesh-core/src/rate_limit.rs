@@ -106,7 +106,12 @@ impl RedisRateLimiter {
     /// - `max_requests`: maximum requests allowed per key within the window.
     /// - `window_secs`: window duration in seconds.
     /// - `key_prefix`: Redis key prefix (e.g. `"rl:"`) to namespace rate limit keys.
-    pub fn new(pool: deadpool_redis::Pool, max_requests: usize, window_secs: u64, key_prefix: &str) -> Self {
+    pub fn new(
+        pool: deadpool_redis::Pool,
+        max_requests: usize,
+        window_secs: u64,
+        key_prefix: &str,
+    ) -> Self {
         Self {
             pool,
             max_requests,
@@ -249,9 +254,9 @@ pub fn extract_client_ip(req: &axum::extract::Request, trust_proxy: bool) -> Str
     }
 
     // Fall through: direct socket address (cannot be spoofed).
-    if let Some(connect_info) =
-        req.extensions()
-            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+    if let Some(connect_info) = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
     {
         return connect_info.0.ip().to_string();
     }

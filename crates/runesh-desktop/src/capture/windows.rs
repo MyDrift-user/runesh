@@ -2,12 +2,12 @@
 //!
 //! This is the fastest and most efficient way to capture the screen on Windows 8+.
 
-use windows::core::Interface;
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::*;
 use windows::Win32::Graphics::Direct3D11::*;
-use windows::Win32::Graphics::Dxgi::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
+use windows::Win32::Graphics::Dxgi::*;
+use windows::core::Interface;
 
 use super::{CapturedFrame, ScreenCapture};
 use crate::error::DesktopError;
@@ -38,7 +38,8 @@ impl DxgiCapturer {
                 .EnumOutputs(display_id)
                 .map_err(|_| DesktopError::DisplayNotFound(display_id))?;
 
-            let output_desc = output.GetDesc()
+            let output_desc = output
+                .GetDesc()
                 .map_err(|e| DesktopError::Capture(format!("GetDesc: {e}")))?;
 
             let rect = output_desc.DesktopCoordinates;
@@ -63,10 +64,12 @@ impl DxgiCapturer {
             .map_err(|e| DesktopError::Capture(format!("D3D11CreateDevice: {e}")))?;
 
             let device = device.ok_or_else(|| DesktopError::Capture("No D3D11 device".into()))?;
-            let context = context.ok_or_else(|| DesktopError::Capture("No D3D11 context".into()))?;
+            let context =
+                context.ok_or_else(|| DesktopError::Capture("No D3D11 context".into()))?;
 
             // Create desktop duplication
-            let output1: IDXGIOutput1 = output.cast()
+            let output1: IDXGIOutput1 = output
+                .cast()
                 .map_err(|e| DesktopError::Capture(format!("IDXGIOutput1 cast: {e}")))?;
 
             let output_dup = output1
@@ -95,7 +98,10 @@ impl DxgiCapturer {
             MipLevels: 1,
             ArraySize: 1,
             Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
             Usage: D3D11_USAGE_STAGING,
             BindFlags: 0,
             CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
@@ -127,7 +133,8 @@ impl ScreenCapture for DxgiCapturer {
                 .map_err(|e| DesktopError::Capture(format!("AcquireNextFrame: {e}")))?;
 
             let resource = resource.ok_or_else(|| DesktopError::Capture("No resource".into()))?;
-            let texture: ID3D11Texture2D = resource.cast()
+            let texture: ID3D11Texture2D = resource
+                .cast()
                 .map_err(|e| DesktopError::Capture(format!("Texture cast: {e}")))?;
 
             let staging = self.staging_texture.as_ref().unwrap();
@@ -153,7 +160,8 @@ impl ScreenCapture for DxgiCapturer {
             }
 
             self.context.Unmap(staging, 0);
-            self.output_dup.ReleaseFrame()
+            self.output_dup
+                .ReleaseFrame()
                 .map_err(|e| DesktopError::Capture(format!("ReleaseFrame: {e}")))?;
 
             let timestamp = std::time::SystemTime::now()

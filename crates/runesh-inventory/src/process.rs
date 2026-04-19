@@ -17,7 +17,11 @@ pub fn collect_processes(sys: &System) -> Vec<ProcessInfo> {
                     .exe()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_default(),
-                cmd: proc_info.cmd().iter().map(|s| s.to_string_lossy().to_string()).collect(),
+                cmd: proc_info
+                    .cmd()
+                    .iter()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .collect(),
                 status,
                 cpu_usage: proc_info.cpu_usage(),
                 memory_bytes: proc_info.memory(),

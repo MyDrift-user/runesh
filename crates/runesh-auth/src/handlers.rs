@@ -14,11 +14,11 @@ use std::sync::Arc;
 
 #[cfg(feature = "axum")]
 use axum::{
+    Json, Router,
     extract::{Query, State},
     http::{Response, StatusCode},
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
 };
 
 #[cfg(feature = "axum")]
@@ -84,41 +84,54 @@ pub fn auth_router<S: AuthStore + 'static>() -> Router<Arc<AuthState<S>>> {
 
 /// Return OIDC config the frontend needs to show a login button.
 #[cfg(feature = "axum")]
-async fn oidc_config<S: AuthStore>(
-    State(state): State<Arc<AuthState<S>>>,
-) -> impl IntoResponse {
+async fn oidc_config<S: AuthStore>(State(state): State<Arc<AuthState<S>>>) -> impl IntoResponse {
     match &state.provider {
         Some(p) => Json(p.frontend_config()).into_response(),
-        None => (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
-            "error": "OIDC not configured"
-        }))).into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "OIDC not configured"
+            })),
+        )
+            .into_response(),
     }
 }
 
 /// Start the OIDC flow. Returns a JSON with the authorization URL.
 /// Frontend redirects the browser to this URL.
 #[cfg(feature = "axum")]
-async fn login_start<S: AuthStore>(
-    State(state): State<Arc<AuthState<S>>>,
-) -> impl IntoResponse {
+async fn login_start<S: AuthStore>(State(state): State<Arc<AuthState<S>>>) -> impl IntoResponse {
     let provider = match &state.provider {
         Some(p) => p,
-        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
-            "error": "OIDC not configured"
-        }))).into_response(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "OIDC not configured"
+                })),
+            )
+                .into_response();
+        }
     };
 
     let (session_id, auth_url) = match state.sessions.start(provider, None).await {
         Ok(v) => v,
-        Err(_) => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
-            "error": "Too many pending login sessions, try again later"
-        }))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Too many pending login sessions, try again later"
+                })),
+            )
+                .into_response();
+        }
     };
 
     Json(serde_json::json!({
         "session_id": session_id,
         "auth_url": auth_url,
-    })).into_response()
+    }))
+    .into_response()
 }
 
 /// OIDC callback. Exchanges code for tokens, creates user, sets cookies, redirects to /.
@@ -158,13 +171,22 @@ async fn callback<S: AuthStore>(
         Ok(u) => u,
         Err(e) => {
             tracing::error!(error = %e, "Failed to create/update user");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "User provisioning failed").into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "User provisioning failed",
+            )
+                .into_response();
         }
     };
 
     // Issue tokens
     let (access_token, _) = match token::issue_access_token(
-        &state.token_config, &user.id, &user.email, &user.name, &user.role, &user.permissions,
+        &state.token_config,
+        &user.id,
+        &user.email,
+        &user.name,
+        &user.role,
+        &user.permissions,
     ) {
         Ok(t) => t,
         Err(e) => {
@@ -177,7 +199,11 @@ async fn callback<S: AuthStore>(
     let refresh_hash = token::hash_refresh_token(&refresh_token);
     let expires = token::refresh_token_expiry(&state.token_config);
 
-    if let Err(e) = state.store.store_refresh_token(&user.id, &refresh_hash, expires).await {
+    if let Err(e) = state
+        .store
+        .store_refresh_token(&user.id, &refresh_hash, expires)
+        .await
+    {
         tracing::error!(error = %e, "Failed to store refresh token");
         return (StatusCode::INTERNAL_SERVER_ERROR, "Session creation failed").into_response();
     }
@@ -187,8 +213,11 @@ async fn callback<S: AuthStore>(
     // Build redirect response with cookies
     let mut response = Response::builder().status(StatusCode::FOUND);
     session::set_session_cookies(
-        &mut response, &state.session_config, &state.token_config,
-        &access_token, &refresh_token,
+        &mut response,
+        &state.session_config,
+        &state.token_config,
+        &access_token,
+        &refresh_token,
     );
 
     response
@@ -205,14 +234,30 @@ async fn password_login<S: AuthStore>(
     jar: CookieJar,
     Json(body): Json<LoginBody>,
 ) -> impl IntoResponse {
-    let user = match state.store.verify_password(&body.email, &body.password).await {
+    let user = match state
+        .store
+        .verify_password(&body.email, &body.password)
+        .await
+    {
         Ok(Some(u)) => u,
-        Ok(None) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-            "error": "Invalid email or password"
-        }))).into_response(),
-        Err(_) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-            "error": "Invalid email or password"
-        }))).into_response(),
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Invalid email or password"
+                })),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Invalid email or password"
+                })),
+            )
+                .into_response();
+        }
     };
 
     issue_session_response(&state, &user).await
@@ -226,9 +271,15 @@ async fn refresh<S: AuthStore>(
 ) -> impl IntoResponse {
     let refresh_token = match session::extract_refresh_token(&jar, &state.session_config) {
         Some(t) => t,
-        None => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-            "error": "No refresh token"
-        }))).into_response(),
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "No refresh token"
+                })),
+            )
+                .into_response();
+        }
     };
 
     let hash = token::hash_refresh_token(&refresh_token);
@@ -236,17 +287,29 @@ async fn refresh<S: AuthStore>(
     // Consume old refresh token (single-use)
     let user_id = match state.store.consume_refresh_token(&hash).await {
         Ok(id) => id,
-        Err(_) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-            "error": "Invalid or expired refresh token"
-        }))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Invalid or expired refresh token"
+                })),
+            )
+                .into_response();
+        }
     };
 
     // Load current user state
     let user = match state.store.get_user_by_id(&user_id).await {
         Ok(u) => u,
-        Err(_) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-            "error": "User not found"
-        }))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "User not found"
+                })),
+            )
+                .into_response();
+        }
     };
 
     issue_session_response(&state, &user).await
@@ -282,23 +345,41 @@ async fn me<S: AuthStore>(
 ) -> impl IntoResponse {
     let access_token = match session::extract_access_token(&jar, &state.session_config) {
         Some(t) => t,
-        None => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-            "error": "Not authenticated"
-        }))).into_response(),
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Not authenticated"
+                })),
+            )
+                .into_response();
+        }
     };
 
     let claims = match token::validate_access_token(&access_token, &state.token_config.secret) {
         Ok(c) => c,
-        Err(_) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-            "error": "Invalid or expired session"
-        }))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Invalid or expired session"
+                })),
+            )
+                .into_response();
+        }
     };
 
     let user = match state.store.get_user_by_id(&claims.sub).await {
         Ok(u) => u,
-        Err(_) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-            "error": "User not found"
-        }))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "User not found"
+                })),
+            )
+                .into_response();
+        }
     };
 
     Json(serde_json::json!({
@@ -308,7 +389,8 @@ async fn me<S: AuthStore>(
         "role": user.role,
         "avatar_url": user.avatar_url,
         "permissions": user.permissions,
-    })).into_response()
+    }))
+    .into_response()
 }
 
 /// Helper: issue tokens, set cookies, return JSON response.
@@ -318,14 +400,23 @@ async fn issue_session_response<S: AuthStore>(
     user: &AuthUser,
 ) -> axum::response::Response {
     let (access_token, _) = match token::issue_access_token(
-        &state.token_config, &user.id, &user.email, &user.name, &user.role, &user.permissions,
+        &state.token_config,
+        &user.id,
+        &user.email,
+        &user.name,
+        &user.role,
+        &user.permissions,
     ) {
         Ok(t) => t,
         Err(e) => {
             tracing::error!(error = %e, "Failed to issue token");
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Token generation failed"
-            }))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Token generation failed"
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -333,19 +424,30 @@ async fn issue_session_response<S: AuthStore>(
     let refresh_hash = token::hash_refresh_token(&refresh_token);
     let expires = token::refresh_token_expiry(&state.token_config);
 
-    if let Err(e) = state.store.store_refresh_token(&user.id, &refresh_hash, expires).await {
+    if let Err(e) = state
+        .store
+        .store_refresh_token(&user.id, &refresh_hash, expires)
+        .await
+    {
         tracing::error!(error = %e, "Failed to store refresh token");
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-            "error": "Session creation failed"
-        }))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "Session creation failed"
+            })),
+        )
+            .into_response();
     }
 
     let _ = state.store.on_login(&user.id).await;
 
     let mut response = Response::builder().status(StatusCode::OK);
     let csrf = session::set_session_cookies(
-        &mut response, &state.session_config, &state.token_config,
-        &access_token, &refresh_token,
+        &mut response,
+        &state.session_config,
+        &state.token_config,
+        &access_token,
+        &refresh_token,
     );
 
     let body = serde_json::json!({
@@ -362,7 +464,9 @@ async fn issue_session_response<S: AuthStore>(
 
     response
         .header("Content-Type", "application/json")
-        .body(axum::body::Body::from(serde_json::to_string(&body).unwrap()))
+        .body(axum::body::Body::from(
+            serde_json::to_string(&body).unwrap(),
+        ))
         .unwrap()
         .into_response()
 }

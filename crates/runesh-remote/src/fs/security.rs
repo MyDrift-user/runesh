@@ -87,26 +87,27 @@ impl FsPolicy {
         // Canonicalize to resolve symlinks and normalize
         // For new files that don't exist yet, canonicalize the parent
         let canonical = if full_path.exists() {
-            full_path.canonicalize().map_err(|e| {
-                RemoteError::Internal(format!("Failed to canonicalize path: {e}"))
-            })?
+            full_path
+                .canonicalize()
+                .map_err(|e| RemoteError::Internal(format!("Failed to canonicalize path: {e}")))?
         } else {
             let parent = full_path.parent().ok_or_else(|| {
                 RemoteError::BadRequest("Invalid path: no parent directory".into())
             })?;
-            let file_name = full_path.file_name().ok_or_else(|| {
-                RemoteError::BadRequest("Invalid path: no file name".into())
-            })?;
-            let canonical_parent = parent.canonicalize().map_err(|e| {
-                RemoteError::NotFound(format!("Parent directory not found: {e}"))
-            })?;
+            let file_name = full_path
+                .file_name()
+                .ok_or_else(|| RemoteError::BadRequest("Invalid path: no file name".into()))?;
+            let canonical_parent = parent
+                .canonicalize()
+                .map_err(|e| RemoteError::NotFound(format!("Parent directory not found: {e}")))?;
             canonical_parent.join(file_name)
         };
 
         // Ensure the canonical path is within the root
-        let canonical_root = self.root.canonicalize().map_err(|e| {
-            RemoteError::Internal(format!("Failed to canonicalize root: {e}"))
-        })?;
+        let canonical_root = self
+            .root
+            .canonicalize()
+            .map_err(|e| RemoteError::Internal(format!("Failed to canonicalize root: {e}")))?;
 
         if !canonical.starts_with(&canonical_root) {
             tracing::warn!(

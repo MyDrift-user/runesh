@@ -18,19 +18,17 @@
 mod axum_handlers {
     use axum::Json;
 
-    use crate::collector::{collect_inventory, collect_quick_inventory, CollectorConfig};
+    use crate::collector::{CollectorConfig, collect_inventory, collect_quick_inventory};
     use crate::error::InventoryError;
     use crate::models::*;
     use crate::{cpu, disk, memory, network, process, software};
 
     /// GET /api/inventory — Full system inventory.
     pub async fn get_full_inventory() -> Result<Json<SystemInventory>, InventoryError> {
-        let inventory = tokio::task::spawn_blocking(|| {
-            collect_inventory(&CollectorConfig::default())
-        })
-        .await
-        .map_err(|e| InventoryError::Internal(format!("Task join error: {e}")))?
-        ?;
+        let inventory =
+            tokio::task::spawn_blocking(|| collect_inventory(&CollectorConfig::default()))
+                .await
+                .map_err(|e| InventoryError::Internal(format!("Task join error: {e}")))??;
 
         Ok(Json(inventory))
     }
@@ -39,8 +37,7 @@ mod axum_handlers {
     pub async fn get_quick_inventory() -> Result<Json<SystemInventory>, InventoryError> {
         let inventory = tokio::task::spawn_blocking(collect_quick_inventory)
             .await
-            .map_err(|e| InventoryError::Internal(format!("Task join error: {e}")))?
-            ?;
+            .map_err(|e| InventoryError::Internal(format!("Task join error: {e}")))??;
 
         Ok(Json(inventory))
     }
