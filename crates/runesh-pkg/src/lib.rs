@@ -11,10 +11,12 @@ pub mod brew;
 pub mod detect;
 pub mod dnf;
 pub mod runner;
+pub mod winget;
 
 pub use apt::AptManager;
 pub use brew::BrewManager;
 pub use dnf::DnfManager;
+pub use winget::WingetManager;
 
 /// Information about an installed or available package.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +73,7 @@ pub fn system_package_manager() -> Option<Box<dyn PackageManager>> {
         detect::PkgManagerType::Apt => Some(Box::new(AptManager)),
         detect::PkgManagerType::Dnf | detect::PkgManagerType::Yum => Some(Box::new(DnfManager)),
         detect::PkgManagerType::Brew => Some(Box::new(BrewManager)),
+        detect::PkgManagerType::Winget => Some(Box::new(WingetManager)),
         _ => None,
     }
 }

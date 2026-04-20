@@ -1,0 +1,24 @@
+[package]
+name = "runesh-winget"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "WinGet REST source server: host a private winget package repository with upload, versioning, and installer distribution"
+
+[features]
+default = ["axum"]
+axum = ["dep:axum", "dep:tokio", "dep:tower"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+sha2 = "0.10"
+
+# Optional: Axum HTTP handlers
+axum = { version = "0.8", optional = true }
+tokio = { workspace = true, optional = true }
+tower = { version = "0.5", optional = true }

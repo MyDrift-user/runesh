@@ -5789,6 +5789,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "runesh-winget"
+version = "0.16.0"
+dependencies = [
+ "axum",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "runesh-workload"
 version = "0.16.0"
 dependencies = [
