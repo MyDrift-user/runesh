@@ -49,7 +49,8 @@ RUNESH/
 ├── crates/
 │   ├── runesh-acl/                      # Tailscale-compatible HuJSON ACL parser + evaluator + diff
 │   ├── runesh-audit/                    # Append-only hash-chained audit log with tamper detection
-│   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait
+│   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait + mesh enrollment
+│   ├── runesh-baseline/                 # Declarative baselines with inheritance, drift detection, enforcement
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
 │   ├── helvetia-agentd/                 # Helvetia agent daemon (consumer binary, will move to own repo)
 │   ├── helvetia-server/                 # Helvetia coordination server (consumer binary, will move to own repo)
@@ -59,6 +60,7 @@ RUNESH/
 │   ├── runesh-mesh/                     # WireGuard mesh: key management, peer maps, IP allocation, tunnel orchestration
 │   ├── runesh-monitor/                  # Check engine (HTTP/TCP/ping/disk/command), alert state machine
 │   ├── runesh-notify/                   # Notification dispatch: webhook, Slack, Discord, Ntfy, email (SMTP)
+│   ├── runesh-pkg/                      # Cross-platform package manager trait: apt, dnf, pacman, winget, brew
 │   ├── runesh-proxy/                    # Reverse proxy: resource config, routing, access control, load balancing
 │   ├── runesh-relay/                    # DERP relay: forwards encrypted WireGuard packets between peers over TCP
 │   ├── runesh-inventory/                # Hardware/software inventory collection (cross-platform)
@@ -66,6 +68,7 @@ RUNESH/
 │   ├── runesh-remote/                   # Remote file explorer + CLI over WebSocket with PTY
 │   ├── runesh-tauri/                    # Tauri helpers (tray, process mgmt, config, elevation)
 │   ├── runesh-telemetry/                # Sentry/GlitchTip error reporting + tracing layer
+│   ├── runesh-vault/                    # Encrypted key-value secret store with rotation and JIT decryption
 │   ├── runesh-tun/                      # Cross-platform TUN device (Windows wintun + Linux)
 │   └── runesh-vfs/                      # Virtual filesystem with cloud provider + overlay writes
 ├── templates/                           # Dockerfile + compose.yaml for new projects
