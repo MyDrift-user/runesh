@@ -8,8 +8,16 @@ use super::InputInjector;
 use crate::error::DesktopError;
 use crate::protocol::MouseButton;
 
+/// Wrapper to allow CGEventSource across thread boundaries.
+/// CGEventSource is a CoreFoundation type and is safe to send between threads.
+struct SendableEventSource(CGEventSource);
+
+// SAFETY: CGEventSource is a CFType reference-counted object.
+// CoreFoundation types are safe to send across threads.
+unsafe impl Send for SendableEventSource {}
+
 pub struct MacOsInputInjector {
-    event_source: CGEventSource,
+    event_source: SendableEventSource,
 }
 
 impl MacOsInputInjector {
@@ -17,7 +25,9 @@ impl MacOsInputInjector {
         let event_source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
             .expect("Failed to create CGEventSource");
 
-        Self { event_source }
+        Self {
+            event_source: SendableEventSource(event_source),
+        }
     }
 }
 
@@ -25,7 +35,7 @@ impl InputInjector for MacOsInputInjector {
     fn mouse_move(&mut self, x: i32, y: i32) -> Result<(), DesktopError> {
         let point = CGPoint::new(x as f64, y as f64);
         let event = CGEvent::new_mouse_event(
-            self.event_source.clone(),
+            self.event_source.0.clone(),
             CGEventType::MouseMoved,
             point,
             CGMouseButton::Left,
@@ -55,7 +65,7 @@ impl InputInjector for MacOsInputInjector {
         };
 
         let event =
-            CGEvent::new_mouse_event(self.event_source.clone(), event_type, point, cg_button)
+            CGEvent::new_mouse_event(self.event_source.0.clone(), event_type, point, cg_button)
                 .map_err(|_| DesktopError::Input("Failed to create mouse button event".into()))?;
 
         event.post(CGEventTapLocation::HID);
@@ -69,7 +79,7 @@ impl InputInjector for MacOsInputInjector {
         _modifiers: u8,
     ) -> Result<(), DesktopError> {
         let event =
-            CGEvent::new_keyboard_event(self.event_source.clone(), key_code as u16, pressed)
+            CGEvent::new_keyboard_event(self.event_source.0.clone(), key_code as u16, pressed)
                 .map_err(|_| DesktopError::Input("Failed to create keyboard event".into()))?;
 
         event.post(CGEventTapLocation::HID);
@@ -84,7 +94,7 @@ impl InputInjector for MacOsInputInjector {
         delta_y: f32,
     ) -> Result<(), DesktopError> {
         let event = CGEvent::new_scroll_event(
-            self.event_source.clone(),
+            self.event_source.0.clone(),
             core_graphics::event::ScrollEventUnit::PIXEL,
             1, // wheel count
             delta_y as i32,

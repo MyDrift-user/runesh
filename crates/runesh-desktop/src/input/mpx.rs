@@ -9,9 +9,13 @@
 
 #[cfg(target_os = "linux")]
 mod mpx_impl {
-    use x11rb::connection::Connection;
-    use x11rb::protocol::xinput::{self, ConnectionExt as XInputExt};
+    use x11rb::connection::{Connection, RequestConnection};
+    use x11rb::protocol::xinput::{
+        self, ConnectionExt as XInputExt, HierarchyChange, HierarchyChangeData,
+        HierarchyChangeDataAddMaster, HierarchyChangeDataRemoveMaster,
+    };
     use x11rb::protocol::xproto::*;
+    use x11rb::protocol::xtest::ConnectionExt as XtestExt;
 
     use crate::error::DesktopError;
     use crate::protocol::MouseButton;
@@ -46,14 +50,19 @@ mod mpx_impl {
             let screen = &conn.setup().roots[screen_num];
             let root = screen.root;
 
-            // Create a new master device pair
-            let name_bytes = name.as_bytes();
-            conn.xinput_create_master_device(
-                name_bytes.len() as u16,
-                name_bytes,
-                true, // send_core: allow this device to generate core events
-            )
-            .map_err(|e| DesktopError::Input(format!("XICreateMasterDevice failed: {e}")))?;
+            // Create a new master device pair via XIChangeHierarchy
+            let add_master = HierarchyChangeDataAddMaster {
+                send_core: true, // allow this device to generate core events
+                enable: true,
+                name: name.as_bytes().to_vec(),
+            };
+            let change = HierarchyChange {
+                len: 0, // serialized automatically
+                data: HierarchyChangeData::AddMaster(add_master),
+            };
+            conn.xinput_xi_change_hierarchy(&[change]).map_err(|e| {
+                DesktopError::Input(format!("XIChangeHierarchy AddMaster failed: {e}"))
+            })?;
 
             conn.flush()
                 .map_err(|e| DesktopError::Input(format!("X11 flush failed: {e}")))?;
@@ -154,13 +163,18 @@ mod mpx_impl {
 
         /// Destroy this virtual cursor.
         fn destroy(&self) {
-            // Remove the master device — this removes the cursor from screen
-            let _ = self.conn.xinput_remove_master_device(
-                self.pointer_id,
-                xinput::ChangeMode::FLOAT, // float slave devices
-                0,                         // return_pointer (unused when floating)
-                0,                         // return_keyboard (unused when floating)
-            );
+            // Remove the master device via XIChangeHierarchy
+            let remove = HierarchyChangeDataRemoveMaster {
+                deviceid: self.pointer_id,
+                return_mode: xinput::ChangeMode::FLOAT,
+                return_pointer: 0,
+                return_keyboard: 0,
+            };
+            let change = HierarchyChange {
+                len: 0,
+                data: HierarchyChangeData::RemoveMaster(remove),
+            };
+            let _ = self.conn.xinput_xi_change_hierarchy(&[change]);
             let _ = self.conn.flush();
             tracing::info!(name = %self.name, "MPX: Destroyed virtual cursor");
         }

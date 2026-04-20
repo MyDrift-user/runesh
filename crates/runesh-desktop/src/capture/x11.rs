@@ -1,6 +1,6 @@
 //! Linux X11 screen capture using XShm (shared memory extension).
 
-use x11rb::connection::Connection;
+use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::shm::{self, ConnectionExt as ShmExt};
 use x11rb::protocol::xproto::*;
 
