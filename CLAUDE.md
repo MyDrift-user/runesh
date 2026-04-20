@@ -80,8 +80,12 @@ RUNESH/
 │   ├── runesh-telemetry/                # Sentry/GlitchTip error reporting + tracing layer
 │   ├── runesh-stun/                     # NAT traversal: STUN, hole punching, connection strategy
 │   ├── runesh-vault/                    # Encrypted key-value secret store with rotation and JIT decryption
-│   ├── runesh-winget/                   # WinGet REST source server: private package repository for Windows
-│   ├── runesh-workload/                 # Uniform VM/container/K8s workload driver trait
+│   ├── runesh-docker/                   # Docker/Podman workload driver via bollard
+│   ├── runesh-hyperv/                   # Hyper-V workload driver via PowerShell (Windows)
+│   ├── runesh-proxmox/                  # Proxmox VE workload driver via REST API
+│   ├── runesh-vmware/                   # VMware vCenter/ESXi workload driver via REST API
+│   ├── runesh-winget/                   # WinGet REST source server
+│   ├── runesh-workload/                 # Workload driver trait (docker/proxmox/vmware/hyperv)
 │   ├── runesh-tun/                      # Cross-platform TUN device (Windows wintun + Linux)
 │   └── runesh-vfs/                      # Virtual filesystem with cloud provider + overlay writes
 ├── templates/                           # Dockerfile + compose.yaml for new projects

@@ -1,10 +1,8 @@
 //! Uniform workload driver trait for VMs, containers, and Kubernetes.
-
-#[cfg(feature = "docker")]
-pub mod docker;
-
-#[cfg(feature = "docker")]
-pub use docker::DockerDriver;
+//!
+//! This crate defines the trait. Actual driver implementations live in
+//! separate crates: runesh-docker, runesh-k8s, runesh-hyperv,
+//! runesh-proxmox, runesh-vmware.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

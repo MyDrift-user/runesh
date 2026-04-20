@@ -1,0 +1,17 @@
+[package]
+name = "runesh-hyperv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Hyper-V workload driver via PowerShell: VMs, snapshots, live migration"
+
+[dependencies]
+tokio = { workspace = true, features = ["process"] }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+runesh-workload = { path = "../runesh-workload" }

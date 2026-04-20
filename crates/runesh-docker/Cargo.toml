@@ -1,0 +1,21 @@
+[package]
+name = "runesh-docker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Docker/Podman workload driver via bollard: list, create, start, stop, exec, logs, resize"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+bollard = "0.18"
+futures-util = "0.3"
+
+runesh-workload = { path = "../runesh-workload" }
