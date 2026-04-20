@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Patch management: ring-based rollout, CVE correlation, maintenance windows.
 
 use chrono::{DateTime, Datelike, NaiveTime, Utc, Weekday};

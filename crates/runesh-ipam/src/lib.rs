@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! IP address management (IPAM).
 //!
 //! Tracks prefixes, VLANs, individual IP assignments, and utilization.

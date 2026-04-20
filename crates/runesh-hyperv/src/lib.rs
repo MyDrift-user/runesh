@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Hyper-V workload driver via PowerShell.
 //!
 //! Uses PowerShell cmdlets (Get-VM, Start-VM, Stop-VM, Checkpoint-VM)

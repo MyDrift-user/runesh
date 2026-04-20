@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Endpoint detection and response.
 //!
 //! File integrity monitoring (with real-time notify-based watcher),

@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Monitoring check engine with alert state machine.
 //!
 //! Runs health probes (HTTP, TCP, process, disk, custom) on a schedule,

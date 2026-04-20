@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Backup engine with content-addressed storage, deduplication, and retention.
 
 pub mod scan;

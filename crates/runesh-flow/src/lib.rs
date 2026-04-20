@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Network flow collector: NetFlow v5/v9, sFlow, IPFIX parsing.
 
 pub mod netflow;

@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Proxmox VE workload driver via REST API.
 //!
 //! Manages QEMU VMs and LXC containers on Proxmox VE clusters.

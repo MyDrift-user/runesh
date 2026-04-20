@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! VMware vCenter/ESXi workload driver via REST API.
 
 use async_trait::async_trait;

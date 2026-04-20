@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Notification dispatch with pluggable channels.
 //!
 //! Each channel implements the `NotificationChannel` trait.

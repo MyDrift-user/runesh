@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Hardware and software asset tracking.
 
 use chrono::{DateTime, NaiveDate, Utc};

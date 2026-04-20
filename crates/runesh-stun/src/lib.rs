@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! NAT traversal: STUN client, UDP hole punching, relay detection.
 
 pub mod client;

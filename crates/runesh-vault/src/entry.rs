@@ -4,6 +4,7 @@
 //! stores opaque encrypted bytes regardless of entry type.
 
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 /// A vault entry with typed content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +59,7 @@ pub enum EntryContent {
 }
 
 /// Login credentials.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LoginEntry {
     pub username: String,
     pub password: String,
@@ -69,7 +70,7 @@ pub struct LoginEntry {
 }
 
 /// API key or bearer token.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ApiKeyEntry {
     pub key: String,
     #[serde(default)]
@@ -81,7 +82,7 @@ pub struct ApiKeyEntry {
 }
 
 /// SSH keypair.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SshKeyEntry {
     /// Private key (PEM or OpenSSH format).
     pub private_key: String,
@@ -99,7 +100,7 @@ pub struct SshKeyEntry {
 }
 
 /// TOTP two-factor authentication secret.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TotpEntry {
     /// Base32-encoded TOTP secret.
     pub secret: String,
@@ -121,7 +122,7 @@ pub struct TotpEntry {
 }
 
 /// Passkey / WebAuthn credential.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PasskeyEntry {
     /// Credential ID (base64url).
     pub credential_id: String,
@@ -140,7 +141,7 @@ pub struct PasskeyEntry {
 }
 
 /// Credit card.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CardEntry {
     pub cardholder: String,
     pub number: String,
@@ -157,7 +158,7 @@ pub struct SecureNoteEntry {
 }
 
 /// TLS certificate with private key.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CertificateEntry {
     /// Certificate chain (PEM).
     pub cert_pem: String,
@@ -172,7 +173,7 @@ pub struct CertificateEntry {
 }
 
 /// WireGuard keypair.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct WireguardKeyEntry {
     pub private_key: String,
     pub public_key: String,
@@ -183,7 +184,7 @@ pub struct WireguardKeyEntry {
 }
 
 /// Database connection.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DatabaseEntry {
     pub db_type: String,
     pub host: String,
@@ -202,6 +203,50 @@ pub struct DatabaseEntry {
 pub struct CustomEntry {
     pub fields: std::collections::HashMap<String, String>,
 }
+
+// --- Redacted Debug impls: never print secrets to logs ---
+
+macro_rules! redacted_debug {
+    ($name:ident, $label:expr) => {
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct($label).field("_", &"[REDACTED]").finish()
+            }
+        }
+    };
+}
+
+redacted_debug!(LoginEntry, "LoginEntry");
+redacted_debug!(ApiKeyEntry, "ApiKeyEntry");
+redacted_debug!(SshKeyEntry, "SshKeyEntry");
+redacted_debug!(TotpEntry, "TotpEntry");
+redacted_debug!(PasskeyEntry, "PasskeyEntry");
+redacted_debug!(CardEntry, "CardEntry");
+redacted_debug!(CertificateEntry, "CertificateEntry");
+redacted_debug!(WireguardKeyEntry, "WireguardKeyEntry");
+redacted_debug!(DatabaseEntry, "DatabaseEntry");
+
+// --- Zeroize on drop: clear secrets from memory ---
+
+macro_rules! zeroize_on_drop {
+    ($name:ident, $($field:ident),+) => {
+        impl Drop for $name {
+            fn drop(&mut self) {
+                $(self.$field.zeroize();)+
+            }
+        }
+    };
+}
+
+zeroize_on_drop!(LoginEntry, password);
+zeroize_on_drop!(ApiKeyEntry, key);
+zeroize_on_drop!(SshKeyEntry, private_key);
+zeroize_on_drop!(TotpEntry, secret);
+zeroize_on_drop!(PasskeyEntry, private_key);
+zeroize_on_drop!(CardEntry, number, cvv);
+zeroize_on_drop!(CertificateEntry, key_pem);
+zeroize_on_drop!(WireguardKeyEntry, private_key);
+zeroize_on_drop!(DatabaseEntry, password);
 
 impl VaultEntry {
     /// Serialize to JSON bytes for encryption.
