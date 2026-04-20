@@ -2452,6 +2452,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "helvetia-agentd"
+version = "0.16.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "clap",
+ "dirs",
+ "reqwest 0.12.28",
+ "runesh-auth",
+ "runesh-coord",
+ "runesh-jobs",
+ "runesh-mesh",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "helvetia-server"
+version = "0.16.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "runesh-acl",
+ "runesh-coord",
+ "runesh-mesh",
+ "runesh-proxy",
+ "runesh-relay",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5119,27 +5162,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "runesh-agentd"
-version = "0.16.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "clap",
- "dirs",
- "reqwest 0.12.28",
- "runesh-auth",
- "runesh-coord",
- "runesh-jobs",
- "runesh-mesh",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "runesh-auth"
 version = "0.16.0"
 dependencies = [
@@ -5336,28 +5358,6 @@ dependencies = [
  "uuid",
  "walkdir",
  "zip 8.5.1",
-]
-
-[[package]]
-name = "runesh-server"
-version = "0.16.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "chrono",
- "runesh-acl",
- "runesh-coord",
- "runesh-mesh",
- "runesh-proxy",
- "runesh-relay",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
