@@ -111,6 +111,96 @@ pub async fn execute_task(task: &AgentTask) -> TaskResult {
             };
             execute_command(cmd, &args, timeout, None).await
         }
+        TaskType::InstallPackage => {
+            let package = task
+                .params
+                .get("package")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let (cmd, args) = platform_pkg_install(package);
+            execute_command(
+                &cmd,
+                &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                timeout,
+                None,
+            )
+            .await
+        }
+        TaskType::RemovePackage => {
+            let package = task
+                .params
+                .get("package")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let (cmd, args) = platform_pkg_remove(package);
+            execute_command(
+                &cmd,
+                &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                timeout,
+                None,
+            )
+            .await
+        }
+        TaskType::StartService => {
+            let service = task
+                .params
+                .get("service")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let (cmd, args) = platform_svc_action(service, "start");
+            execute_command(
+                &cmd,
+                &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                timeout,
+                None,
+            )
+            .await
+        }
+        TaskType::StopService => {
+            let service = task
+                .params
+                .get("service")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let (cmd, args) = platform_svc_action(service, "stop");
+            execute_command(
+                &cmd,
+                &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                timeout,
+                None,
+            )
+            .await
+        }
+        TaskType::RestartService => {
+            let service = task
+                .params
+                .get("service")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let (cmd, args) = platform_svc_action(service, "restart");
+            execute_command(
+                &cmd,
+                &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                timeout,
+                None,
+            )
+            .await
+        }
+        TaskType::ScheduleReboot => {
+            let delay = task
+                .params
+                .get("delay_secs")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(60);
+            let (cmd, args) = platform_reboot(delay);
+            execute_command(
+                &cmd,
+                &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                timeout,
+                None,
+            )
+            .await
+        }
         _ => TaskResult {
             exit_code: -1,
             stdout: String::new(),
@@ -118,6 +208,124 @@ pub async fn execute_task(task: &AgentTask) -> TaskResult {
             data: None,
             duration_ms: 0,
         },
+    }
+}
+
+fn platform_pkg_install(package: &str) -> (String, Vec<String>) {
+    if cfg!(windows) {
+        (
+            "winget".into(),
+            vec![
+                "install".into(),
+                "--id".into(),
+                package.into(),
+                "--silent".into(),
+                "--accept-package-agreements".into(),
+                "--accept-source-agreements".into(),
+                "--disable-interactivity".into(),
+            ],
+        )
+    } else if cfg!(target_os = "macos") {
+        ("brew".into(), vec!["install".into(), package.into()])
+    } else {
+        // Linux: detect package manager
+        if std::path::Path::new("/usr/bin/apt-get").exists() {
+            (
+                "apt-get".into(),
+                vec!["install".into(), "-y".into(), package.into()],
+            )
+        } else if std::path::Path::new("/usr/bin/dnf").exists() {
+            (
+                "dnf".into(),
+                vec!["install".into(), "-y".into(), package.into()],
+            )
+        } else if std::path::Path::new("/usr/bin/pacman").exists() {
+            (
+                "pacman".into(),
+                vec!["-S".into(), "--noconfirm".into(), package.into()],
+            )
+        } else {
+            (
+                "echo".into(),
+                vec![format!("no package manager found for {package}")],
+            )
+        }
+    }
+}
+
+fn platform_pkg_remove(package: &str) -> (String, Vec<String>) {
+    if cfg!(windows) {
+        (
+            "winget".into(),
+            vec![
+                "uninstall".into(),
+                "--id".into(),
+                package.into(),
+                "--silent".into(),
+                "--disable-interactivity".into(),
+            ],
+        )
+    } else if cfg!(target_os = "macos") {
+        ("brew".into(), vec!["uninstall".into(), package.into()])
+    } else {
+        if std::path::Path::new("/usr/bin/apt-get").exists() {
+            (
+                "apt-get".into(),
+                vec!["remove".into(), "-y".into(), package.into()],
+            )
+        } else if std::path::Path::new("/usr/bin/dnf").exists() {
+            (
+                "dnf".into(),
+                vec!["remove".into(), "-y".into(), package.into()],
+            )
+        } else if std::path::Path::new("/usr/bin/pacman").exists() {
+            (
+                "pacman".into(),
+                vec!["-R".into(), "--noconfirm".into(), package.into()],
+            )
+        } else {
+            (
+                "echo".into(),
+                vec![format!("no package manager found for {package}")],
+            )
+        }
+    }
+}
+
+fn platform_svc_action(service: &str, action: &str) -> (String, Vec<String>) {
+    if cfg!(windows) {
+        let sc_action = match action {
+            "start" => "start",
+            "stop" => "stop",
+            "restart" => "start", // Windows: stop then start handled by caller
+            _ => action,
+        };
+        ("sc".into(), vec![sc_action.into(), service.into()])
+    } else if cfg!(target_os = "macos") {
+        let launchctl_action = match action {
+            "start" => "load",
+            "stop" => "unload",
+            "restart" => "kickstart",
+            _ => action,
+        };
+        (
+            "launchctl".into(),
+            vec![launchctl_action.into(), service.into()],
+        )
+    } else {
+        ("systemctl".into(), vec![action.into(), service.into()])
+    }
+}
+
+fn platform_reboot(delay_secs: u64) -> (String, Vec<String>) {
+    if cfg!(windows) {
+        (
+            "shutdown".into(),
+            vec!["/r".into(), "/t".into(), delay_secs.to_string()],
+        )
+    } else {
+        let minutes = (delay_secs / 60).max(1);
+        ("shutdown".into(), vec!["-r".into(), format!("+{minutes}")])
     }
 }
 

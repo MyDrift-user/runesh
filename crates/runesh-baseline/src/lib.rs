@@ -5,8 +5,10 @@
 //! declared state against actual state and reports drift.
 
 pub mod checker;
+pub mod collector;
 
 pub use checker::{SystemState, check_compliance};
+pub use collector::collect_system_state;
 
 use std::collections::HashMap;
 

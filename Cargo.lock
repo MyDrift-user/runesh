@@ -5535,7 +5535,7 @@ dependencies = [
  "core-foundation",
  "serde",
  "serde_json",
- "sysinfo",
+ "sysinfo 0.38.4",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5608,6 +5608,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sysinfo 0.35.2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -7067,6 +7068,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.35.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c3ffa3e4ff2b324a57f7aeb3c349656c7b127c3c189520251a648102a92496e"
+dependencies = [
+ "libc",
+ "memchr",
+ "ntapi",
+ "objc2-core-foundation",
+ "objc2-io-kit",
+ "windows 0.61.3",
 ]
 
 [[package]]
