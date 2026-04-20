@@ -36,7 +36,7 @@ impl ScreenCapture for CgCapturer {
         let display = CGDisplay::new(self.display_id);
 
         // Capture the display
-        let image = CGDisplay::image(display)
+        let image = CGDisplay::image(&display)
             .ok_or_else(|| DesktopError::Capture("CGDisplayCreateImage returned null".into()))?;
 
         let width = image.width() as u32;

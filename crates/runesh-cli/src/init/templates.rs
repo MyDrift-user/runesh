@@ -1030,8 +1030,8 @@ export default function ExamplesPage() {
 
 // ── Novel WYSIWYG Editor templates ──────────────────────────────────────────
 
-pub fn editor_page(c: &ProjectConfig) -> String {
-    format!(
+pub fn editor_page(_c: &ProjectConfig) -> String {
+    String::from(
         r#""use client";
 
 import {{ useState }} from "react";
@@ -1056,7 +1056,7 @@ export default function EditorPage() {{
     </div>
   );
 }}
-"#
+"#,
     )
 }
 
@@ -1291,13 +1291,13 @@ RUST_LOG=info
     }
 
     if c.with_docker {
-        env.push_str(&format!(
+        env.push_str(
             r#"
 # ── Docker ─────────────────────────────────────────────────────────────────
 POSTGRES_PASSWORD=changeme
 APP_PORT=8080
-"#
-        ));
+"#,
+        );
     }
 
     if c.with_auth {
@@ -1723,7 +1723,7 @@ pub const TAURI_CAPABILITIES: &str = r#"{
 
 pub fn claude_md(c: &ProjectConfig) -> String {
     // ── Stack ────────────────────────────────────────────────────────────
-    let mut stack = Vec::new();
+    let mut stack: Vec<String> = Vec::new();
     if c.has_server {
         stack.push("Rust (Axum) + PostgreSQL (SQLx)".into());
     }
@@ -1737,9 +1737,7 @@ pub fn claude_md(c: &ProjectConfig) -> String {
         stack.push("Chrome extension (WXT)".into());
     }
     stack.push("Package manager: bun (never npm/yarn)".into());
-    stack.push(format!(
-        "Shared code: @mydrift/runesh-ui + runesh-core/runesh-auth crates"
-    ));
+    stack.push("Shared code: @mydrift/runesh-ui + runesh-core/runesh-auth crates".into());
 
     // ── Structure ────────────────────────────────────────────────────────
     let mut structure = Vec::new();
