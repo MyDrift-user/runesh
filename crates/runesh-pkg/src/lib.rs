@@ -1,0 +1,70 @@
+//! Cross-platform package manager abstraction.
+//!
+//! Provides a uniform trait over apt, dnf, pacman, apk, zypper, brew,
+//! winget, and FreeBSD pkg. Auto-detects the system package manager.
+
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+
+pub mod detect;
+pub mod runner;
+
+/// Information about an installed or available package.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageInfo {
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub installed: bool,
+    #[serde(default)]
+    pub update_available: Option<String>,
+}
+
+/// Result of a package operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageResult {
+    pub success: bool,
+    pub package: String,
+    pub action: String,
+    pub output: String,
+    pub exit_code: i32,
+}
+
+/// Uniform package manager interface.
+#[async_trait]
+pub trait PackageManager: Send + Sync {
+    /// Manager name (apt, dnf, pacman, etc.).
+    fn name(&self) -> &str;
+
+    /// List installed packages.
+    async fn list_installed(&self) -> Result<Vec<PackageInfo>, PkgError>;
+
+    /// Search for available packages.
+    async fn search(&self, query: &str) -> Result<Vec<PackageInfo>, PkgError>;
+
+    /// Install a package.
+    async fn install(&self, package: &str) -> Result<PackageResult, PkgError>;
+
+    /// Remove a package.
+    async fn remove(&self, package: &str) -> Result<PackageResult, PkgError>;
+
+    /// Upgrade a package (or all packages if name is empty).
+    async fn upgrade(&self, package: &str) -> Result<PackageResult, PkgError>;
+
+    /// Check for available updates.
+    async fn available_updates(&self) -> Result<Vec<PackageInfo>, PkgError>;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PkgError {
+    #[error("package manager not found: {0}")]
+    NotFound(String),
+    #[error("command failed: {0}")]
+    CommandFailed(String),
+    #[error("parse error: {0}")]
+    ParseError(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+}
