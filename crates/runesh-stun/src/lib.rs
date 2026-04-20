@@ -1,5 +1,9 @@
 //! NAT traversal: STUN client, UDP hole punching, relay detection.
 
+pub mod client;
+
+pub use client::stun_binding_request;
+
 use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};

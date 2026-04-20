@@ -1,5 +1,11 @@
 //! Uniform workload driver trait for VMs, containers, and Kubernetes.
 
+#[cfg(feature = "docker")]
+pub mod docker;
+
+#[cfg(feature = "docker")]
+pub use docker::DockerDriver;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
