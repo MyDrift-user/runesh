@@ -80,6 +80,7 @@ RUNESH/
 │   ├── runesh-telemetry/                # Sentry/GlitchTip error reporting + tracing layer
 │   ├── runesh-stun/                     # NAT traversal: STUN, hole punching, connection strategy
 │   ├── runesh-vault/                    # Encrypted key-value secret store with rotation and JIT decryption
+│   ├── runesh-winget/                   # WinGet REST source server: private package repository for Windows
 │   ├── runesh-workload/                 # Uniform VM/container/K8s workload driver trait
 │   ├── runesh-tun/                      # Cross-platform TUN device (Windows wintun + Linux)
 │   └── runesh-vfs/                      # Virtual filesystem with cloud provider + overlay writes
