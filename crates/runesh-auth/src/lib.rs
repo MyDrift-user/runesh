@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 pub mod error;
 pub mod jwks;
 pub mod oidc;

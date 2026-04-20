@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Uniform workload driver trait for VMs, containers, and Kubernetes.
 //!
 //! This crate defines the trait. Actual driver implementations live in

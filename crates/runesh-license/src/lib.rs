@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Software license tracking.
 
 use chrono::{DateTime, NaiveDate, Utc};

@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 pub mod diff;
 pub mod error;
 pub mod eval;

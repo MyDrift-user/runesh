@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Cross-platform package manager abstraction.
 //!
 //! Provides a uniform trait over apt, dnf, pacman, apk, zypper, brew,

@@ -2,6 +2,27 @@
 
 use crate::{PackageResult, PkgError};
 
+/// Validate a package name to prevent command injection.
+/// Allows: alphanumeric, hyphens, dots, underscores, forward slashes, @, plus signs.
+/// Rejects: semicolons, backticks, pipes, ampersands, dollar signs, etc.
+pub fn validate_package_name(name: &str) -> Result<(), PkgError> {
+    if name.is_empty() {
+        return Ok(()); // empty name is valid (used for "upgrade all")
+    }
+    if name.len() > 256 {
+        return Err(PkgError::CommandFailed("package name too long".into()));
+    }
+    for c in name.chars() {
+        if !matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '/' | '@' | '+' | ':')
+        {
+            return Err(PkgError::CommandFailed(format!(
+                "invalid character '{c}' in package name '{name}'"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Run a package manager command and capture output.
 pub async fn run_pkg_command(
     command: &str,
@@ -9,6 +30,8 @@ pub async fn run_pkg_command(
     action: &str,
     package: &str,
 ) -> Result<PackageResult, PkgError> {
+    validate_package_name(package)?;
+
     let output = tokio::process::Command::new(command)
         .args(args)
         .output()

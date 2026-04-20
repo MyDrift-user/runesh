@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! DNS management: MagicDNS, split DNS, zone management, service discovery,
 //! and async DNS resolution via hickory-resolver.
 

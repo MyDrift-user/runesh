@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! WinGet REST source server.
 //!
 //! Implements the Microsoft.Rest protocol so `winget` clients can

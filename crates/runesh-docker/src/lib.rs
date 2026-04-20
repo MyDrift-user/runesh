@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Docker/Podman workload driver via bollard.
 //!
 //! Connects to the Docker daemon via Unix socket (Linux/macOS),

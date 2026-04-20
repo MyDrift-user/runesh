@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 pub mod executor;
 pub mod task;
 

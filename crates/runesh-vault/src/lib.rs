@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Encrypted vault with typed entries for password management.
 //!
 //! Secrets are encrypted at rest with ChaCha20-Poly1305 using a

@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Uniform network appliance driver trait.
 //!
 //! Every network device driver implements the same trait surface:

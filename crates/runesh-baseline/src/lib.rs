@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Declarative baselines with drift detection.
 //!
 //! A baseline declares desired state across packages, services, files,

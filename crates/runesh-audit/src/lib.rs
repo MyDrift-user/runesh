@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Append-only hash-chained audit log.
 //!
 //! Every entry contains the SHA-256 hash of the previous entry,

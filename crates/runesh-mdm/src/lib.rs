@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 //! Mobile device management: enrollment, configuration profiles, remote actions.
 
 use chrono::{DateTime, Utc};
