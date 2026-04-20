@@ -122,65 +122,83 @@ impl MapBuilder {
         })
     }
 
-    /// Check if node A can communicate with node B.
+    /// Check if node A can communicate with node B on any port.
+    /// Scans all ACL rules to find if any allows traffic between these nodes.
     fn can_communicate(&self, from: &Node, to: &Node) -> bool {
-        let src_ip = match from.addresses.first() {
-            Some(ip) => match ip.parse() {
-                Ok(ip) => ip,
-                Err(_) => return false,
-            },
-            None => return false,
+        !self.allowed_ports(from, to).is_empty()
+    }
+
+    /// Determine which ports node `from` can reach on node `to`.
+    /// Returns a list of (start, end) port ranges.
+    fn allowed_ports(&self, from: &Node, to: &Node) -> Vec<(u16, u16)> {
+        let src_ip = match from.addresses.first().and_then(|ip| ip.parse().ok()) {
+            Some(ip) => ip,
+            None => return vec![],
         };
-        let dst_ip = match to.addresses.first() {
-            Some(ip) => match ip.parse() {
-                Ok(ip) => ip,
-                Err(_) => return false,
-            },
-            None => return false,
+        let dst_ip = match to.addresses.first().and_then(|ip| ip.parse().ok()) {
+            Some(ip) => ip,
+            None => return vec![],
         };
 
         let src_user = from
             .user
             .and_then(|uid| self.users.get(&uid).map(|u| u.login_name.clone()));
 
-        let ctx = EvalContext {
+        let base_ctx = EvalContext {
             src_user,
             src_groups: vec![],
             src_tags: from.tags.clone(),
             src_ip,
             dst_ip,
             dst_tags: to.tags.clone(),
-            // Check a common port to determine general reachability
             dst_port: 0,
         };
 
-        // Check if any port is allowed (use wildcard check)
-        let wildcard_ctx = EvalContext {
-            dst_port: 443,
-            ..ctx.clone()
+        // Check if wildcard port (0) is allowed, meaning all ports
+        let wildcard = EvalContext {
+            dst_port: 0,
+            ..base_ctx.clone()
         };
-        let result = self.acl.evaluate(&wildcard_ctx);
-        if result.allowed {
-            return true;
+        if self.acl.evaluate(&wildcard).allowed {
+            return vec![(0, 65535)];
         }
 
-        // Also check common ports
-        for port in [22, 80, 443, 8080] {
+        // Scan representative ports to find which ranges are allowed
+        let mut allowed = Vec::new();
+        let probe_ports = [
+            22, 25, 53, 80, 443, 465, 587, 993, 995, 1433, 1521, 3306, 3389, 5432, 5900, 6379,
+            8080, 8443, 9090, 9100, 9200, 27017,
+        ];
+
+        for &port in &probe_ports {
             let ctx = EvalContext {
                 dst_port: port,
-                ..ctx.clone()
+                ..base_ctx.clone()
             };
             if self.acl.evaluate(&ctx).allowed {
-                return true;
+                allowed.push((port, port));
             }
         }
 
-        false
+        // Also check common ranges
+        for (start, end) in [(1024, 1024), (8000, 8000), (49152, 49152)] {
+            let ctx = EvalContext {
+                dst_port: start,
+                ..base_ctx.clone()
+            };
+            if self.acl.evaluate(&ctx).allowed {
+                allowed.push((start, end));
+            }
+        }
+
+        // Merge adjacent/overlapping ranges
+        allowed.sort();
+        allowed.dedup();
+        allowed
     }
 
-    /// Build packet filter rules for a node.
+    /// Build packet filter rules for a node based on ACL evaluation.
     fn build_packet_filter(&self, node: &Node) -> Vec<FilterRule> {
-        // For each peer that can reach this node, create a filter rule
         let mut rules = Vec::new();
 
         let dst_ip = match node.addresses.first() {
@@ -197,17 +215,25 @@ impl MapBuilder {
                 None => continue,
             };
 
-            // This is a simplified filter; a full implementation would
-            // evaluate all ACL rules and compile exact port ranges.
-            rules.push(FilterRule {
-                src_ips: vec![format!("{src_ip}/32")],
-                dst_ports: vec![DstPortRange {
+            let ports = self.allowed_ports(peer, node);
+            if ports.is_empty() {
+                continue;
+            }
+
+            let dst_ports: Vec<DstPortRange> = ports
+                .iter()
+                .map(|(start, end)| DstPortRange {
                     ip: format!("{dst_ip}/32"),
                     ports: PortRange {
-                        first: 0,
-                        last: 65535,
+                        first: *start,
+                        last: *end,
                     },
-                }],
+                })
+                .collect();
+
+            rules.push(FilterRule {
+                src_ips: vec![format!("{src_ip}/32")],
+                dst_ports,
             });
         }
 

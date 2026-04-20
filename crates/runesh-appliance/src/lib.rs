@@ -3,6 +3,10 @@
 //! Every network device driver implements the same trait surface:
 //! identity, inventory, config, firewall, health, lifecycle.
 
+pub mod opnsense;
+
+pub use opnsense::OPNsenseDriver;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
