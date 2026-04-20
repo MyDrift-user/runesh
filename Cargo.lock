@@ -5284,6 +5284,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "runesh-backup"
+version = "0.16.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "runesh-baseline"
 version = "0.16.0"
 dependencies = [
@@ -5370,6 +5384,26 @@ dependencies = [
  "windows 0.62.2",
  "x11rb",
  "zstd",
+]
+
+[[package]]
+name = "runesh-dns"
+version = "0.16.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "runesh-edr"
+version = "0.16.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -5597,6 +5631,16 @@ dependencies = [
  "tracing",
  "uuid",
  "windows 0.62.2",
+]
+
+[[package]]
+name = "runesh-workload"
+version = "0.16.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

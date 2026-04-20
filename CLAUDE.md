@@ -52,11 +52,14 @@ RUNESH/
 │   ├── runesh-asset/                    # Hardware asset tracking: lifecycle, warranty, depreciation
 │   ├── runesh-audit/                    # Append-only hash-chained audit log with tamper detection
 │   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait + mesh enrollment
+│   ├── runesh-backup/                   # Backup engine: content-addressed chunking, dedup, snapshots, retention
 │   ├── runesh-baseline/                 # Declarative baselines with inheritance, drift detection, enforcement
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
 │   ├── helvetia-agentd/                 # Helvetia agent daemon (consumer binary, will move to own repo)
 │   ├── helvetia-server/                 # Helvetia coordination server (consumer binary, will move to own repo)
 │   ├── runesh-coord/                    # Tailscale-compatible coordination: Noise IK handshake, node registry, map builder
+│   ├── runesh-dns/                      # MagicDNS, split DNS, zone management, service discovery
+│   ├── runesh-edr/                      # Endpoint detection: file integrity monitoring, IoC matching, security events
 │   ├── runesh-core/                     # AppError, RateLimiter, WS broadcast, file upload, DB pool
 │   ├── runesh-desktop/                  # Remote desktop: screen capture, encoding, input injection (Win/Mac/Linux)
 │   ├── runesh-mesh/                     # WireGuard mesh: key management, peer maps, IP allocation, tunnel orchestration
@@ -73,6 +76,7 @@ RUNESH/
 │   ├── runesh-tauri/                    # Tauri helpers (tray, process mgmt, config, elevation)
 │   ├── runesh-telemetry/                # Sentry/GlitchTip error reporting + tracing layer
 │   ├── runesh-vault/                    # Encrypted key-value secret store with rotation and JIT decryption
+│   ├── runesh-workload/                 # Uniform VM/container/K8s workload driver trait
 │   ├── runesh-tun/                      # Cross-platform TUN device (Windows wintun + Linux)
 │   └── runesh-vfs/                      # Virtual filesystem with cloud provider + overlay writes
 ├── templates/                           # Dockerfile + compose.yaml for new projects
