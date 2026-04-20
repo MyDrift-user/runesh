@@ -6,17 +6,25 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub mod apk;
 pub mod apt;
 pub mod brew;
 pub mod detect;
 pub mod dnf;
+pub mod freebsd;
+pub mod pacman;
 pub mod runner;
 pub mod winget;
+pub mod zypper;
 
+pub use apk::ApkManager;
 pub use apt::AptManager;
 pub use brew::BrewManager;
 pub use dnf::DnfManager;
+pub use freebsd::PkgManager;
+pub use pacman::PacmanManager;
 pub use winget::WingetManager;
+pub use zypper::ZypperManager;
 
 /// Information about an installed or available package.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,8 +80,12 @@ pub fn system_package_manager() -> Option<Box<dyn PackageManager>> {
     match pm_type {
         detect::PkgManagerType::Apt => Some(Box::new(AptManager)),
         detect::PkgManagerType::Dnf | detect::PkgManagerType::Yum => Some(Box::new(DnfManager)),
+        detect::PkgManagerType::Pacman => Some(Box::new(PacmanManager)),
+        detect::PkgManagerType::Apk => Some(Box::new(ApkManager)),
+        detect::PkgManagerType::Zypper => Some(Box::new(ZypperManager)),
         detect::PkgManagerType::Brew => Some(Box::new(BrewManager)),
         detect::PkgManagerType::Winget => Some(Box::new(WingetManager)),
+        detect::PkgManagerType::Pkg => Some(Box::new(PkgManager)),
         _ => None,
     }
 }
