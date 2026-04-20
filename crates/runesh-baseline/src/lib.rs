@@ -4,6 +4,10 @@
 //! firewall rules, users, and other system facets. The engine compares
 //! declared state against actual state and reports drift.
 
+pub mod checker;
+
+pub use checker::{SystemState, check_compliance};
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};

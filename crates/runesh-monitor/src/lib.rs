@@ -6,6 +6,8 @@
 
 pub mod alert;
 pub mod check;
+pub mod scheduler;
 
 pub use alert::{Alert, AlertManager, AlertState};
 pub use check::{Check, CheckResult, CheckStatus, CheckType};
+pub use scheduler::CheckScheduler;

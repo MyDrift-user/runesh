@@ -61,6 +61,24 @@ impl Vault {
         )
     }
 
+    /// Derive a master key from a password using Argon2id and open a vault.
+    /// Returns (vault, salt) where salt must be persisted for reopening.
+    pub fn from_password(password: &[u8]) -> Result<(Self, [u8; 16]), VaultError> {
+        let mut salt = [0u8; 16];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut salt);
+        let vault = Self::from_password_and_salt(password, &salt)?;
+        Ok((vault, salt))
+    }
+
+    /// Reopen a vault with a password and a previously persisted salt.
+    pub fn from_password_and_salt(password: &[u8], salt: &[u8; 16]) -> Result<Self, VaultError> {
+        let mut key = [0u8; 32];
+        argon2::Argon2::default()
+            .hash_password_into(password, salt, &mut key)
+            .map_err(|_| VaultError::EncryptionFailed)?;
+        Ok(Self::open(&key))
+    }
+
     /// Open a vault with an existing master key.
     pub fn open(master_key: &[u8; 32]) -> Self {
         let cipher = ChaCha20Poly1305::new(master_key.into());
@@ -234,7 +252,7 @@ impl Vault {
     /// Import sealed secrets from JSON.
     pub fn import(&mut self, json: &str) -> Result<usize, VaultError> {
         let secrets: Vec<SealedSecret> =
-            serde_json::from_str(json).map_err(|e| VaultError::CorruptData)?;
+            serde_json::from_str(json).map_err(|_| VaultError::CorruptData)?;
         let count = secrets.len();
         for s in secrets {
             self.secrets.insert(s.id.clone(), s);
