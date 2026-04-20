@@ -1,14 +1,14 @@
 [package]
-name = "runesh-agentd"
+name = "helvetia-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "RUNESH endpoint agent daemon: enrolls with the controller, joins the mesh, runs heartbeat and task execution"
+description = "Helvetia coordination server: node enrollment, mesh coordination, DERP relay, and management API"
 
 [[bin]]
-name = "runesh-agentd"
+name = "helvetia-server"
 path = "src/main.rs"
 
 [dependencies]
@@ -17,15 +17,16 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = { workspace = true }
 
+axum = { version = "0.8", features = ["ws"] }
+tower = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-clap = { version = "4", features = ["derive", "env"] }
-dirs = "6"
+uuid = { version = "1", features = ["v4"] }
 
-runesh-auth = { path = "../runesh-auth", default-features = false, features = ["mesh"] }
-runesh-jobs = { path = "../runesh-jobs" }
+runesh-acl = { path = "../runesh-acl" }
 runesh-mesh = { path = "../runesh-mesh" }
 runesh-coord = { path = "../runesh-coord" }
+runesh-relay = { path = "../runesh-relay" }
+runesh-proxy = { path = "../runesh-proxy" }

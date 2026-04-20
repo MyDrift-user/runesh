@@ -50,8 +50,8 @@ RUNESH/
 │   ├── runesh-acl/                      # Tailscale-compatible HuJSON ACL parser + evaluator + diff
 │   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
-│   ├── runesh-agentd/                   # Agent daemon binary: enrollment, heartbeat, identity persistence
-│   ├── runesh-server/                   # Coordination server binary: API, enrollment, mesh, DERP relay
+│   ├── helvetia-agentd/                 # Helvetia agent daemon (consumer binary, will move to own repo)
+│   ├── helvetia-server/                 # Helvetia coordination server (consumer binary, will move to own repo)
 │   ├── runesh-coord/                    # Tailscale-compatible coordination: Noise IK handshake, node registry, map builder
 │   ├── runesh-core/                     # AppError, RateLimiter, WS broadcast, file upload, DB pool
 │   ├── runesh-desktop/                  # Remote desktop: screen capture, encoding, input injection (Win/Mac/Linux)
