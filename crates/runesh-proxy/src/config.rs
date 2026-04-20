@@ -331,21 +331,39 @@ impl Resource {
     }
 
     /// Check if a source IP is allowed by the network filter.
+    /// Supports both exact IPs and CIDR ranges in allow/deny lists.
     pub fn check_ip(&self, ip: &str) -> bool {
         let nf = &self.access.network;
+        let parsed: std::net::IpAddr = match ip.parse() {
+            Ok(addr) => addr,
+            Err(_) => return false,
+        };
 
         // Check deny list first
-        if !nf.deny_ips.is_empty() && nf.deny_ips.iter().any(|d| d == ip) {
+        if !nf.deny_ips.is_empty() && nf.deny_ips.iter().any(|d| ip_matches(d, parsed)) {
             return false;
         }
 
         // If allow list is set, IP must be in it
         if !nf.allow_ips.is_empty() {
-            return nf.allow_ips.iter().any(|a| a == ip);
+            return nf.allow_ips.iter().any(|a| ip_matches(a, parsed));
         }
 
         true
     }
+}
+
+/// Check if an IP matches an entry (exact IP or CIDR range).
+fn ip_matches(entry: &str, ip: std::net::IpAddr) -> bool {
+    // Try as CIDR first
+    if let Ok(net) = entry.parse::<ipnet::IpNet>() {
+        return net.contains(&ip);
+    }
+    // Try as exact IP
+    if let Ok(entry_ip) = entry.parse::<std::net::IpAddr>() {
+        return entry_ip == ip;
+    }
+    false
 }
 
 fn default_public_port() -> u16 {

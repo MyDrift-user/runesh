@@ -6,8 +6,15 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub mod apt;
+pub mod brew;
 pub mod detect;
+pub mod dnf;
 pub mod runner;
+
+pub use apt::AptManager;
+pub use brew::BrewManager;
+pub use dnf::DnfManager;
 
 /// Information about an installed or available package.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +62,17 @@ pub trait PackageManager: Send + Sync {
 
     /// Check for available updates.
     async fn available_updates(&self) -> Result<Vec<PackageInfo>, PkgError>;
+}
+
+/// Create the appropriate PackageManager for this system.
+pub fn system_package_manager() -> Option<Box<dyn PackageManager>> {
+    let pm_type = detect::detect()?;
+    match pm_type {
+        detect::PkgManagerType::Apt => Some(Box::new(AptManager)),
+        detect::PkgManagerType::Dnf | detect::PkgManagerType::Yum => Some(Box::new(DnfManager)),
+        detect::PkgManagerType::Brew => Some(Box::new(BrewManager)),
+        _ => None,
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
