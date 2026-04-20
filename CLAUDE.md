@@ -48,6 +48,8 @@ RUNESH/
 │           └── styles/                  # globals.css (OKLCH theme, dark mode, editor styles)
 ├── crates/
 │   ├── runesh-acl/                      # Tailscale-compatible HuJSON ACL parser + evaluator + diff
+│   ├── runesh-appliance/                # Uniform network appliance driver trait (OPNsense/UniFi/FortiGate/etc.)
+│   ├── runesh-asset/                    # Hardware asset tracking: lifecycle, warranty, depreciation
 │   ├── runesh-audit/                    # Append-only hash-chained audit log with tamper detection
 │   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait + mesh enrollment
 │   ├── runesh-baseline/                 # Declarative baselines with inheritance, drift detection, enforcement
@@ -64,7 +66,9 @@ RUNESH/
 │   ├── runesh-proxy/                    # Reverse proxy: resource config, routing, access control, load balancing
 │   ├── runesh-relay/                    # DERP relay: forwards encrypted WireGuard packets between peers over TCP
 │   ├── runesh-inventory/                # Hardware/software inventory collection (cross-platform)
+│   ├── runesh-ipam/                     # IP address management: prefixes, VLANs, allocation, utilization
 │   ├── runesh-jobs/                     # Typed job/task model with idempotency, retry, and queue management
+│   ├── runesh-license/                  # Software license tracking: entitlements, utilization, renewal alerts
 │   ├── runesh-remote/                   # Remote file explorer + CLI over WebSocket with PTY
 │   ├── runesh-tauri/                    # Tauri helpers (tray, process mgmt, config, elevation)
 │   ├── runesh-telemetry/                # Sentry/GlitchTip error reporting + tracing layer
