@@ -42,6 +42,7 @@ const AVAILABLE_CRATES: &[(&str, &str)] = &[
     ),
 ];
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     name: String,
     description: Option<String>,

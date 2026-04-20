@@ -365,6 +365,7 @@ impl ProjectConfig {
         }
     }
 
+    #[allow(dead_code)]
     pub fn has_any_frontend(&self) -> bool {
         self.has_web || self.has_desktop_frontend || self.has_extension
     }
@@ -440,10 +441,10 @@ fn resolve_local_path(target_dir: &Path, explicit: Option<String>) -> Result<Str
             .ok()
             .and_then(|cwd| cwd.join(target_dir).parent().map(|p| p.join("RUNESH")))
     };
-    if let Some(ref path) = sibling {
-        if path.join("Cargo.toml").exists() {
-            return make_relative(target_dir, path);
-        }
+    if let Some(ref path) = sibling
+        && path.join("Cargo.toml").exists()
+    {
+        return make_relative(target_dir, path);
     }
     println!(
         "  {} RUNESH not found locally. Defaulting to ../RUNESH",
@@ -501,18 +502,18 @@ fn run_bun_installs(root: &Path, config: &ProjectConfig) {
             // hits EPERM on Windows for the deep tree. Pre-create a directory
             // junction (Windows) / symlink (unix) so the package is resolvable
             // BEFORE bun install runs and BEFORE shadcn add tries to read it.
-            if label != "extension" {
-                if let RuneshSource::Local(runesh_path) = &config.source {
-                    relink_runesh_ui(&root.join(label), runesh_path);
-                }
+            if label != "extension"
+                && let RuneshSource::Local(runesh_path) = &config.source
+            {
+                relink_runesh_ui(&root.join(label), runesh_path);
             }
             run_bun_install(&root.join(label), label);
             // bun install may have stomped the junction if it found a stub
             // package.json reference. Re-link to be safe.
-            if label != "extension" {
-                if let RuneshSource::Local(runesh_path) = &config.source {
-                    relink_runesh_ui(&root.join(label), runesh_path);
-                }
+            if label != "extension"
+                && let RuneshSource::Local(runesh_path) = &config.source
+            {
+                relink_runesh_ui(&root.join(label), runesh_path);
             }
         }
     }
@@ -674,7 +675,7 @@ fn run_bun_install(dir: &Path, label: &str) {
     );
     let _ = Command::new("bun")
         .arg("add")
-        .args(&preinstall)
+        .args(preinstall)
         .current_dir(dir)
         .status();
 
@@ -715,7 +716,7 @@ fn run_bun_install(dir: &Path, label: &str) {
         .arg("--bun")
         .arg("shadcn@latest")
         .arg("add")
-        .args(&shadcn_components)
+        .args(shadcn_components)
         .arg("--yes")
         .arg("--overwrite")
         .current_dir(dir)
