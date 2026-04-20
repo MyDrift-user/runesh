@@ -41,7 +41,7 @@ pub fn content_hash(data: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-/// Simple fixed-size chunker (for testing; real impl uses fastcdc).
+/// Fixed-size chunker (simple, for small data or testing).
 pub fn chunk_data(data: &[u8], chunk_size: usize) -> Vec<Chunk> {
     data.chunks(chunk_size)
         .map(|slice| {
@@ -53,6 +53,35 @@ pub fn chunk_data(data: &[u8], chunk_size: usize) -> Vec<Chunk> {
             }
         })
         .collect()
+}
+
+/// Content-defined chunker using FastCDC (rolling hash).
+///
+/// Produces variable-size chunks with boundaries determined by content,
+/// so inserting/deleting data only affects nearby chunks instead of
+/// shifting all subsequent chunk boundaries. This maximizes dedup.
+///
+/// `min_size` / `avg_size` / `max_size` control chunk boundaries.
+/// Typical values: 8KB / 16KB / 64KB.
+pub fn chunk_data_cdc(data: &[u8], min_size: u32, avg_size: u32, max_size: u32) -> Vec<Chunk> {
+    use fastcdc::ronomon::FastCDC;
+
+    FastCDC::new(
+        data,
+        min_size as usize,
+        avg_size as usize,
+        max_size as usize,
+    )
+    .map(|entry| {
+        let slice = &data[entry.offset..entry.offset + entry.length];
+        let id = content_hash(slice);
+        Chunk {
+            id,
+            data: slice.to_vec(),
+            original_size: entry.length,
+        }
+    })
+    .collect()
 }
 
 /// Retention policy.

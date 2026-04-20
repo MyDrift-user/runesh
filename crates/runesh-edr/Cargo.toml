@@ -13,3 +13,6 @@ serde_json = "1"
 thiserror = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
+notify = "8"
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }

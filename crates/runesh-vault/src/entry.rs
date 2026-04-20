@@ -258,6 +258,40 @@ impl VaultEntry {
             label, totp.secret, issuer, totp.digits, totp.period, totp.algorithm
         ))
     }
+
+    /// Generate the current TOTP code for entries that have a TOTP secret.
+    ///
+    /// Returns the 6-8 digit code and the seconds remaining until it expires.
+    pub fn generate_totp(&self) -> Option<(String, u64)> {
+        let (secret, digits, period, algorithm) = match &self.content {
+            EntryContent::Totp(t) => (&t.secret, t.digits, t.period, t.algorithm.as_str()),
+            EntryContent::Login(LoginEntry {
+                totp_secret: Some(s),
+                ..
+            }) => (s, 6, 30, "SHA1"),
+            _ => return None,
+        };
+
+        let algo = match algorithm.to_uppercase().as_str() {
+            "SHA256" => totp_rs::Algorithm::SHA256,
+            "SHA512" => totp_rs::Algorithm::SHA512,
+            _ => totp_rs::Algorithm::SHA1,
+        };
+
+        let decoded = totp_rs::Secret::Encoded(secret.clone()).to_bytes().ok()?;
+
+        let totp = totp_rs::TOTP::new(algo, digits as usize, 1, period as u64, decoded).ok()?;
+
+        let code = totp.generate_current().ok()?;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let remaining = period as u64 - (now % period as u64);
+
+        Some((code, remaining))
+    }
 }
 
 fn default_digits() -> u32 {

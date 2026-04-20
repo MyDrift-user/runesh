@@ -1,7 +1,12 @@
 //! Endpoint detection and response.
 //!
-//! File integrity monitoring, process tracking, indicator of compromise
-//! matching, and security event generation.
+//! File integrity monitoring (with real-time notify-based watcher),
+//! process tracking, indicator of compromise matching, and security
+//! event generation.
+
+pub mod watcher;
+
+pub use watcher::{WatcherHandle, start_watcher};
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
