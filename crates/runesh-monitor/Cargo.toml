@@ -1,0 +1,18 @@
+[package]
+name = "runesh-monitor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Monitoring check engine with alert state machine, metric collection, and health probes"
+
+[dependencies]
+tokio = { workspace = true, features = ["net", "time"] }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

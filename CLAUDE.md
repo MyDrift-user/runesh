@@ -48,6 +48,7 @@ RUNESH/
 │           └── styles/                  # globals.css (OKLCH theme, dark mode, editor styles)
 ├── crates/
 │   ├── runesh-acl/                      # Tailscale-compatible HuJSON ACL parser + evaluator + diff
+│   ├── runesh-audit/                    # Append-only hash-chained audit log with tamper detection
 │   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
 │   ├── helvetia-agentd/                 # Helvetia agent daemon (consumer binary, will move to own repo)
@@ -56,6 +57,8 @@ RUNESH/
 │   ├── runesh-core/                     # AppError, RateLimiter, WS broadcast, file upload, DB pool
 │   ├── runesh-desktop/                  # Remote desktop: screen capture, encoding, input injection (Win/Mac/Linux)
 │   ├── runesh-mesh/                     # WireGuard mesh: key management, peer maps, IP allocation, tunnel orchestration
+│   ├── runesh-monitor/                  # Check engine (HTTP/TCP/ping/disk/command), alert state machine
+│   ├── runesh-notify/                   # Notification dispatch: webhook, Slack, Discord, Ntfy, email (SMTP)
 │   ├── runesh-proxy/                    # Reverse proxy: resource config, routing, access control, load balancing
 │   ├── runesh-relay/                    # DERP relay: forwards encrypted WireGuard packets between peers over TCP
 │   ├── runesh-inventory/                # Hardware/software inventory collection (cross-platform)
