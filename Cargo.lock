@@ -5119,21 +5119,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "runesh-agent"
-version = "0.16.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "runesh-mesh",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "runesh-agentd"
 version = "0.16.0"
 dependencies = [
@@ -5142,8 +5127,9 @@ dependencies = [
  "clap",
  "dirs",
  "reqwest 0.12.28",
- "runesh-agent",
+ "runesh-auth",
  "runesh-coord",
+ "runesh-jobs",
  "runesh-mesh",
  "serde",
  "serde_json",
@@ -5169,6 +5155,7 @@ dependencies = [
  "rand 0.10.0",
  "reqwest 0.13.2",
  "runesh-core",
+ "runesh-mesh",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -5274,6 +5261,15 @@ dependencies = [
  "tracing",
  "uuid",
  "wmi",
+]
+
+[[package]]
+name = "runesh-jobs"
+version = "0.16.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

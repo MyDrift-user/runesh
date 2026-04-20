@@ -8,7 +8,8 @@ use std::time::Duration;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-use runesh_agent::{AgentIdentity, TaskQueue};
+use runesh_auth::AgentIdentity;
+use runesh_jobs::TaskQueue;
 
 /// Helvetia endpoint agent.
 #[derive(Parser)]

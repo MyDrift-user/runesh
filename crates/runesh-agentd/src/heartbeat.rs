@@ -5,7 +5,8 @@
 
 use std::time::Duration;
 
-use runesh_agent::{AgentIdentity, AgentTask, TaskQueue};
+use runesh_auth::AgentIdentity;
+use runesh_jobs::{AgentTask, TaskQueue};
 
 /// Heartbeat payload sent to the controller.
 #[derive(Debug, serde::Serialize)]

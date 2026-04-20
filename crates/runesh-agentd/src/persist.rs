@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use runesh_agent::AgentIdentity;
+use runesh_auth::AgentIdentity;
 
 /// Default identity file location per platform.
 pub fn default_identity_path() -> PathBuf {
