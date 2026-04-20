@@ -178,25 +178,95 @@ async fn run_ping_check(host: &str) -> (CheckStatus, String) {
 }
 
 fn run_disk_check(path: &str, min_free_percent: f64) -> (CheckStatus, String) {
-    // Use a simple approach: check if the path exists
-    // Full disk space checking requires platform-specific APIs
-    if std::path::Path::new(path).exists() {
-        (
-            CheckStatus::Ok,
-            format!("path {path} exists (disk space check requires platform integration)"),
-        )
-    } else {
-        (CheckStatus::Critical, format!("path {path} not found"))
+    use sysinfo::Disks;
+
+    if !std::path::Path::new(path).exists() {
+        return (CheckStatus::Critical, format!("path {path} not found"));
+    }
+
+    let disks = Disks::new_with_refreshed_list();
+
+    // Find the disk that contains this path by matching mount points
+    let target = std::path::Path::new(path);
+    let mut best_match: Option<(&sysinfo::Disk, usize)> = None;
+
+    for disk in disks.list() {
+        let mount = disk.mount_point();
+        if target.starts_with(mount) {
+            let depth = mount.components().count();
+            if best_match.is_none() || depth > best_match.unwrap().1 {
+                best_match = Some((disk, depth));
+            }
+        }
+    }
+
+    match best_match {
+        Some((disk, _)) => {
+            let total = disk.total_space();
+            let available = disk.available_space();
+            if total == 0 {
+                return (
+                    CheckStatus::Unknown,
+                    format!("disk at {path}: 0 total bytes"),
+                );
+            }
+            let free_percent = (available as f64 / total as f64) * 100.0;
+            let total_gb = total as f64 / 1_073_741_824.0;
+            let avail_gb = available as f64 / 1_073_741_824.0;
+
+            if free_percent < min_free_percent {
+                (
+                    CheckStatus::Critical,
+                    format!(
+                        "{path}: {free_percent:.1}% free ({avail_gb:.1}/{total_gb:.1} GB), threshold {min_free_percent}%"
+                    ),
+                )
+            } else {
+                (
+                    CheckStatus::Ok,
+                    format!("{path}: {free_percent:.1}% free ({avail_gb:.1}/{total_gb:.1} GB)"),
+                )
+            }
+        }
+        None => (
+            CheckStatus::Unknown,
+            format!("no disk found for path {path}"),
+        ),
     }
 }
 
 fn run_process_check(name: &str) -> (CheckStatus, String) {
-    // Process checking requires platform-specific APIs (sysinfo crate)
-    // For now, return unknown
-    (
-        CheckStatus::Unknown,
-        format!("process check for '{name}' requires sysinfo integration"),
-    )
+    use sysinfo::System;
+
+    let mut sys = System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+    let matching: Vec<_> = sys
+        .processes()
+        .values()
+        .filter(|p| {
+            let pname = p.name().to_string_lossy();
+            pname.eq_ignore_ascii_case(name) || pname.to_lowercase().contains(&name.to_lowercase())
+        })
+        .collect();
+
+    if matching.is_empty() {
+        (CheckStatus::Critical, format!("process '{name}' not found"))
+    } else {
+        let pids: Vec<String> = matching
+            .iter()
+            .take(5)
+            .map(|p| p.pid().to_string())
+            .collect();
+        (
+            CheckStatus::Ok,
+            format!(
+                "process '{name}' running ({} instance(s), PIDs: {})",
+                matching.len(),
+                pids.join(", ")
+            ),
+        )
+    }
 }
 
 async fn run_command_check(
@@ -281,8 +351,9 @@ mod tests {
     #[test]
     fn disk_check_exists() {
         let path = if cfg!(windows) { "C:\\" } else { "/" };
-        let (status, _) = run_disk_check(path, 10.0);
-        assert_eq!(status, CheckStatus::Ok);
+        let (status, msg) = run_disk_check(path, 0.1); // 0.1% threshold, root should always pass
+        assert_eq!(status, CheckStatus::Ok, "disk check failed: {msg}");
+        assert!(msg.contains("free"), "expected free space info: {msg}");
     }
 
     #[test]
