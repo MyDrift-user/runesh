@@ -51,7 +51,7 @@ windows = { version = "0.62", features = [
 
 # macOS screen capture + input
 [target.'cfg(target_os = "macos")'.dependencies]
-core-graphics = "0.25"
+core-graphics = { version = "0.25", features = ["highsierra"] }
 core-foundation = "0.10"
 
 # Linux X11 screen capture + input

@@ -1,6 +1,6 @@
 //! Linux X11 input injection using XTest extension.
 
-use x11rb::connection::Connection;
+use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::xproto::*;
 use x11rb::protocol::xtest::ConnectionExt as XtestExt;
 
