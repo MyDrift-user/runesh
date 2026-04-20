@@ -11,7 +11,7 @@ use bollard::container::{
 };
 use futures_util::StreamExt;
 
-use crate::{
+use runesh_workload::{
     RunResult, Workload, WorkloadDriver, WorkloadError, WorkloadSnapshot, WorkloadState,
     WorkloadType,
 };

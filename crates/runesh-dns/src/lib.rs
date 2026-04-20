@@ -1,4 +1,9 @@
-//! DNS management: MagicDNS, split DNS, zone management, service discovery.
+//! DNS management: MagicDNS, split DNS, zone management, service discovery,
+//! and async DNS resolution via hickory-resolver.
+
+pub mod resolver;
+
+pub use resolver::DnsResolver;
 
 use std::collections::HashMap;
 use std::net::Ipv4Addr;

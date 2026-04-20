@@ -1,5 +1,9 @@
 //! Network flow collector: NetFlow v5/v9, sFlow, IPFIX parsing.
 
+pub mod netflow;
+
+pub use netflow::{NetflowV5Header, listen_netflow_v5, parse_netflow_v5};
+
 use std::net::Ipv4Addr;
 
 use chrono::{DateTime, Utc};
