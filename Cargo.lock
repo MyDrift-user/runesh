@@ -5407,6 +5407,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "runesh-flow"
+version = "0.16.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "runesh-inventory"
 version = "0.16.0"
 dependencies = [
@@ -5445,6 +5455,16 @@ dependencies = [
 
 [[package]]
 name = "runesh-license"
+version = "0.16.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "runesh-mdm"
 version = "0.16.0"
 dependencies = [
  "chrono",
@@ -5495,6 +5515,16 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "runesh-patch"
+version = "0.16.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -5556,6 +5586,16 @@ dependencies = [
  "uuid",
  "walkdir",
  "zip 8.5.1",
+]
+
+[[package]]
+name = "runesh-stun"
+version = "0.16.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

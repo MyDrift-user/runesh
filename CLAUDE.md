@@ -60,11 +60,14 @@ RUNESH/
 │   ├── runesh-coord/                    # Tailscale-compatible coordination: Noise IK handshake, node registry, map builder
 │   ├── runesh-dns/                      # MagicDNS, split DNS, zone management, service discovery
 │   ├── runesh-edr/                      # Endpoint detection: file integrity monitoring, IoC matching, security events
+│   ├── runesh-flow/                     # Network flow collector: NetFlow/sFlow/IPFIX, top-N aggregations
+│   ├── runesh-mdm/                      # Mobile device management: enrollment, config profiles, remote actions
 │   ├── runesh-core/                     # AppError, RateLimiter, WS broadcast, file upload, DB pool
 │   ├── runesh-desktop/                  # Remote desktop: screen capture, encoding, input injection (Win/Mac/Linux)
 │   ├── runesh-mesh/                     # WireGuard mesh: key management, peer maps, IP allocation, tunnel orchestration
 │   ├── runesh-monitor/                  # Check engine (HTTP/TCP/ping/disk/command), alert state machine
 │   ├── runesh-notify/                   # Notification dispatch: webhook, Slack, Discord, Ntfy, email (SMTP)
+│   ├── runesh-patch/                    # Patch management: ring-based rollout, CVE correlation, maintenance windows
 │   ├── runesh-pkg/                      # Cross-platform package manager trait: apt, dnf, pacman, winget, brew
 │   ├── runesh-proxy/                    # Reverse proxy: resource config, routing, access control, load balancing
 │   ├── runesh-relay/                    # DERP relay: forwards encrypted WireGuard packets between peers over TCP
@@ -75,6 +78,7 @@ RUNESH/
 │   ├── runesh-remote/                   # Remote file explorer + CLI over WebSocket with PTY
 │   ├── runesh-tauri/                    # Tauri helpers (tray, process mgmt, config, elevation)
 │   ├── runesh-telemetry/                # Sentry/GlitchTip error reporting + tracing layer
+│   ├── runesh-stun/                     # NAT traversal: STUN, hole punching, connection strategy
 │   ├── runesh-vault/                    # Encrypted key-value secret store with rotation and JIT decryption
 │   ├── runesh-workload/                 # Uniform VM/container/K8s workload driver trait
 │   ├── runesh-tun/                      # Cross-platform TUN device (Windows wintun + Linux)
