@@ -1,14 +1,14 @@
 [package]
-name = "helvetia-agent"
+name = "runesh-agentd"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Helvetia endpoint agent: enrolls with the controller, joins the mesh, runs heartbeat and task execution"
+description = "RUNESH endpoint agent daemon: enrolls with the controller, joins the mesh, runs heartbeat and task execution"
 
 [[bin]]
-name = "helvetia-agent"
+name = "runesh-agentd"
 path = "src/main.rs"
 
 [dependencies]

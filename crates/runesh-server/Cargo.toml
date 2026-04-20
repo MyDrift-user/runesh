@@ -1,14 +1,14 @@
 [package]
-name = "helvetia-ctl"
+name = "runesh-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Helvetia coordination server: node enrollment, mesh coordination, DERP relay, and management API"
+description = "RUNESH coordination server: node enrollment, mesh coordination, DERP relay, and management API"
 
 [[bin]]
-name = "helvetia-ctl"
+name = "runesh-server"
 path = "src/main.rs"
 
 [dependencies]

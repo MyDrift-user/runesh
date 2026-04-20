@@ -35,15 +35,15 @@ async fn main() {
     let app = api::router(state);
 
     // Start the HTTP API server
-    let api_addr = std::env::var("HELVETIA_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
-    tracing::info!(%api_addr, "starting Helvetia coordination server");
+    let api_addr = std::env::var("RUNESH_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
+    tracing::info!(%api_addr, "starting RUNESH coordination server");
 
     let listener = tokio::net::TcpListener::bind(&api_addr)
         .await
         .expect("failed to bind API address");
 
     // Start DERP relay in background
-    let relay_addr = std::env::var("HELVETIA_RELAY_ADDR").unwrap_or_else(|_| "0.0.0.0:3340".into());
+    let relay_addr = std::env::var("RUNESH_RELAY_ADDR").unwrap_or_else(|_| "0.0.0.0:3340".into());
     tokio::spawn(async move {
         let relay = RelayServer::new(RelayConfig {
             bind_addr: relay_addr,
