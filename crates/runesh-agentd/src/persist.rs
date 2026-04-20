@@ -11,9 +11,9 @@ use runesh_agent::AgentIdentity;
 /// Default identity file location per platform.
 pub fn default_identity_path() -> PathBuf {
     if cfg!(windows) {
-        PathBuf::from(r"C:\ProgramData\helvetia\agent\identity.json")
+        PathBuf::from(r"C:\ProgramData\runesh\agent\identity.json")
     } else {
-        PathBuf::from("/etc/helvetia/agent/identity.json")
+        PathBuf::from("/etc/runesh/agent/identity.json")
     }
 }
 

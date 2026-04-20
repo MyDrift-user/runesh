@@ -12,14 +12,14 @@ use runesh_agent::{AgentIdentity, TaskQueue};
 
 /// Helvetia endpoint agent.
 #[derive(Parser)]
-#[command(name = "helvetia-agent", about = "Helvetia mesh agent daemon")]
+#[command(name = "runesh-agentd", about = "RUNESH mesh agent daemon")]
 struct Cli {
     /// Controller URL (e.g., https://ctrl.example.com:8080).
-    #[arg(long, env = "HELVETIA_CONTROLLER")]
+    #[arg(long, env = "RUNESH_CONTROLLER")]
     controller: Option<String>,
 
     /// Pre-authentication key for unattended enrollment.
-    #[arg(long, env = "HELVETIA_AUTH_KEY")]
+    #[arg(long, env = "RUNESH_AUTH_KEY")]
     auth_key: Option<String>,
 
     /// Identity file path.

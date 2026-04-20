@@ -1,6 +1,6 @@
-# Helvetia Implementation Plan
+# RUNESH Implementation Plan
 
-Comprehensive implementation plan for AI subagents building the Helvetia platform on top of RUNESH.
+Comprehensive implementation plan for AI subagents building the RUNESH platform.
 
 ## Architecture Decision Record
 
@@ -303,14 +303,14 @@ The public-facing reverse proxy running on cheap VPS nodes. Routes incoming HTTP
 
 **pingora ProxyHttp implementation:**
 ```rust
-struct HelvetiaProxy {
+struct RuneshProxy {
     config: Arc<ProxyConfig>,  // tenant -> resource -> backend mapping
     mesh: Arc<MeshManager>,    // for reaching backends via mesh
     certs: Arc<CertStore>,     // ACME-managed certificates
 }
 
 #[async_trait]
-impl ProxyHttp for HelvetiaProxy {
+impl ProxyHttp for RuneshProxy {
     type CTX = RequestContext; // per-request tenant + resource state
 
     async fn upstream_peer(
