@@ -51,6 +51,7 @@ RUNESH/
 │   ├── runesh-agent/                    # Endpoint daemon: enrollment, identity, task queue, heartbeat
 │   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
+│   ├── helvetia-ctl/                    # Helvetia coordination server binary: API, enrollment, mesh, DERP relay
 │   ├── runesh-coord/                    # Tailscale-compatible coordination: Noise IK handshake, node registry, map builder
 │   ├── runesh-core/                     # AppError, RateLimiter, WS broadcast, file upload, DB pool
 │   ├── runesh-desktop/                  # Remote desktop: screen capture, encoding, input injection (Win/Mac/Linux)
