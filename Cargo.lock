@@ -5220,6 +5220,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "runesh-appliance"
+version = "0.16.0"
+dependencies = [
+ "async-trait",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "runesh-asset"
+version = "0.16.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "runesh-audit"
 version = "0.16.0"
 dependencies = [
@@ -5366,6 +5390,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "runesh-ipam"
+version = "0.16.0"
+dependencies = [
+ "ipnet",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "runesh-jobs"
 version = "0.16.0"
 dependencies = [
@@ -5373,6 +5407,16 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "runesh-license"
+version = "0.16.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
