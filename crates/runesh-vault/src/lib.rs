@@ -1,7 +1,18 @@
-//! Encrypted key-value secret store.
+//! Encrypted vault with typed entries for password management.
 //!
 //! Secrets are encrypted at rest with ChaCha20-Poly1305 using a
 //! 256-bit master key. Each secret gets a unique nonce.
+//!
+//! Supports structured entry types: logins, API keys, SSH keys,
+//! TOTP secrets, passkeys, certificates, WireGuard keys, database
+//! credentials, credit cards, and custom key-value pairs.
+
+pub mod entry;
+
+pub use entry::{
+    ApiKeyEntry, CardEntry, CertificateEntry, CustomEntry, DatabaseEntry, EntryContent, LoginEntry,
+    PasskeyEntry, SecureNoteEntry, SshKeyEntry, TotpEntry, VaultEntry, WireguardKeyEntry,
+};
 
 use base64::Engine;
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng};
@@ -165,6 +176,59 @@ impl Vault {
     pub fn export(&self) -> Result<String, serde_json::Error> {
         let secrets: Vec<&SealedSecret> = self.secrets.values().collect();
         serde_json::to_string_pretty(&secrets)
+    }
+
+    /// Store a typed vault entry (encrypts the full JSON representation).
+    pub fn put_entry(
+        &mut self,
+        id: &str,
+        entry: &VaultEntry,
+        expires_at: Option<DateTime<Utc>>,
+    ) -> Result<(), VaultError> {
+        let bytes = entry.to_bytes().map_err(|_| VaultError::EncryptionFailed)?;
+        self.put(id, &bytes, entry.entry_type(), expires_at)
+    }
+
+    /// Retrieve and decrypt a typed vault entry.
+    pub fn get_entry(&self, id: &str) -> Result<VaultEntry, VaultError> {
+        let bytes = self.get(id)?;
+        VaultEntry::from_bytes(&bytes).map_err(|_| VaultError::CorruptData)
+    }
+
+    /// List entries filtered by type.
+    pub fn list_by_type(&self, entry_type: &str) -> Vec<&SealedSecret> {
+        self.secrets
+            .values()
+            .filter(|s| s.secret_type == entry_type)
+            .collect()
+    }
+
+    /// Search entries by name (decrypts each to check, use sparingly).
+    pub fn search(&self, query: &str) -> Vec<(String, VaultEntry)> {
+        let query_lower = query.to_lowercase();
+        self.secrets
+            .keys()
+            .filter_map(|id| {
+                self.get_entry(id).ok().and_then(|entry| {
+                    if entry.name.to_lowercase().contains(&query_lower)
+                        || entry
+                            .tags
+                            .iter()
+                            .any(|t| t.to_lowercase().contains(&query_lower))
+                        || entry
+                            .url
+                            .as_deref()
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .contains(&query_lower)
+                    {
+                        Some((id.clone(), entry))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect()
     }
 
     /// Import sealed secrets from JSON.
