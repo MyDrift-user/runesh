@@ -48,7 +48,6 @@ RUNESH/
 │           └── styles/                  # globals.css (OKLCH theme, dark mode, editor styles)
 ├── crates/
 │   ├── runesh-acl/                      # Tailscale-compatible HuJSON ACL parser + evaluator + diff
-│   ├── runesh-agent/                    # Endpoint daemon: enrollment, identity, task queue, heartbeat
 │   ├── runesh-auth/                     # OIDC + JWT + Axum middleware + AuthStore trait
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
 │   ├── runesh-agentd/                   # Agent daemon binary: enrollment, heartbeat, identity persistence
@@ -60,6 +59,7 @@ RUNESH/
 │   ├── runesh-proxy/                    # Reverse proxy: resource config, routing, access control, load balancing
 │   ├── runesh-relay/                    # DERP relay: forwards encrypted WireGuard packets between peers over TCP
 │   ├── runesh-inventory/                # Hardware/software inventory collection (cross-platform)
+│   ├── runesh-jobs/                     # Typed job/task model with idempotency, retry, and queue management
 │   ├── runesh-remote/                   # Remote file explorer + CLI over WebSocket with PTY
 │   ├── runesh-tauri/                    # Tauri helpers (tray, process mgmt, config, elevation)
 │   ├── runesh-telemetry/                # Sentry/GlitchTip error reporting + tracing layer

@@ -1,6 +1,6 @@
 //! Enrollment with the Helvetia controller.
 
-use runesh_agent::{AgentIdentity, EnrollmentState};
+use runesh_auth::{AgentIdentity, EnrollmentState};
 use runesh_coord::{RegisterRequest, RegisterResponse};
 
 /// Enroll this agent with the controller.
