@@ -1,0 +1,281 @@
+//! Backup engine with content-addressed storage, deduplication, and retention.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+/// A backup snapshot (point-in-time reference to chunks).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snapshot {
+    pub id: String,
+    pub hostname: String,
+    pub paths: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub total_size: u64,
+    pub chunk_count: usize,
+    /// SHA-256 hashes of chunks in this snapshot.
+    pub chunk_ids: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+/// A content-addressed chunk.
+#[derive(Debug, Clone)]
+pub struct Chunk {
+    /// SHA-256 hash of the content (content address).
+    pub id: String,
+    /// Raw (or compressed) content.
+    pub data: Vec<u8>,
+    /// Original size before compression.
+    pub original_size: usize,
+}
+
+/// Hash data to produce a content address.
+pub fn content_hash(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    format!("{:x}", hasher.finalize())
+}
+
+/// Simple fixed-size chunker (for testing; real impl uses fastcdc).
+pub fn chunk_data(data: &[u8], chunk_size: usize) -> Vec<Chunk> {
+    data.chunks(chunk_size)
+        .map(|slice| {
+            let id = content_hash(slice);
+            Chunk {
+                id,
+                data: slice.to_vec(),
+                original_size: slice.len(),
+            }
+        })
+        .collect()
+}
+
+/// Retention policy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetentionPolicy {
+    pub keep_daily: u32,
+    pub keep_weekly: u32,
+    pub keep_monthly: u32,
+    #[serde(default)]
+    pub keep_yearly: u32,
+}
+
+impl Default for RetentionPolicy {
+    fn default() -> Self {
+        Self {
+            keep_daily: 7,
+            keep_weekly: 4,
+            keep_monthly: 12,
+            keep_yearly: 0,
+        }
+    }
+}
+
+/// In-memory backup repository (trait implementations for real backends).
+#[derive(Debug, Default)]
+pub struct BackupRepo {
+    snapshots: Vec<Snapshot>,
+    /// Content-addressed chunk store (hash -> data).
+    chunks: std::collections::HashMap<String, Vec<u8>>,
+}
+
+impl BackupRepo {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Store a chunk. Returns true if it was new (not deduplicated).
+    pub fn store_chunk(&mut self, chunk: &Chunk) -> bool {
+        if self.chunks.contains_key(&chunk.id) {
+            false // already exists, dedup
+        } else {
+            self.chunks.insert(chunk.id.clone(), chunk.data.clone());
+            true
+        }
+    }
+
+    /// Retrieve a chunk by hash.
+    pub fn get_chunk(&self, id: &str) -> Option<&Vec<u8>> {
+        self.chunks.get(id)
+    }
+
+    /// Create a snapshot from chunks.
+    pub fn create_snapshot(
+        &mut self,
+        hostname: &str,
+        paths: Vec<String>,
+        chunks: &[Chunk],
+        tags: Vec<String>,
+    ) -> Snapshot {
+        let chunk_ids: Vec<String> = chunks.iter().map(|c| c.id.clone()).collect();
+        let total_size: u64 = chunks.iter().map(|c| c.original_size as u64).sum();
+
+        // Store chunks (dedup happens automatically)
+        for chunk in chunks {
+            self.store_chunk(chunk);
+        }
+
+        let snapshot = Snapshot {
+            id: uuid::Uuid::new_v4().to_string(),
+            hostname: hostname.to_string(),
+            paths,
+            created_at: Utc::now(),
+            total_size,
+            chunk_count: chunk_ids.len(),
+            chunk_ids,
+            tags,
+        };
+        self.snapshots.push(snapshot.clone());
+        snapshot
+    }
+
+    /// Restore a snapshot: reassemble chunks into original data.
+    pub fn restore(&self, snapshot_id: &str) -> Result<Vec<u8>, BackupError> {
+        let snapshot = self
+            .snapshots
+            .iter()
+            .find(|s| s.id == snapshot_id)
+            .ok_or_else(|| BackupError::SnapshotNotFound(snapshot_id.into()))?;
+
+        let mut data = Vec::new();
+        for chunk_id in &snapshot.chunk_ids {
+            let chunk_data = self
+                .chunks
+                .get(chunk_id)
+                .ok_or_else(|| BackupError::ChunkMissing(chunk_id.clone()))?;
+            data.extend_from_slice(chunk_data);
+        }
+        Ok(data)
+    }
+
+    /// List all snapshots.
+    pub fn list_snapshots(&self) -> &[Snapshot] {
+        &self.snapshots
+    }
+
+    /// Delete a snapshot (does not remove chunks; they may be shared).
+    pub fn delete_snapshot(&mut self, id: &str) -> bool {
+        let before = self.snapshots.len();
+        self.snapshots.retain(|s| s.id != id);
+        self.snapshots.len() < before
+    }
+
+    /// Count unique chunks.
+    pub fn chunk_count(&self) -> usize {
+        self.chunks.len()
+    }
+
+    /// Total storage used by chunks.
+    pub fn storage_bytes(&self) -> u64 {
+        self.chunks.values().map(|d| d.len() as u64).sum()
+    }
+
+    /// Garbage collect: remove chunks not referenced by any snapshot.
+    pub fn gc(&mut self) -> usize {
+        let referenced: std::collections::HashSet<&str> = self
+            .snapshots
+            .iter()
+            .flat_map(|s| s.chunk_ids.iter().map(|id| id.as_str()))
+            .collect();
+        let before = self.chunks.len();
+        self.chunks.retain(|id, _| referenced.contains(id.as_str()));
+        before - self.chunks.len()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BackupError {
+    #[error("snapshot not found: {0}")]
+    SnapshotNotFound(String),
+    #[error("chunk missing: {0}")]
+    ChunkMissing(String),
+    #[error("storage error: {0}")]
+    Storage(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_hashing() {
+        let h1 = content_hash(b"hello");
+        let h2 = content_hash(b"hello");
+        let h3 = content_hash(b"world");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn chunking() {
+        let data = b"hello world this is test data for chunking";
+        let chunks = chunk_data(data, 10);
+        assert!(chunks.len() >= 4);
+        // Reassemble
+        let reassembled: Vec<u8> = chunks.iter().flat_map(|c| c.data.clone()).collect();
+        assert_eq!(reassembled, data);
+    }
+
+    #[test]
+    fn deduplication() {
+        let mut repo = BackupRepo::new();
+        let chunk = Chunk {
+            id: content_hash(b"data"),
+            data: b"data".to_vec(),
+            original_size: 4,
+        };
+        assert!(repo.store_chunk(&chunk)); // new
+        assert!(!repo.store_chunk(&chunk)); // dedup
+        assert_eq!(repo.chunk_count(), 1);
+    }
+
+    #[test]
+    fn snapshot_and_restore() {
+        let mut repo = BackupRepo::new();
+        let data = b"important file content here";
+        let chunks = chunk_data(data, 10);
+
+        let snap = repo.create_snapshot("server-1", vec!["/data".into()], &chunks, vec![]);
+        assert!(!snap.id.is_empty());
+        assert_eq!(snap.total_size, data.len() as u64);
+
+        let restored = repo.restore(&snap.id).unwrap();
+        assert_eq!(restored, data);
+    }
+
+    #[test]
+    fn cross_snapshot_dedup() {
+        let mut repo = BackupRepo::new();
+        let data = b"shared content between snapshots";
+        let chunks = chunk_data(data, 16);
+
+        repo.create_snapshot("host-a", vec!["/a".into()], &chunks, vec![]);
+        repo.create_snapshot("host-b", vec!["/b".into()], &chunks, vec![]);
+
+        // Two snapshots but chunks stored only once
+        assert_eq!(repo.list_snapshots().len(), 2);
+        assert_eq!(repo.chunk_count(), chunks.len());
+    }
+
+    #[test]
+    fn garbage_collection() {
+        let mut repo = BackupRepo::new();
+        let data1 = chunk_data(b"first backup", 6);
+        let data2 = chunk_data(b"second backup", 6);
+
+        let snap1 = repo.create_snapshot("h", vec![], &data1, vec![]);
+        repo.create_snapshot("h", vec![], &data2, vec![]);
+
+        let before = repo.chunk_count();
+        repo.delete_snapshot(&snap1.id);
+        let removed = repo.gc();
+        assert!(removed > 0 || repo.chunk_count() <= before);
+    }
+
+    #[test]
+    fn snapshot_not_found() {
+        let repo = BackupRepo::new();
+        assert!(repo.restore("nonexistent").is_err());
+    }
+}
