@@ -1,5 +1,9 @@
 //! Backup engine with content-addressed storage, deduplication, and retention.
 
+pub mod scan;
+
+pub use scan::{ScannedFile, backup_directory, scan_directory};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
