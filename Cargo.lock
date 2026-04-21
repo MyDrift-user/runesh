@@ -5653,13 +5653,14 @@ name = "runesh-hyperv"
 version = "0.16.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "runesh-workload",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
+ "wmi",
 ]
 
 [[package]]

@@ -78,7 +78,7 @@ RUNESH/
 │   ├── runesh-stun/                     # NAT traversal: STUN, hole punching, connection strategy
 │   ├── runesh-vault/                    # Encrypted key-value secret store with rotation and JIT decryption
 │   ├── runesh-docker/                   # Docker/Podman workload driver via bollard
-│   ├── runesh-hyperv/                   # Hyper-V workload driver via PowerShell (Windows)
+│   ├── runesh-hyperv/                   # Hyper-V workload driver via WMI (Windows)
 │   ├── runesh-proxmox/                  # Proxmox VE workload driver via REST API
 │   ├── runesh-vmware/                   # VMware vCenter/ESXi workload driver via REST API
 │   ├── runesh-winget/                   # WinGet REST source server
