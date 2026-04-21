@@ -16,8 +16,16 @@ axum = ["dep:axum", "dep:futures-util"]
 webrtc-transport = ["dep:webrtc", "dep:tokio-util"]
 # Software H.264 encoder via openh264.
 h264 = ["dep:openh264"]
-# Audio capture (cpal) + Opus encoding.
-audio = ["dep:cpal", "dep:opus"]
+# Audio capture + Opus encoding.
+# - Windows / Linux: cpal (WASAPI loopback / default input).
+# - macOS: ScreenCaptureKit `SCStream` for real system-audio loopback on
+#   macOS 13+. The screencapturekit dep is declared under the macOS target
+#   block; enabling `audio` activates it there automatically.
+#
+# Opus encoding uses `mousiki`, a pure-Rust port of the Xiph Opus reference
+# implementation. No cmake, no bindgen, no libclang, no system libopus — just
+# `cargo build --features audio` works on a stock toolchain.
+audio = ["dep:cpal", "dep:mousiki", "dep:screencapturekit"]
 # Clipboard sharing.
 clipboard = ["dep:arboard"]
 # Input injection kept on by default; legacy flag retained for consumers.
@@ -55,8 +63,13 @@ webrtc = { version = "0.14", optional = true }
 openh264 = { version = "0.9", optional = true }
 
 # Optional: Audio capture and Opus encoding.
+# `mousiki` is a pure-Rust Opus codec (port of the Xiph reference
+# implementation) — chosen over the `opus` / `shiguredo_opus` / `libopus_sys`
+# crates because they all transitively require cmake + libclang + llvm-tools,
+# which are not shipped with the Rust toolchain and differ by platform.
+# `mousiki` only pulls in pure-Rust deps (libm, bitflags, log).
 cpal = { version = "0.17", optional = true }
-opus = { version = "0.3", optional = true }
+mousiki = { version = "0.2", optional = true }
 
 # Windows screen capture + input + WASAPI loopback.
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -81,6 +94,10 @@ windows = { version = "0.62", features = [
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = { version = "0.25", features = ["highsierra"] }
 core-foundation = "0.10"
+# Real system-audio loopback on macOS 13+ via ScreenCaptureKit. Only pulled
+# in when the `audio` feature is on. cpal can't do system audio loopback
+# on macOS without an aggregate device.
+screencapturekit = { version = "1", optional = true, features = ["macos_13_0"] }
 
 # Linux X11 screen capture + input.
 [target.'cfg(target_os = "linux")'.dependencies]

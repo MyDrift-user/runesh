@@ -255,10 +255,13 @@ mod axum_handlers {
                             ));
                             #[cfg(feature = "audio")]
                             {
-                                if audio_on && state.session_manager.audio_enabled() {
-                                    if let Ok(ap) = state.session_manager.ensure_audio_pipeline().await {
-                                        audio_forwarder = Some(spawn_audio_forwarder(Arc::clone(&peer), ap));
-                                    }
+                                if audio_on
+                                    && state.session_manager.audio_enabled()
+                                    && let Ok(ap) =
+                                        state.session_manager.ensure_audio_pipeline().await
+                                {
+                                    audio_forwarder =
+                                        Some(spawn_audio_forwarder(Arc::clone(&peer), ap));
                                 }
                             }
                             // Nudge the encoder for an IDR so the client can decode immediately.
