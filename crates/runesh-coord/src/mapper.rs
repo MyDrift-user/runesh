@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use runesh_acl::{AclPolicy, EvalContext};
+use runesh_acl::{AclPolicy, EvalContext, PortSet, parse_dst};
 
 use crate::types::{
     DerpMap, DnsConfig, DstPortRange, FilterRule, MapResponse, Node, PortRange, User,
@@ -87,7 +87,7 @@ impl MapBuilder {
                 continue;
             }
 
-            if peer.addresses.first().is_none() {
+            if peer.addresses.is_empty() {
                 continue;
             }
 
@@ -96,12 +96,11 @@ impl MapBuilder {
 
             if can_reach {
                 peers.push(peer.clone());
-                if let Some(uid) = peer.user {
-                    if let Some(user) = self.users.get(&uid) {
-                        if !referenced_users.iter().any(|u: &User| u.id == uid) {
-                            referenced_users.push(user.clone());
-                        }
-                    }
+                if let Some(uid) = peer.user
+                    && let Some(user) = self.users.get(&uid)
+                    && !referenced_users.iter().any(|u: &User| u.id == uid)
+                {
+                    referenced_users.push(user.clone());
                 }
             }
         }
@@ -130,6 +129,11 @@ impl MapBuilder {
 
     /// Determine which ports node `from` can reach on node `to`.
     /// Returns a list of (start, end) port ranges.
+    ///
+    /// Instead of probing a fixed list of ports, this walks the ACL's actual
+    /// destination port specifications, unions them, and checks each distinct
+    /// range against the evaluator. This correctly surfaces user-declared
+    /// ranges like `8000-9000` or `1-1024` in the emitted filter.
     fn allowed_ports(&self, from: &Node, to: &Node) -> Vec<(u16, u16)> {
         let src_ip = match from.addresses.first().and_then(|ip| ip.parse().ok()) {
             Some(ip) => ip,
@@ -143,6 +147,9 @@ impl MapBuilder {
         let src_user = from
             .user
             .and_then(|uid| self.users.get(&uid).map(|u| u.login_name.clone()));
+        let dst_user = to
+            .user
+            .and_then(|uid| self.users.get(&uid).map(|u| u.login_name.clone()));
 
         let base_ctx = EvalContext {
             src_user,
@@ -152,49 +159,84 @@ impl MapBuilder {
             dst_ip,
             dst_tags: to.tags.clone(),
             dst_port: 0,
+            dst_user,
         };
 
-        // Check if wildcard port (0) is allowed, meaning all ports
+        // Fast path: if rule evaluation at port 0 is allowed via a wildcard
+        // port spec, treat as all ports allowed.
         let wildcard = EvalContext {
             dst_port: 0,
             ..base_ctx.clone()
         };
         if self.acl.evaluate(&wildcard).allowed {
-            return vec![(0, 65535)];
-        }
-
-        // Scan representative ports to find which ranges are allowed
-        let mut allowed = Vec::new();
-        let probe_ports = [
-            22, 25, 53, 80, 443, 465, 587, 993, 995, 1433, 1521, 3306, 3389, 5432, 5900, 6379,
-            8080, 8443, 9090, 9100, 9200, 27017,
-        ];
-
-        for &port in &probe_ports {
-            let ctx = EvalContext {
-                dst_port: port,
+            // Confirm wildcard by checking a sentinel high port.
+            let sentinel = EvalContext {
+                dst_port: 65535,
                 ..base_ctx.clone()
             };
-            if self.acl.evaluate(&ctx).allowed {
-                allowed.push((port, port));
+            if self.acl.evaluate(&sentinel).allowed {
+                return vec![(0, 65535)];
             }
         }
 
-        // Also check common ranges
-        for (start, end) in [(1024, 1024), (8000, 8000), (49152, 49152)] {
-            let ctx = EvalContext {
-                dst_port: start,
-                ..base_ctx.clone()
+        // Collect candidate port ranges directly from the ACL rules.
+        let mut candidates: Vec<(u16, u16)> = Vec::new();
+        for rule in &self.acl.acls {
+            for d in &rule.dst {
+                let parsed = match parse_dst(d) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+                match parsed.ports {
+                    PortSet::Any => candidates.push((0, 65535)),
+                    PortSet::Ports(ranges) => {
+                        for r in ranges {
+                            candidates.push((r.start, r.end));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort, dedup, and merge overlapping/adjacent ranges.
+        candidates.sort();
+        candidates.dedup();
+        let candidates = merge_ranges(candidates);
+
+        // For each candidate range, probe both endpoints. If both match, keep
+        // the range. If only some ports match, split into the matching
+        // sub-span. For simple single-port rules (start==end) this is exact.
+        let mut allowed: Vec<(u16, u16)> = Vec::new();
+        for (start, end) in candidates {
+            let start_ok = {
+                let ctx = EvalContext {
+                    dst_port: start,
+                    ..base_ctx.clone()
+                };
+                self.acl.evaluate(&ctx).allowed
             };
-            if self.acl.evaluate(&ctx).allowed {
+            let end_ok = if start == end {
+                start_ok
+            } else {
+                let ctx = EvalContext {
+                    dst_port: end,
+                    ..base_ctx.clone()
+                };
+                self.acl.evaluate(&ctx).allowed
+            };
+
+            if start_ok && end_ok {
                 allowed.push((start, end));
+            } else if start_ok {
+                allowed.push((start, start));
+            } else if end_ok {
+                allowed.push((end, end));
             }
         }
 
-        // Merge adjacent/overlapping ranges
         allowed.sort();
         allowed.dedup();
-        allowed
+        merge_ranges(allowed)
     }
 
     /// Build packet filter rules for a node based on ACL evaluation.
@@ -206,7 +248,7 @@ impl MapBuilder {
             None => return rules,
         };
 
-        for (_, peer) in &self.nodes {
+        for peer in self.nodes.values() {
             if peer.id == node.id || !peer.authorized {
                 continue;
             }
@@ -244,6 +286,27 @@ impl MapBuilder {
     pub fn node_ids(&self) -> Vec<u64> {
         self.nodes.keys().copied().collect()
     }
+}
+
+/// Merge sorted port ranges, collapsing overlapping or adjacent spans.
+fn merge_ranges(mut ranges: Vec<(u16, u16)>) -> Vec<(u16, u16)> {
+    if ranges.is_empty() {
+        return ranges;
+    }
+    ranges.sort();
+    let mut merged: Vec<(u16, u16)> = Vec::with_capacity(ranges.len());
+    for (s, e) in ranges {
+        if let Some(last) = merged.last_mut()
+            && s <= last.1.saturating_add(1)
+        {
+            if e > last.1 {
+                last.1 = e;
+            }
+            continue;
+        }
+        merged.push((s, e));
+    }
+    merged
 }
 
 #[cfg(test)]

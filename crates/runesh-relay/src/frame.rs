@@ -53,6 +53,8 @@ pub enum FrameType {
     Restarting = 0x0f,
     /// Server-to-server forwarding (multi-relay mesh).
     ForwardPacket = 0x10,
+    /// Server-to-client random challenge for HMAC auth (runesh extension).
+    ServerChallenge = 0x11,
 }
 
 impl FrameType {
@@ -73,6 +75,7 @@ impl FrameType {
             0x0e => Some(Self::Health),
             0x0f => Some(Self::Restarting),
             0x10 => Some(Self::ForwardPacket),
+            0x11 => Some(Self::ServerChallenge),
             _ => None,
         }
     }
@@ -133,6 +136,16 @@ pub enum Frame {
         reconnect_in_ms: u32,
         try_for_ms: u32,
     },
+
+    /// Server-to-server forwarded packet (multi-relay mesh only).
+    /// Never legal on a client connection.
+    ForwardPacket {
+        dst_key: [u8; KEY_LEN],
+        data: Vec<u8>,
+    },
+
+    /// Server-to-client random challenge for HMAC auth (runesh extension).
+    ServerChallenge { nonce: Vec<u8> },
 }
 
 /// Encode a frame into a byte buffer.
@@ -198,6 +211,15 @@ pub fn encode_frame(frame: &Frame, buf: &mut BytesMut) {
             write_header(buf, FrameType::Restarting, 8);
             buf.put_u32(*reconnect_in_ms);
             buf.put_u32(*try_for_ms);
+        }
+        Frame::ForwardPacket { dst_key, data } => {
+            write_header(buf, FrameType::ForwardPacket, KEY_LEN + data.len());
+            buf.put_slice(dst_key);
+            buf.put_slice(data);
+        }
+        Frame::ServerChallenge { nonce } => {
+            write_header(buf, FrameType::ServerChallenge, nonce.len());
+            buf.put_slice(nonce);
         }
     }
 }
@@ -305,16 +327,20 @@ pub fn decode_frame(buf: &mut BytesMut) -> Result<Option<Frame>, RelayError> {
             }
         }
         FrameType::ForwardPacket => {
-            // Same as SendPacket but server-to-server
+            // Server-to-server only. Preserve the type so the server can
+            // reject it when it arrives from a client connection.
             if payload.len() < KEY_LEN {
                 return Err(RelayError::InvalidFrame("ForwardPacket too short".into()));
             }
             let dst_key = read_key(&payload[..KEY_LEN])?;
-            Frame::SendPacket {
+            Frame::ForwardPacket {
                 dst_key,
                 data: payload[KEY_LEN..].to_vec(),
             }
         }
+        FrameType::ServerChallenge => Frame::ServerChallenge {
+            nonce: payload.to_vec(),
+        },
     };
 
     Ok(Some(frame))

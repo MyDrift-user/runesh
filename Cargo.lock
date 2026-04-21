@@ -5595,6 +5595,7 @@ name = "runesh-flow"
 version = "0.16.0"
 dependencies = [
  "chrono",
+ "ipnet",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5683,6 +5684,7 @@ dependencies = [
  "ipnet",
  "rand 0.8.5",
  "runesh-acl",
+ "secrecy",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5778,6 +5780,11 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "dashmap",
+ "hmac 0.12.1",
+ "rand 0.8.5",
+ "secrecy",
+ "sha2 0.10.9",
+ "subtle",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5855,6 +5862,8 @@ name = "runesh-tun"
 version = "0.16.0"
 dependencies = [
  "bytes",
+ "libc",
+ "sha2 0.10.9",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

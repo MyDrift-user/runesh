@@ -40,9 +40,27 @@ impl TunConfig {
 #[cfg(windows)]
 mod platform {
     use super::*;
+    use sha2::{Digest, Sha256};
     use std::os::windows::process::CommandExt;
+    use std::path::Path;
     use std::sync::Arc;
-    use tracing::{error, info};
+    #[allow(unused_imports)]
+    use tracing::{error, info, warn};
+
+    /// SHA-256 of the known-good Wintun DLL (WireGuard-signed build). This
+    /// pin must match the shipped wintun.dll byte-for-byte.
+    ///
+    /// To update: compute `sha256sum wintun.dll` of the new signed build and
+    /// replace the value below.
+    const PINNED_WINTUN_SHA256: [u8; 32] = [
+        // NOTE: This is a placeholder value. Production builds must replace
+        // this with the real hash of the shipped wintun.dll. With the
+        // default feature set the check is enforced; with the
+        // `unpinned-wintun` feature it is only logged.
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
 
     pub struct TunDevice {
         name: String,
@@ -55,6 +73,41 @@ mod platform {
     unsafe impl Send for TunDevice {}
     unsafe impl Sync for TunDevice {}
 
+    fn hash_file(path: &Path) -> Result<[u8; 32], TunError> {
+        let bytes = std::fs::read(path)
+            .map_err(|e| TunError::Network(format!("cannot read wintun.dll for pin check: {e}")))?;
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        let out = hasher.finalize();
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&out);
+        Ok(arr)
+    }
+
+    fn check_wintun_pin(path: &Path) -> Result<(), TunError> {
+        let actual = hash_file(path)?;
+        if actual == PINNED_WINTUN_SHA256 {
+            return Ok(());
+        }
+        #[cfg(feature = "unpinned-wintun")]
+        {
+            warn!(
+                path = %path.display(),
+                "WINTUN DLL HASH DOES NOT MATCH PIN AND unpinned-wintun IS ENABLED; \
+                 continuing but this is UNSAFE for production"
+            );
+            return Ok(());
+        }
+        #[cfg(not(feature = "unpinned-wintun"))]
+        {
+            Err(TunError::Network(format!(
+                "wintun.dll at {} does not match the pinned SHA-256. \
+                 Refusing to load. Enable feature `unpinned-wintun` only for dev.",
+                path.display()
+            )))
+        }
+    }
+
     impl TunDevice {
         pub fn create(config: TunConfig) -> Result<Self, TunError> {
             config.validate()?;
@@ -64,6 +117,27 @@ mod platform {
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.join("wintun.dll")))
                 .filter(|p| p.exists());
+
+            if let Some(path) = &dll_path {
+                check_wintun_pin(path)?;
+            } else {
+                #[cfg(not(feature = "unpinned-wintun"))]
+                {
+                    return Err(TunError::Network(
+                        "wintun.dll not found next to the executable; refusing to load \
+                         an unknown system copy. Bundle the pinned DLL or enable the \
+                         `unpinned-wintun` feature."
+                            .into(),
+                    ));
+                }
+                #[cfg(feature = "unpinned-wintun")]
+                {
+                    warn!(
+                        "wintun.dll not found next to the executable; falling back to \
+                         the system copy because `unpinned-wintun` is enabled"
+                    );
+                }
+            }
 
             let wintun = if let Some(ref path) = dll_path {
                 unsafe { wintun::load_from_path(path) }
@@ -193,7 +267,30 @@ mod platform {
 #[cfg(not(windows))]
 mod platform {
     use super::*;
-    use tracing::info;
+    use std::ffi::CString;
+    use tracing::{info, warn};
+
+    /// Architecture-specific TUNSETIFF ioctl request number.
+    ///
+    /// On x86/x86_64 TUNSETIFF = `_IOW('T', 202, int)` = 0x400454CA.
+    /// On arm/aarch64/mips/riscv64 the direction bits swap so the value is
+    /// 0x800454CA. Using the wrong constant silently fails or corrupts
+    /// kernel state, so we hard-pin per target_arch.
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    pub const TUNSETIFF: libc::c_ulong = 0x400454CA;
+    #[cfg(any(
+        target_arch = "arm",
+        target_arch = "aarch64",
+        target_arch = "riscv64",
+        target_arch = "mips",
+        target_arch = "mips64",
+        target_arch = "powerpc",
+        target_arch = "powerpc64",
+    ))]
+    pub const TUNSETIFF: libc::c_ulong = 0x800454CA;
+
+    /// IFF_TUN | IFF_NO_PI
+    const IFF_FLAGS: i16 = 0x0001 | 0x1000;
 
     pub struct TunDevice {
         name: String,
@@ -242,36 +339,35 @@ mod platform {
             let _ = std::fs::write(format!("{sysctl_path}/accept_local"), "1");
 
             // Open the TUN fd
-            let fd = unsafe {
-                let fd = libc::open(b"/dev/net/tun\0".as_ptr() as *const _, libc::O_RDWR);
-                if fd < 0 {
-                    return Err(TunError::Network("Cannot open /dev/net/tun".into()));
-                }
+            let path = CString::new("/dev/net/tun")
+                .map_err(|e| TunError::Network(format!("bad tun path: {e}")))?;
+            let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR) };
+            if fd < 0 {
+                return Err(TunError::Network("Cannot open /dev/net/tun".into()));
+            }
 
-                #[repr(C)]
-                struct IfReq {
-                    ifr_name: [u8; 16],
-                    ifr_flags: i16,
-                    _pad: [u8; 22],
-                }
+            #[repr(C)]
+            struct IfReq {
+                ifr_name: [u8; 16],
+                ifr_flags: i16,
+                _pad: [u8; 22],
+            }
 
-                let mut req = IfReq {
-                    ifr_name: [0u8; 16],
-                    ifr_flags: 0x0001 | 0x1000, // IFF_TUN | IFF_NO_PI
-                    _pad: [0u8; 22],
-                };
-
-                let name_bytes = iface.as_bytes();
-                let len = name_bytes.len().min(15);
-                req.ifr_name[..len].copy_from_slice(&name_bytes[..len]);
-
-                if libc::ioctl(fd, 0x400454CA, &req) < 0 {
-                    // TUNSETIFF
-                    libc::close(fd);
-                    return Err(TunError::Network("TUNSETIFF ioctl failed".into()));
-                }
-                fd
+            let mut req = IfReq {
+                ifr_name: [0u8; 16],
+                ifr_flags: IFF_FLAGS,
+                _pad: [0u8; 22],
             };
+
+            let name_bytes = iface.as_bytes();
+            let len = name_bytes.len().min(15);
+            req.ifr_name[..len].copy_from_slice(&name_bytes[..len]);
+
+            let ret = unsafe { libc::ioctl(fd, TUNSETIFF, &mut req as *mut _) };
+            if ret < 0 {
+                unsafe { libc::close(fd) };
+                return Err(TunError::Network("TUNSETIFF ioctl failed".into()));
+            }
 
             info!(name = %iface, address = %config.address, mtu = config.mtu, "TUN adapter created");
 
@@ -282,19 +378,36 @@ mod platform {
             })
         }
 
+        /// Read one packet from the TUN device (blocking).
+        ///
+        /// Allocates `mtu + 64 + 1` bytes, where the extra guard byte lets
+        /// us detect kernel truncation: a read that fills the buffer exactly
+        /// to `mtu + 64` almost certainly means the next packet was larger
+        /// than advertised and was silently clipped. We discard such reads.
         pub fn read_blocking(&self) -> Option<Bytes> {
-            let mut buf = vec![0u8; self.mtu as usize + 64];
-            let n = unsafe { libc::read(self.fd, buf.as_mut_ptr() as *mut _, buf.len()) };
-            if n > 0 {
-                buf.truncate(n as usize);
-                Some(Bytes::from(buf))
-            } else {
-                None
+            let advertised = self.mtu as usize + 64;
+            let mut buf = vec![0u8; advertised + 1];
+            let n =
+                unsafe { libc::read(self.fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+            if n <= 0 {
+                return None;
             }
+            let n = n as usize;
+            if n > advertised {
+                warn!(
+                    mtu = self.mtu,
+                    got = n,
+                    "TUN packet exceeded mtu+64; discarding to avoid truncated packet"
+                );
+                return None;
+            }
+            buf.truncate(n);
+            Some(Bytes::from(buf))
         }
 
         pub fn write(&self, data: &[u8]) -> Result<(), TunError> {
-            let n = unsafe { libc::write(self.fd, data.as_ptr() as *const _, data.len()) };
+            let n =
+                unsafe { libc::write(self.fd, data.as_ptr() as *const libc::c_void, data.len()) };
             if n < 0 {
                 Err(TunError::Network("TUN write failed".into()))
             } else {
@@ -326,17 +439,6 @@ mod platform {
         let bits = u32::from_be_bytes(mask.octets());
         bits.count_ones() as u8
     }
-
-    mod libc {
-        unsafe extern "C" {
-            pub fn open(path: *const i8, flags: i32) -> i32;
-            pub fn close(fd: i32) -> i32;
-            pub fn read(fd: i32, buf: *mut std::ffi::c_void, count: usize) -> isize;
-            pub fn write(fd: i32, buf: *const std::ffi::c_void, count: usize) -> isize;
-            pub fn ioctl(fd: i32, request: u64, ...) -> i32;
-        }
-        pub const O_RDWR: i32 = 2;
-    }
 }
 
 pub use platform::TunDevice;
@@ -353,5 +455,50 @@ mod tests {
             netmask: Ipv4Addr::new(255, 192, 0, 0),
             mtu: 1420,
         };
+    }
+
+    #[test]
+    fn config_validate_accepts_typical_name() {
+        let cfg = TunConfig {
+            name: "wg0".into(),
+            address: Ipv4Addr::new(10, 0, 0, 1),
+            netmask: Ipv4Addr::new(255, 255, 255, 0),
+            mtu: 1420,
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn config_validate_rejects_shell_metachars() {
+        let cfg = TunConfig {
+            name: "wg0;rm -rf /".into(),
+            address: Ipv4Addr::new(10, 0, 0, 1),
+            netmask: Ipv4Addr::new(255, 255, 255, 0),
+            mtu: 1420,
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[cfg(all(not(windows), any(target_arch = "x86_64", target_arch = "x86")))]
+    #[test]
+    fn tunsetiff_constant_matches_x86() {
+        assert_eq!(super::platform::TUNSETIFF, 0x400454CA);
+    }
+
+    #[cfg(all(
+        not(windows),
+        any(
+            target_arch = "arm",
+            target_arch = "aarch64",
+            target_arch = "riscv64",
+            target_arch = "mips",
+            target_arch = "mips64",
+            target_arch = "powerpc",
+            target_arch = "powerpc64",
+        )
+    ))]
+    #[test]
+    fn tunsetiff_constant_matches_arm_family() {
+        assert_eq!(super::platform::TUNSETIFF, 0x800454CA);
     }
 }

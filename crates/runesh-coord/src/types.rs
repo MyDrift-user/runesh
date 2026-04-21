@@ -6,7 +6,10 @@
 use std::collections::HashMap;
 // std::net types used by consumers but not directly here
 
+use runesh_acl::AclPolicy;
 use serde::{Deserialize, Serialize};
+
+use crate::error::CoordError;
 
 /// A registered node (machine) in the mesh.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +140,59 @@ pub struct RegisterRequest {
     /// Known endpoints.
     #[serde(default)]
     pub endpoints: Vec<String>,
+}
+
+impl RegisterRequest {
+    /// Validate that every requested tag is owned by `identity` (or by any
+    /// group that `identity` belongs to) according to the ACL's `tagOwners`
+    /// map. Returns `CoordError::UnauthorizedTag` for the first offending tag.
+    ///
+    /// `identity` should be the enrolling user's login (e.g., email). If a
+    /// pre-auth key carries the identity, use its owner here.
+    ///
+    /// `identity_groups` is the list of `group:` names that `identity`
+    /// belongs to. Pass an empty slice when groups aren't tracked.
+    ///
+    /// Tags that have no entry in `tagOwners` are rejected (consistent with
+    /// Tailscale's behavior where a tag not in tagOwners is unassignable).
+    pub fn validate_tags(
+        &self,
+        policy: &AclPolicy,
+        identity: &str,
+        identity_groups: &[String],
+    ) -> Result<(), CoordError> {
+        for tag in &self.tags {
+            if !tag.starts_with("tag:") {
+                return Err(CoordError::UnauthorizedTag(tag.clone()));
+            }
+            let owners = match policy.tag_owners.get(tag) {
+                Some(o) => o,
+                None => return Err(CoordError::UnauthorizedTag(tag.clone())),
+            };
+            let allowed = owners.iter().any(|owner| {
+                if owner == "*" {
+                    return true;
+                }
+                if owner == identity {
+                    return true;
+                }
+                if owner.starts_with("group:") && identity_groups.iter().any(|g| g == owner) {
+                    return true;
+                }
+                // Resolve nested groups declared in the policy.
+                if owner.starts_with("group:")
+                    && let Ok(members) = policy.resolve_group(owner)
+                {
+                    return members.iter().any(|m| m == identity);
+                }
+                false
+            });
+            if !allowed {
+                return Err(CoordError::UnauthorizedTag(tag.clone()));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Registration response from the server.
