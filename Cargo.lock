@@ -5544,6 +5544,7 @@ name = "runesh-desktop"
 version = "0.16.0"
 dependencies = [
  "arboard",
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "bytes",
@@ -5794,6 +5795,7 @@ dependencies = [
 name = "runesh-remote"
 version = "0.16.0"
 dependencies = [
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "bytes",

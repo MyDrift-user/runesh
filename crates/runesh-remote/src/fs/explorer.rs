@@ -3,7 +3,6 @@
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncReadExt;
 
 use crate::error::RemoteError;
 use crate::fs::security::FsPolicy;
@@ -60,6 +59,10 @@ pub async fn stat(policy: &FsPolicy, path: &str) -> Result<FileEntry, RemoteErro
 }
 
 /// Read file content. Returns (data, total_size, sha256_hex).
+///
+/// The read is **all-or-nothing** (we use `tokio::fs::read` once the slice
+/// is determined) and capped at [`FsPolicy::max_read_bytes`]. Callers that
+/// need larger files must use the chunked download API.
 pub async fn read_file(
     policy: &FsPolicy,
     path: &str,
@@ -75,30 +78,37 @@ pub async fn read_file(
     let metadata = tokio::fs::metadata(&resolved).await?;
     let total_size = metadata.len();
 
-    let mut file = tokio::fs::File::open(&resolved).await?;
+    let max_read = policy.max_read_bytes;
 
-    if offset > 0 {
-        use tokio::io::AsyncSeekExt;
-        file.seek(std::io::SeekFrom::Start(offset)).await?;
-    }
-
-    let read_len = if length == 0 {
-        (total_size - offset) as usize
+    // Requested window, before capping.
+    let requested = if length == 0 {
+        total_size.saturating_sub(offset)
     } else {
-        length as usize
+        length
     };
 
-    // Cap read size at 10 MB per request
-    let read_len = read_len.min(10 * 1024 * 1024);
-    let mut buffer = vec![0u8; read_len];
-    let bytes_read = file.read(&mut buffer).await?;
-    buffer.truncate(bytes_read);
+    if requested > max_read {
+        return Err(RemoteError::NotAllowed(format!(
+            "read size {requested} exceeds max_read_bytes {max_read}; use chunked download"
+        )));
+    }
+
+    // Fast path: whole-file read. Complete or fail, no short reads.
+    let buffer = if offset == 0 && (length == 0 || length >= total_size) {
+        tokio::fs::read(&resolved).await?
+    } else {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        let mut file = tokio::fs::File::open(&resolved).await?;
+        file.seek(std::io::SeekFrom::Start(offset)).await?;
+        let want = requested as usize;
+        let mut buf = vec![0u8; want];
+        file.read_exact(&mut buf).await?;
+        buf
+    };
 
     // Compute checksum
     let mut hasher = Sha256::new();
     hasher.update(&buffer);
-    // sha2 0.11 returns hybrid_array::Array; convert via hex::encode which
-    // takes AsRef<[u8]>.
     let checksum = hex::encode(hasher.finalize());
 
     Ok((buffer, total_size, checksum))
@@ -186,7 +196,11 @@ pub async fn rename(policy: &FsPolicy, src: &str, dst: &str) -> Result<(), Remot
     Ok(())
 }
 
-/// Search for files matching a glob pattern.
+/// Search for files matching a pattern.
+///
+/// Symlinks are **not followed** (`follow_links(false)`), and each returned
+/// entry is re-validated through `policy.resolve_path` as defense in depth
+/// in case a directory is bind-mounted after startup.
 pub async fn search(
     policy: &FsPolicy,
     path: &str,
@@ -202,6 +216,7 @@ pub async fn search(
         let mut results = Vec::new();
         for entry in walkdir::WalkDir::new(&resolved_clone)
             .max_depth(20)
+            .follow_links(false)
             .into_iter()
             .filter_map(|e| e.ok())
         {
@@ -219,9 +234,22 @@ pub async fn search(
     .await
     .map_err(|e| RemoteError::Internal(format!("Search task failed: {e}")))?;
 
+    let policy_root = policy
+        .root
+        .canonicalize()
+        .unwrap_or_else(|_| policy.root.clone());
     let mut file_entries = Vec::new();
     for path in entries {
-        if let Ok(fe) = file_entry_from_path(&path).await {
+        // Defense in depth: re-check containment against the sandbox root.
+        let canon = match path.canonicalize() {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if !canon.starts_with(&policy_root) {
+            tracing::debug!(path = %canon.display(), "search: skipping entry outside sandbox");
+            continue;
+        }
+        if let Ok(fe) = file_entry_from_path(&canon).await {
             file_entries.push(fe);
         }
     }

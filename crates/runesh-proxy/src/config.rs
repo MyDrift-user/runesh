@@ -7,15 +7,89 @@
 //! by matching the TLS SNI / Host header against the resource's public
 //! hostname, then forwards to the backend via the WireGuard mesh.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
+
+use crate::ProxyError;
+
+/// Headers that must never be injectable via [`HttpConfig::request_headers`]
+/// or [`HttpConfig::response_headers`] (hop-by-hop, framing, or security
+/// sensitive headers that belong to the proxy, not the tenant).
+const BLOCKED_HEADER_NAMES: &[&str] = &[
+    "connection",
+    "content-length",
+    "transfer-encoding",
+    "upgrade",
+    "host",
+    "x-forwarded-for",
+    "x-forwarded-proto",
+    "x-real-ip",
+    "authorization",
+];
+
+/// Backend hosts that must never be targets unless explicitly allowlisted
+/// in [`BackendValidation::allowed_backend_hosts`]. These cover link-local
+/// metadata services and loopback interfaces that are commonly abused in
+/// SSRF attacks.
+const SSRF_DENY_CIDRS: &[&str] = &["127.0.0.0/8", "::1/128", "169.254.0.0/16", "fe80::/10"];
 
 /// The full proxy configuration: all tenants' resources.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProxyConfig {
     /// Resources indexed by public hostname.
     pub resources: HashMap<String, Resource>,
+}
+
+/// Extra validation policy applied to resource configs at load time.
+#[derive(Debug, Clone)]
+pub struct BackendValidation {
+    /// Schemes allowed for backend addresses that carry a scheme. When
+    /// backends are plain host:port (no scheme) this field is unused.
+    /// Defaults to `{http, https}`.
+    pub allowed_backend_schemes: HashSet<String>,
+    /// Optional allowlist of backend host specs. When `Some`, every
+    /// resource backend must match at least one entry. When `None`, only
+    /// the hard SSRF deny list (loopback, link-local, IMDS) is enforced.
+    pub allowed_backend_hosts: Option<Vec<HostSpec>>,
+}
+
+impl Default for BackendValidation {
+    fn default() -> Self {
+        let mut schemes = HashSet::new();
+        schemes.insert("http".to_string());
+        schemes.insert("https".to_string());
+        Self {
+            allowed_backend_schemes: schemes,
+            allowed_backend_hosts: None,
+        }
+    }
+}
+
+/// A host specification used by [`BackendValidation::allowed_backend_hosts`].
+#[derive(Debug, Clone)]
+pub enum HostSpec {
+    /// Exact hostname or IP string match (case-insensitive for hostnames).
+    Exact(String),
+    /// Suffix match against a hostname (e.g. `.internal.example.com`).
+    Suffix(String),
+    /// CIDR range match against backend IPs.
+    Cidr(ipnet::IpNet),
+}
+
+impl HostSpec {
+    fn matches(&self, address: &str) -> bool {
+        match self {
+            HostSpec::Exact(s) => s.eq_ignore_ascii_case(address),
+            HostSpec::Suffix(suffix) => address
+                .to_ascii_lowercase()
+                .ends_with(&suffix.to_ascii_lowercase()),
+            HostSpec::Cidr(net) => address
+                .parse::<std::net::IpAddr>()
+                .map(|ip| net.contains(&ip))
+                .unwrap_or(false),
+        }
+    }
 }
 
 /// A published resource (one hostname/port combination).
@@ -282,6 +356,9 @@ pub struct PathRewrite {
 
 impl ProxyConfig {
     /// Look up a resource by hostname.
+    ///
+    /// Callers that handle raw `Host`/SNI values should normalize first via
+    /// [`normalize_hostname`] — this function does only an exact match.
     pub fn route(&self, hostname: &str) -> Option<&Resource> {
         self.resources.get(hostname)
     }
@@ -311,6 +388,190 @@ impl ProxyConfig {
             .filter(|r| r.enabled)
             .map(|r| r.hostname.as_str())
             .collect()
+    }
+
+    /// Validate every resource in this config against `validation`.
+    ///
+    /// Rejects SSRF-sensitive backends (loopback, link-local, cloud metadata
+    /// endpoints), malformed or blocked request/response headers, and
+    /// disallowed backend host specs. Intended to be called once at load
+    /// time; returns a hard error on the first offending resource.
+    pub fn validate(&self, validation: &BackendValidation) -> Result<(), ProxyError> {
+        for resource in self.resources.values() {
+            validate_resource(resource, validation)?;
+        }
+        Ok(())
+    }
+}
+
+fn validate_resource(
+    resource: &Resource,
+    validation: &BackendValidation,
+) -> Result<(), ProxyError> {
+    for backend in &resource.backends {
+        validate_backend_address(&backend.address, validation).map_err(|msg| {
+            ProxyError::InvalidConfig(format!(
+                "resource {}: backend {}: {msg}",
+                resource.id, backend.address
+            ))
+        })?;
+    }
+
+    if let Some(http) = &resource.http {
+        for (name, value) in http
+            .request_headers
+            .iter()
+            .chain(http.response_headers.iter())
+        {
+            validate_header(name, value).map_err(|msg| {
+                ProxyError::InvalidConfig(format!(
+                    "resource {}: header {:?}: {msg}",
+                    resource.id, name
+                ))
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_backend_address(address: &str, validation: &BackendValidation) -> Result<(), String> {
+    if address.is_empty() {
+        return Err("empty address".into());
+    }
+    if address.contains('\0') {
+        return Err("address contains null byte".into());
+    }
+
+    // Extract scheme + host if a URL-like address was given. Otherwise the
+    // raw string is treated as the host portion.
+    let (scheme, host) = match address.split_once("://") {
+        Some((s, rest)) => (Some(s.to_ascii_lowercase()), rest),
+        None => (None, address),
+    };
+
+    // Strip userinfo, port, path — keep only the host.
+    let host = host.split('/').next().unwrap_or(host);
+    let host = match host.rsplit_once('@') {
+        Some((_, h)) => h,
+        None => host,
+    };
+    let host = match host.rsplit_once(':') {
+        Some((h, _)) if !h.is_empty() && !h.contains(':') => h,
+        _ => host.trim_start_matches('[').trim_end_matches(']'),
+    };
+
+    if let Some(scheme) = scheme
+        && !validation.allowed_backend_schemes.contains(&scheme)
+    {
+        return Err(format!("scheme '{scheme}' not allowed"));
+    }
+
+    // Hard-deny SSRF-sensitive literal addresses regardless of allowlist.
+    if is_ssrf_sensitive(host) && !allowlist_permits(host, validation) {
+        return Err(format!(
+            "host '{host}' resolves to a loopback, link-local, or metadata endpoint"
+        ));
+    }
+
+    // If a host allowlist was configured, enforce it.
+    if let Some(allowed) = &validation.allowed_backend_hosts
+        && !allowed.iter().any(|spec| spec.matches(host))
+    {
+        return Err(format!("host '{host}' not in allowlist"));
+    }
+
+    Ok(())
+}
+
+fn is_ssrf_sensitive(host: &str) -> bool {
+    // IMDS / cloud metadata endpoints.
+    if host == "169.254.169.254" || host.eq_ignore_ascii_case("metadata.google.internal") {
+        return true;
+    }
+    // Parse as IP literal and check against deny CIDRs.
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        for cidr in SSRF_DENY_CIDRS {
+            if let Ok(net) = cidr.parse::<ipnet::IpNet>()
+                && net.contains(&ip)
+            {
+                return true;
+            }
+        }
+    }
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    false
+}
+
+fn allowlist_permits(host: &str, validation: &BackendValidation) -> bool {
+    match &validation.allowed_backend_hosts {
+        Some(entries) => entries.iter().any(|spec| spec.matches(host)),
+        None => false,
+    }
+}
+
+fn validate_header(name: &str, value: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("empty header name".into());
+    }
+    // RFC 7230 token chars: ALPHA / DIGIT / "!" "#" "$" "%" "&" "'" "*"
+    // "+" "-" "." "^" "_" "`" "|" "~".
+    if !name.bytes().all(|b| {
+        matches!(
+            b,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        ) || b.is_ascii_alphanumeric()
+    }) {
+        return Err("header name contains invalid characters".into());
+    }
+    if BLOCKED_HEADER_NAMES
+        .iter()
+        .any(|blocked| name.eq_ignore_ascii_case(blocked))
+    {
+        return Err("header name is blocked".into());
+    }
+    // CR/LF/NUL in header values enable response splitting.
+    if value.bytes().any(|b| b == 0 || b == b'\r' || b == b'\n') {
+        return Err("header value contains CR, LF, or NUL".into());
+    }
+    Ok(())
+}
+
+/// Normalize a Host header or TLS SNI value before looking it up in the
+/// route table.
+///
+/// - Trim surrounding whitespace
+/// - Lowercase
+/// - Strip the port component (for Host headers)
+/// - Strip a single trailing dot (FQDN root)
+pub fn normalize_hostname(input: &str) -> String {
+    let trimmed = input.trim().trim_end_matches('.').to_ascii_lowercase();
+    if trimmed.starts_with('[') {
+        // IPv6 literal like `[::1]:443` — strip port after `]`.
+        if let Some(end) = trimmed.rfind(']') {
+            let host = &trimmed[..=end];
+            return host.to_string();
+        }
+    }
+    // Strip port: the last `:` on an IPv4/hostname separates host from port.
+    match trimmed.rsplit_once(':') {
+        Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) => host.to_string(),
+        _ => trimmed,
     }
 }
 
@@ -537,5 +798,93 @@ mod tests {
         let hosts = config.hostnames();
         assert_eq!(hosts.len(), 1);
         assert!(hosts.contains(&"enabled.example.com"));
+    }
+
+    #[test]
+    fn normalize_strips_port_and_case() {
+        assert_eq!(normalize_hostname("App.Example.Com:443"), "app.example.com");
+        assert_eq!(normalize_hostname(" app.example.com. "), "app.example.com");
+        assert_eq!(normalize_hostname("[::1]:443"), "[::1]");
+        assert_eq!(normalize_hostname("1.2.3.4"), "1.2.3.4");
+    }
+
+    #[test]
+    fn validate_rejects_imds() {
+        let mut config = ProxyConfig::default();
+        let mut r = sample_resource();
+        r.backends = vec![Backend {
+            address: "169.254.169.254".into(),
+            port: 80,
+            tls: false,
+            weight: 1,
+            healthy: true,
+        }];
+        config.upsert(r);
+        assert!(config.validate(&BackendValidation::default()).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_loopback() {
+        let mut config = ProxyConfig::default();
+        let mut r = sample_resource();
+        r.backends = vec![Backend {
+            address: "127.0.0.1".into(),
+            port: 80,
+            tls: false,
+            weight: 1,
+            healthy: true,
+        }];
+        config.upsert(r);
+        assert!(config.validate(&BackendValidation::default()).is_err());
+    }
+
+    #[test]
+    fn validate_allowlist_permits_loopback() {
+        let mut config = ProxyConfig::default();
+        let mut r = sample_resource();
+        r.backends = vec![Backend {
+            address: "127.0.0.1".into(),
+            port: 80,
+            tls: false,
+            weight: 1,
+            healthy: true,
+        }];
+        config.upsert(r);
+        let validation = BackendValidation {
+            allowed_backend_hosts: Some(vec![HostSpec::Exact("127.0.0.1".into())]),
+            ..Default::default()
+        };
+        assert!(config.validate(&validation).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_blocked_header() {
+        let mut config = ProxyConfig::default();
+        let mut r = sample_resource();
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer hi".to_string());
+        r.http = Some(HttpConfig {
+            request_headers: headers,
+            ..Default::default()
+        });
+        config.upsert(r);
+        assert!(config.validate(&BackendValidation::default()).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_crlf_in_header_value() {
+        let mut config = ProxyConfig::default();
+        let mut r = sample_resource();
+        let mut headers = HashMap::new();
+        headers.insert(
+            "X-Custom".to_string(),
+            "value\r\nX-Injected: evil".to_string(),
+        );
+        r.http = Some(HttpConfig {
+            request_headers: headers,
+            ..Default::default()
+        });
+        config.upsert(r);
+        assert!(config.validate(&BackendValidation::default()).is_err());
     }
 }

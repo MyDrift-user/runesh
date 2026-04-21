@@ -66,10 +66,10 @@ impl CursorTracker {
         if self.active_cursor.as_deref() == Some(cursor_id) {
             // Transfer focus to first remaining cursor
             self.active_cursor = self.cursors.keys().next().cloned();
-            if let Some(ref active) = self.active_cursor {
-                if let Some(c) = self.cursors.get_mut(active) {
-                    c.has_focus = true;
-                }
+            if let Some(ref active) = self.active_cursor
+                && let Some(c) = self.cursors.get_mut(active)
+            {
+                c.has_focus = true;
             }
         }
     }
@@ -356,6 +356,7 @@ fn blit_sprite_bgra(frame: &mut CapturedFrame, x: i32, y: i32, sprite: &CursorSp
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn set_pixel(data: &mut [u8], width: u32, x: u32, y: u32, r: u8, g: u8, b: u8, a: u8) {
     let idx = ((y * width + x) * 4) as usize;
     if idx + 3 < data.len() {

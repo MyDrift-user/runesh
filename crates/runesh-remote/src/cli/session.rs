@@ -3,6 +3,7 @@
 #[cfg(feature = "cli")]
 mod session_impl {
     use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::time::Instant;
 
@@ -13,6 +14,73 @@ mod session_impl {
     use crate::error::RemoteError;
     use crate::protocol::SessionInfo;
 
+    /// Environment variables an attacker must never be able to inject into
+    /// the PTY. Loader hijacks, module path pollution, and arbitrary-command
+    /// tricks via `NODE_OPTIONS` / `PATH` all live here.
+    const DENYLIST_ENV_KEYS: &[&str] = &[
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FORCE_FLAT_NAMESPACE",
+        "DYLD_IMAGE_SUFFIX",
+        "PYTHONPATH",
+        "PERL5LIB",
+        "RUBYLIB",
+        "NODE_OPTIONS",
+        "PATH",
+    ];
+
+    /// Strip any denylisted env keys. Comparison is case-insensitive on
+    /// Windows (where env var names are case-insensitive) and case-sensitive
+    /// on Unix.
+    fn filter_env(input: &HashMap<String, String>) -> HashMap<String, String> {
+        input
+            .iter()
+            .filter(|(k, _)| {
+                !DENYLIST_ENV_KEYS.iter().any(|denied| {
+                    #[cfg(windows)]
+                    {
+                        denied.eq_ignore_ascii_case(k.as_str())
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        *denied == k.as_str()
+                    }
+                })
+            })
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
+    /// Validate that `cwd` resolves to a path inside `sandbox_root`.
+    fn check_cwd(cwd: &str, sandbox_root: &Path) -> Result<PathBuf, RemoteError> {
+        if cwd.contains('\0') {
+            return Err(RemoteError::BadRequest(
+                "cwd must not contain null bytes".into(),
+            ));
+        }
+        let requested = Path::new(cwd);
+        let full = if requested.is_absolute() {
+            requested.to_path_buf()
+        } else {
+            sandbox_root.join(requested)
+        };
+        let canon = full.canonicalize().map_err(|e| {
+            RemoteError::BadRequest(format!("cwd does not exist or is invalid: {e}"))
+        })?;
+        let canon_root = sandbox_root.canonicalize().map_err(|e| {
+            RemoteError::Internal(format!("Failed to canonicalize sandbox root: {e}"))
+        })?;
+        if !canon.starts_with(&canon_root) {
+            return Err(RemoteError::NotAllowed(
+                "cwd must be inside the sandbox root".into(),
+            ));
+        }
+        Ok(canon)
+    }
+
     /// Configuration for the session manager.
     #[derive(Debug, Clone)]
     pub struct SessionConfig {
@@ -22,6 +90,10 @@ mod session_impl {
         pub idle_timeout_secs: u64,
         /// Allowed shells (empty = all allowed).
         pub allowed_shells: Vec<String>,
+        /// Root directory that client-supplied `cwd` must be inside. When
+        /// `None`, `cwd` is refused entirely (safe default for multi-tenant
+        /// deployments).
+        pub sandbox_root: Option<PathBuf>,
     }
 
     impl Default for SessionConfig {
@@ -30,6 +102,7 @@ mod session_impl {
                 max_sessions: 10,
                 idle_timeout_secs: 1800, // 30 minutes
                 allowed_shells: Vec::new(),
+                sandbox_root: None,
             }
         }
     }
@@ -77,21 +150,37 @@ mod session_impl {
             drop(sessions);
 
             // Validate shell if allowlist is configured
-            if let Some(shell) = shell {
-                if !self.config.allowed_shells.is_empty()
-                    && !self.config.allowed_shells.iter().any(|s| s == shell)
-                {
-                    return Err(RemoteError::NotAllowed(format!(
-                        "Shell '{}' is not in the allowed list",
-                        shell
-                    )));
-                }
+            if let Some(shell) = shell
+                && !self.config.allowed_shells.is_empty()
+                && !self.config.allowed_shells.iter().any(|s| s == shell)
+            {
+                return Err(RemoteError::NotAllowed(format!(
+                    "Shell '{}' is not in the allowed list",
+                    shell
+                )));
             }
+
+            // Sanitize env: drop anything that could be used to hijack the
+            // loader or pollute module search paths.
+            let safe_env = filter_env(env);
+
+            // Validate cwd. Reject entirely if no sandbox root is configured.
+            let safe_cwd: Option<String> = match cwd {
+                Some(c) => {
+                    let root = self.config.sandbox_root.as_ref().ok_or_else(|| {
+                        RemoteError::NotAllowed(
+                            "cwd is not allowed: no sandbox root configured".into(),
+                        )
+                    })?;
+                    Some(check_cwd(c, root)?.to_string_lossy().to_string())
+                }
+                None => None,
+            };
 
             let pty = tokio::task::spawn_blocking({
                 let shell = shell.map(String::from);
-                let cwd = cwd.map(String::from);
-                let env = env.clone();
+                let cwd = safe_cwd;
+                let env = safe_env;
                 move || PtyHandle::spawn(shell.as_deref(), cols, rows, cwd.as_deref(), &env)
             })
             .await
@@ -227,6 +316,50 @@ mod session_impl {
                     tracing::info!(session_id = %key, "Closed idle terminal session");
                 }
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn env_denylist_strips_ld_preload_and_path() {
+            let mut env = HashMap::new();
+            env.insert("LD_PRELOAD".into(), "/tmp/evil.so".into());
+            env.insert("PATH".into(), "/tmp".into());
+            env.insert("MY_VAR".into(), "ok".into());
+            env.insert("PYTHONPATH".into(), "/evil".into());
+
+            let filtered = filter_env(&env);
+            assert!(!filtered.contains_key("LD_PRELOAD"));
+            assert!(!filtered.contains_key("PATH"));
+            assert!(!filtered.contains_key("PYTHONPATH"));
+            assert_eq!(filtered.get("MY_VAR").map(String::as_str), Some("ok"));
+        }
+
+        #[test]
+        fn cwd_outside_sandbox_rejected() {
+            let tmp =
+                std::env::temp_dir().join(format!("runesh-remote-cwd-{}", std::process::id()));
+            std::fs::create_dir_all(&tmp).unwrap();
+
+            // Absolute outside path should fail.
+            let res = check_cwd("/", &tmp);
+            assert!(res.is_err());
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+
+        #[test]
+        fn cwd_inside_sandbox_accepted() {
+            let tmp =
+                std::env::temp_dir().join(format!("runesh-remote-cwd-ok-{}", std::process::id()));
+            let sub = tmp.join("sub");
+            std::fs::create_dir_all(&sub).unwrap();
+
+            let res = check_cwd("sub", &tmp);
+            assert!(res.is_ok(), "{res:?}");
+            let _ = std::fs::remove_dir_all(&tmp);
         }
     }
 }

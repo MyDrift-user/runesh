@@ -120,8 +120,60 @@ impl DxgiCapturer {
     }
 }
 
+/// Check whether the active input desktop is the user's "Default" desktop.
+///
+/// If the user is on the Secure Desktop (UAC prompt, Ctrl-Alt-Del screen,
+/// lock screen), we must not capture — we would otherwise leak credentials
+/// and smartcard PINs. Returns `false` on any error (fail closed).
+fn is_user_desktop_active() -> bool {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::StationsAndDesktops::{
+        DESKTOP_ACCESS_FLAGS, DESKTOP_CONTROL_FLAGS, GetUserObjectInformationW, OpenInputDesktop,
+        UOI_NAME,
+    };
+    unsafe {
+        let desktop = match OpenInputDesktop(
+            DESKTOP_CONTROL_FLAGS(0),
+            false,
+            DESKTOP_ACCESS_FLAGS(0x0100), // DESKTOP_READOBJECTS
+        ) {
+            Ok(d) => d,
+            Err(_) => return false,
+        };
+        let handle = HANDLE(desktop.0);
+        // First call with a zero-sized buffer returns the required length.
+        let mut needed: u32 = 0;
+        let _ = GetUserObjectInformationW(handle, UOI_NAME, None, 0, Some(&mut needed));
+        if needed == 0 {
+            return false;
+        }
+        let mut buf: Vec<u16> = vec![0u16; (needed as usize).div_ceil(2) + 1];
+        let raw = buf.as_mut_ptr() as *mut core::ffi::c_void;
+        let ok = GetUserObjectInformationW(
+            handle,
+            UOI_NAME,
+            Some(raw),
+            buf.len() as u32 * 2,
+            Some(&mut needed),
+        );
+        if ok.is_err() {
+            return false;
+        }
+        let nul = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        let name = String::from_utf16_lossy(&buf[..nul]);
+        name.eq_ignore_ascii_case("Default")
+    }
+}
+
 impl ScreenCapture for DxgiCapturer {
     fn capture_frame(&mut self) -> Result<CapturedFrame, DesktopError> {
+        // Secure-desktop guard: if UAC / lock / Ctrl-Alt-Del is up, skip.
+        if !is_user_desktop_active() {
+            return Err(DesktopError::Capture(
+                "secure desktop active; capture suppressed".into(),
+            ));
+        }
+
         self.ensure_staging_texture()?;
 
         unsafe {
@@ -147,16 +199,37 @@ impl ScreenCapture for DxgiCapturer {
 
             let row_pitch = mapped.RowPitch as usize;
             let expected_pitch = (self.width * 4) as usize;
+            let slice_len = row_pitch
+                .checked_mul(self.height as usize)
+                .ok_or_else(|| DesktopError::Capture("row pitch overflow".into()))?;
+
+            // Bound-check row_pitch against the minimum valid pitch.
+            if mapped.RowPitch < self.width * 4 {
+                self.context.Unmap(staging, 0);
+                let _ = self.output_dup.ReleaseFrame();
+                return Err(DesktopError::Capture(format!(
+                    "InvalidFrame: row_pitch {} < width*4 {}",
+                    mapped.RowPitch,
+                    self.width * 4
+                )));
+            }
+
             let mut data = Vec::with_capacity((self.width * self.height * 4) as usize);
 
-            let src = std::slice::from_raw_parts(
-                mapped.pData as *const u8,
-                row_pitch * self.height as usize,
-            );
+            let src = std::slice::from_raw_parts(mapped.pData as *const u8, slice_len);
 
             for row in 0..self.height as usize {
                 let row_start = row * row_pitch;
-                data.extend_from_slice(&src[row_start..row_start + expected_pitch]);
+                let row_end = row_start + expected_pitch;
+                if row_end > src.len() {
+                    self.context.Unmap(staging, 0);
+                    let _ = self.output_dup.ReleaseFrame();
+                    return Err(DesktopError::Capture(format!(
+                        "InvalidFrame: row {row} end {row_end} > src.len {}",
+                        src.len()
+                    )));
+                }
+                data.extend_from_slice(&src[row_start..row_end]);
             }
 
             self.context.Unmap(staging, 0);

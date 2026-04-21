@@ -27,7 +27,7 @@ pub async fn create_zip_archive(
     let output_path_clone = output_path.clone();
 
     tokio::task::spawn_blocking(move || {
-        let file = std::fs::File::create(&output_path_clone).map_err(|e| RemoteError::Io(e))?;
+        let file = std::fs::File::create(&output_path_clone).map_err(RemoteError::Io)?;
         let mut zip = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated)

@@ -21,6 +21,7 @@ bytes = { workspace = true }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
@@ -47,6 +48,7 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_Threading",
+    "Win32_System_StationsAndDesktops",
 ] }
 
 # macOS screen capture + input

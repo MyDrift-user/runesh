@@ -1,4 +1,9 @@
 //! Windows input injection using SendInput API.
+//!
+//! We intentionally construct INPUT via `Default::default()` and then assign
+//! the tagged-union fields individually because the union cannot be populated
+//! with a single struct literal.
+#![allow(clippy::field_reassign_with_default)]
 
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -10,6 +15,12 @@ use crate::protocol::MouseButton;
 pub struct WindowsInputInjector {
     screen_width: i32,
     screen_height: i32,
+}
+
+impl Default for WindowsInputInjector {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WindowsInputInjector {

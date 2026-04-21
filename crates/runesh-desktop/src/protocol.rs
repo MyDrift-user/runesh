@@ -197,7 +197,9 @@ pub struct CursorState {
 /// Cursor shape types for multi-cursor rendering.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum CursorShape {
+    #[default]
     Arrow,
     Hand,
     IBeam,
@@ -210,17 +212,13 @@ pub enum CursorShape {
     NotAllowed,
 }
 
-impl Default for CursorShape {
-    fn default() -> Self {
-        CursorShape::Arrow
-    }
-}
-
 /// Multi-cursor control mode — how input conflicts are resolved.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum MultiCursorMode {
     /// Both cursors move freely; last click wins input focus.
+    #[default]
     Collaborative,
     /// Remote technician has exclusive input control.
     TechControl,
@@ -228,12 +226,6 @@ pub enum MultiCursorMode {
     UserControl,
     /// Tech must request control; user approves via prompt.
     RequestControl,
-}
-
-impl Default for MultiCursorMode {
-    fn default() -> Self {
-        MultiCursorMode::Collaborative
-    }
 }
 
 /// Default colors assigned to cursors in order of connection.
