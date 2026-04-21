@@ -127,8 +127,146 @@ pub mod cors {
 #[cfg(feature = "axum")]
 pub mod security_headers {
     use axum::{body::Body, extract::Request, middleware::Next, response::Response};
+    use std::sync::Arc;
+
+    /// Builder for the Content-Security-Policy header.
+    ///
+    /// The secure default denies `'unsafe-inline'` and `'unsafe-eval'` on every
+    /// directive. SPAs that legitimately require inline styles (Tailwind/Next.js)
+    /// can opt in to `'unsafe-inline'` on `style-src` only via
+    /// [`CspConfig::allow_inline_styles`]. Inline scripts are NEVER enabled by
+    /// default; callers that truly need them must call
+    /// [`CspConfig::allow_inline_scripts`] and accept the XSS risk.
+    #[derive(Debug, Clone)]
+    pub struct CspConfig {
+        /// If true, `style-src` includes `'unsafe-inline'`. Default: false.
+        pub allow_inline_styles: bool,
+        /// If true, `script-src` includes `'unsafe-inline'`. Default: false.
+        /// Do NOT enable without a compelling reason (breaks XSS defense).
+        pub allow_inline_scripts: bool,
+        /// If true, `script-src` includes `'unsafe-eval'`. Default: false.
+        /// Do NOT enable without a compelling reason.
+        pub allow_eval: bool,
+        /// Extra host sources appended to `style-src`. e.g.
+        /// `["https://fonts.googleapis.com"]`. Default: fonts.googleapis.com.
+        pub style_src_hosts: Vec<String>,
+        /// Extra host sources appended to `font-src`. Default: fonts.gstatic.com.
+        pub font_src_hosts: Vec<String>,
+        /// Extra host sources appended to `img-src`. Default: `data:`, `blob:`, `https:`.
+        pub img_src_hosts: Vec<String>,
+        /// Extra host sources appended to `connect-src`. Default: `ws:`, `wss:`.
+        pub connect_src_hosts: Vec<String>,
+        /// Extra host sources appended to `media-src`. Default: `blob:`.
+        pub media_src_hosts: Vec<String>,
+        /// Extra host sources appended to `frame-src`. Default: none.
+        pub frame_src_hosts: Vec<String>,
+    }
+
+    impl Default for CspConfig {
+        fn default() -> Self {
+            Self {
+                allow_inline_styles: false,
+                allow_inline_scripts: false,
+                allow_eval: false,
+                style_src_hosts: vec!["https://fonts.googleapis.com".into()],
+                font_src_hosts: vec!["https://fonts.gstatic.com".into()],
+                img_src_hosts: vec!["data:".into(), "blob:".into(), "https:".into()],
+                connect_src_hosts: vec!["ws:".into(), "wss:".into()],
+                media_src_hosts: vec!["blob:".into()],
+                frame_src_hosts: vec![],
+            }
+        }
+    }
+
+    impl CspConfig {
+        /// Secure default: no inline scripts, no eval, no inline styles.
+        pub fn strict() -> Self {
+            Self {
+                allow_inline_styles: false,
+                allow_inline_scripts: false,
+                allow_eval: false,
+                ..Self::default()
+            }
+        }
+
+        /// Relaxed for Next.js / Tailwind style systems: permits inline styles
+        /// (hashing every style attribute is impractical) but keeps scripts strict.
+        pub fn spa_styles() -> Self {
+            Self {
+                allow_inline_styles: true,
+                allow_inline_scripts: false,
+                allow_eval: false,
+                ..Self::default()
+            }
+        }
+
+        /// Render the CSP header value.
+        pub fn to_header_value(&self) -> String {
+            let style_extras = self.style_src_hosts.join(" ");
+            let font_extras = self.font_src_hosts.join(" ");
+            let img_extras = self.img_src_hosts.join(" ");
+            let connect_extras = self.connect_src_hosts.join(" ");
+            let media_extras = self.media_src_hosts.join(" ");
+            let frame_extras = self.frame_src_hosts.join(" ");
+
+            let script_inline = if self.allow_inline_scripts {
+                " 'unsafe-inline'"
+            } else {
+                ""
+            };
+            let script_eval = if self.allow_eval {
+                " 'unsafe-eval'"
+            } else {
+                ""
+            };
+            let style_inline = if self.allow_inline_styles {
+                " 'unsafe-inline'"
+            } else {
+                ""
+            };
+
+            let mut out = String::new();
+            out.push_str("default-src 'self'; ");
+            out.push_str(&format!("script-src 'self'{script_inline}{script_eval}; "));
+            if style_extras.is_empty() {
+                out.push_str(&format!("style-src 'self'{style_inline}; "));
+            } else {
+                out.push_str(&format!("style-src 'self'{style_inline} {style_extras}; "));
+            }
+            if font_extras.is_empty() {
+                out.push_str("font-src 'self'; ");
+            } else {
+                out.push_str(&format!("font-src 'self' {font_extras}; "));
+            }
+            if img_extras.is_empty() {
+                out.push_str("img-src 'self'; ");
+            } else {
+                out.push_str(&format!("img-src 'self' {img_extras}; "));
+            }
+            if media_extras.is_empty() {
+                out.push_str("media-src 'self'; ");
+            } else {
+                out.push_str(&format!("media-src 'self' {media_extras}; "));
+            }
+            if connect_extras.is_empty() {
+                out.push_str("connect-src 'self'; ");
+            } else {
+                out.push_str(&format!("connect-src 'self' {connect_extras}; "));
+            }
+            if frame_extras.is_empty() {
+                out.push_str("frame-src 'self'");
+            } else {
+                out.push_str(&format!("frame-src 'self' {frame_extras}"));
+            }
+            out
+        }
+    }
 
     /// Middleware that sets recommended security headers on every response.
+    ///
+    /// Uses the secure default CSP ([`CspConfig::strict`]) which blocks inline
+    /// scripts, styles, and `eval`. To customize, use
+    /// [`security_headers_middleware_with`] instead.
     ///
     /// Headers set:
     /// - `X-Content-Type-Options: nosniff` (prevents MIME sniffing)
@@ -148,6 +286,22 @@ pub mod security_headers {
     ///     .layer(middleware::from_fn(security_headers_middleware));
     /// ```
     pub async fn security_headers_middleware(req: Request<Body>, next: Next) -> Response {
+        apply_security_headers(req, next, &CspConfig::strict()).await
+    }
+
+    /// Like [`security_headers_middleware`] but uses a caller-supplied CSP.
+    ///
+    /// Build the layer from a `CspConfig` and plug it in with
+    /// `axum::middleware::from_fn_with_state` or a closure.
+    pub async fn security_headers_middleware_with(
+        csp: Arc<CspConfig>,
+        req: Request<Body>,
+        next: Next,
+    ) -> Response {
+        apply_security_headers(req, next, &csp).await
+    }
+
+    async fn apply_security_headers(req: Request<Body>, next: Next, csp: &CspConfig) -> Response {
         let mut response = next.run(req).await;
         let headers = response.headers_mut();
 
@@ -166,12 +320,44 @@ pub mod security_headers {
             "camera=(), microphone=(), geolocation=()".parse().unwrap(),
         );
         headers.insert("x-xss-protection", "0".parse().unwrap());
-        headers.insert(
-            "content-security-policy",
-            "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' ws: wss:; frame-src 'self'".parse().unwrap(),
-        );
+
+        let csp_value = csp.to_header_value();
+        if let Ok(v) = csp_value.parse() {
+            headers.insert("content-security-policy", v);
+        }
 
         response
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn strict_csp_has_no_unsafe() {
+            let csp = CspConfig::strict().to_header_value();
+            assert!(!csp.contains("'unsafe-inline'"));
+            assert!(!csp.contains("'unsafe-eval'"));
+            assert!(csp.contains("script-src 'self'"));
+        }
+
+        #[test]
+        fn spa_styles_allows_inline_style_only() {
+            let csp = CspConfig::spa_styles().to_header_value();
+            // script-src must remain strict
+            let script_section = csp
+                .split(';')
+                .find(|s| s.trim().starts_with("script-src"))
+                .unwrap();
+            assert!(!script_section.contains("'unsafe-inline'"));
+            assert!(!script_section.contains("'unsafe-eval'"));
+            // style-src may include 'unsafe-inline'
+            let style_section = csp
+                .split(';')
+                .find(|s| s.trim().starts_with("style-src"))
+                .unwrap();
+            assert!(style_section.contains("'unsafe-inline'"));
+        }
     }
 }
 

@@ -94,5 +94,11 @@ pub fn claims_from_user(user: &AuthUser, config: &crate::token::TokenConfig) -> 
         permissions: user.permissions.clone(),
         exp: now + config.access_token_ttl,
         iat: now,
+        iss: config.required_iss.clone(),
+        aud: if config.required_aud.is_empty() {
+            None
+        } else {
+            Some(config.required_aud.clone())
+        },
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! Supports Windows (SCM via sc.exe), Linux (systemd), and macOS (launchd).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use crate::error::AppError;
@@ -36,6 +36,7 @@ fn validate_display_name(name: &str) -> Result<(), AppError> {
 }
 
 /// XML-escape a string for safe embedding in plist files.
+#[cfg(target_os = "macos")]
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -93,7 +94,7 @@ pub fn uninstall_service(name: &str) -> Result<(), AppError> {
             let stderr = String::from_utf8_lossy(&out.stderr);
             return Err(AppError::Internal(format!("sc delete: {stderr}")));
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]
