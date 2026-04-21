@@ -29,6 +29,10 @@ mod axum_handlers {
     const MAX_MESSAGE_SIZE: usize = 4 << 20;
     const AUTH_DEADLINE: Duration = Duration::from_secs(5);
     const START_DEADLINE: Duration = Duration::from_secs(30);
+    /// If the peer doesn't reach `Connected` within this window after the
+    /// offer is sent, we close the peer and stop the capture pipeline so it
+    /// doesn't burn CPU indefinitely.
+    const PEER_CONNECT_DEADLINE: Duration = Duration::from_secs(45);
 
     type WsSink = SplitSink<WebSocket, Message>;
     type WsStream = SplitStream<WebSocket>;
@@ -142,86 +146,23 @@ mod axum_handlers {
             };
         let injector = Arc::new(tokio::sync::Mutex::new(injector));
 
-        // ── 5. Fan-out subscriptions ─────────────────────────────────────
-        let mut video_rx = pipeline.subscribe();
-
-        // Video forwarder: samples → peer RTP track.
-        {
-            let peer = Arc::clone(&peer);
-            tokio::spawn(async move {
-                loop {
-                    match video_rx.recv().await {
-                        Ok(sample) => {
-                            if peer.send_video(&sample).await.is_err() {
-                                break;
-                            }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!(dropped = n, "video viewer lagged");
-                        }
-                        Err(_) => break,
-                    }
-                }
-            });
-        }
-
+        // ── 5. State carried through the main loop ──────────────────────
+        //
+        // `current_pipeline` is swappable: SelectDisplay replaces it.
+        // `connected` flips to true on PeerEvent::Connected; forwarders and
+        // cursor broadcaster only start once connected, to avoid sending on
+        // a DataChannel that isn't open yet.
+        let current_pipeline = Arc::new(tokio::sync::Mutex::new(Arc::clone(&pipeline)));
+        let mut video_forwarder: Option<tokio::task::JoinHandle<()>> = None;
+        let mut cursor_broadcaster: Option<tokio::task::JoinHandle<()>> = None;
         #[cfg(feature = "audio")]
-        {
-            if audio_on && state.session_manager.audio_enabled() {
-                if let Ok(ap) = state.session_manager.ensure_audio_pipeline().await {
-                    let mut rx = ap.subscribe();
-                    let peer = Arc::clone(&peer);
-                    tokio::spawn(async move {
-                        loop {
-                            match rx.recv().await {
-                                Ok(sample) => {
-                                    if peer.send_audio(&sample).await.is_err() {
-                                        break;
-                                    }
-                                }
-                                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                                    tracing::warn!(dropped = n, "audio viewer lagged");
-                                }
-                                Err(_) => break,
-                            }
-                        }
-                    });
-                }
-            }
-        }
+        let mut audio_forwarder: Option<tokio::task::JoinHandle<()>> = None;
         #[cfg(not(feature = "audio"))]
-        {
-            let _ = audio_on;
-        }
+        let _ = audio_on;
 
-        // Cursor broadcaster: periodically push cursor positions over the DC.
-        {
-            let peer = Arc::clone(&peer);
-            let tracker = Arc::clone(state.session_manager.cursor_tracker());
-            let enabled = state.session_manager.multi_cursor_enabled();
-            tokio::spawn(async move {
-                let mut ticker = tokio::time::interval(Duration::from_millis(50));
-                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                loop {
-                    ticker.tick().await;
-                    if !enabled {
-                        continue;
-                    }
-                    let cursors = tracker.read().await.all_cursors();
-                    if cursors.is_empty() {
-                        continue;
-                    }
-                    let msg = ControlResponse::CursorPositions { cursors };
-                    let json = match serde_json::to_string(&msg) {
-                        Ok(s) => s,
-                        Err(_) => continue,
-                    };
-                    if peer.send_control_json(&json).await.is_err() {
-                        break;
-                    }
-                }
-            });
-        }
+        let mut connected = false;
+        let connect_deadline = tokio::time::sleep(PEER_CONNECT_DEADLINE);
+        tokio::pin!(connect_deadline);
 
         // ── 6. Main signaling / event loop ───────────────────────────────
         let mut clip_writes: std::collections::VecDeque<Instant> =
@@ -230,6 +171,15 @@ mod axum_handlers {
         loop {
             tokio::select! {
                 biased;
+
+                // Peer-connect timeout: only armed before we reach Connected.
+                _ = &mut connect_deadline, if !connected => {
+                    tracing::warn!(session_id = %session_id, "peer did not connect within deadline, closing");
+                    let _ = send_signal(&mut ws_tx, &SignalResponse::PeerClosed {
+                        reason: "connect_timeout".into(),
+                    }).await;
+                    break;
+                }
 
                 ws_msg = ws_rx.next() => {
                     let text = match ws_msg {
@@ -285,17 +235,50 @@ mod axum_handlers {
                             }).await;
                         }
                         PeerEvent::Connected => {
+                            if connected {
+                                // Stale re-entry (e.g. Disconnected → Connected bounce).
+                                continue;
+                            }
+                            connected = true;
                             let _ = send_signal(&mut ws_tx, &SignalResponse::PeerConnected {
                                 session_id: session_id.clone(),
                             }).await;
-                            pipeline.request_keyframe();
+                            // The DataChannel is open now — spawn the forwarders.
+                            video_forwarder = Some(spawn_video_forwarder(
+                                Arc::clone(&peer),
+                                Arc::clone(&current_pipeline),
+                            ));
+                            cursor_broadcaster = Some(spawn_cursor_broadcaster(
+                                Arc::clone(&peer),
+                                Arc::clone(state.session_manager.cursor_tracker()),
+                                state.session_manager.multi_cursor_enabled(),
+                            ));
+                            #[cfg(feature = "audio")]
+                            {
+                                if audio_on && state.session_manager.audio_enabled() {
+                                    if let Ok(ap) = state.session_manager.ensure_audio_pipeline().await {
+                                        audio_forwarder = Some(spawn_audio_forwarder(Arc::clone(&peer), ap));
+                                    }
+                                }
+                            }
+                            // Nudge the encoder for an IDR so the client can decode immediately.
+                            current_pipeline.lock().await.request_keyframe();
                         }
                         PeerEvent::Closed(reason) => {
                             let _ = send_signal(&mut ws_tx, &SignalResponse::PeerClosed { reason }).await;
                             break;
                         }
                         PeerEvent::ControlJson(json) => {
-                            handle_control_json(&peer, &state, &principal, &pipeline, &json, &mut clip_writes).await;
+                            handle_control_json(
+                                &peer,
+                                &state,
+                                &principal,
+                                Arc::clone(&current_pipeline),
+                                &session_id,
+                                &mut video_forwarder,
+                                &json,
+                                &mut clip_writes,
+                            ).await;
                         }
                         PeerEvent::InputBinary(bytes) => {
                             handle_input_binary(&state, &principal, &cursor_id, &bytes, &injector, input_consent).await;
@@ -305,10 +288,132 @@ mod axum_handlers {
             }
         }
 
+        // Cleanup: stop forwarders before dropping the peer so their last
+        // write_sample attempts don't race with shutdown.
+        if let Some(h) = video_forwarder {
+            h.abort();
+        }
+        if let Some(h) = cursor_broadcaster {
+            h.abort();
+        }
+        #[cfg(feature = "audio")]
+        if let Some(h) = audio_forwarder {
+            h.abort();
+        }
+
         let _ = peer.close().await;
         let _ = state.session_manager.stop_session(&session_id).await;
         cleanup_cursor(&state, &cursor_id).await;
         tracing::info!(session_id = %session_id, "desktop ws closed");
+    }
+
+    // ── Forwarder spawners ────────────────────────────────────────────────
+
+    /// Drain the pipeline's broadcast and write samples to the peer's track.
+    /// On [`RecvError::Lagged`] ask the pipeline for an IDR so the client can
+    /// resync instead of waiting for the periodic keyframe.
+    fn spawn_video_forwarder(
+        peer: Arc<PeerHandle>,
+        pipeline: Arc<tokio::sync::Mutex<Arc<crate::session::VideoPipeline>>>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut rx = pipeline.lock().await.subscribe();
+            loop {
+                match rx.recv().await {
+                    Ok(sample) => {
+                        if peer.send_video(&sample).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(dropped = n, "video viewer lagged, forcing keyframe");
+                        pipeline.lock().await.request_keyframe();
+                        // `rx` is now re-synced (broadcast resumes at latest).
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Pipeline tore down; try to rebind in case of a display switch.
+                        let new_rx = pipeline.lock().await.subscribe();
+                        rx = new_rx;
+                    }
+                }
+            }
+        })
+    }
+
+    fn spawn_cursor_broadcaster(
+        peer: Arc<PeerHandle>,
+        tracker: Arc<tokio::sync::RwLock<crate::cursor::CursorTracker>>,
+        enabled: bool,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            if !enabled {
+                return;
+            }
+            let mut ticker = tokio::time::interval(Duration::from_millis(50));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                let cursors = tracker.read().await.all_cursors();
+                if cursors.is_empty() {
+                    continue;
+                }
+                let msg = ControlResponse::CursorPositions { cursors };
+                let json = match serde_json::to_string(&msg) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                if peer.send_control_json(&json).await.is_err() {
+                    break;
+                }
+            }
+        })
+    }
+
+    /// Swap the video pipeline under the forwarder. Used by both quality
+    /// changes and display switches. Aborts the old forwarder, replaces the
+    /// shared pipeline arc, forces an IDR so the client picks up the new
+    /// SPS/PPS (dimensions or bitrate may differ), and respawns the forwarder.
+    async fn swap_pipeline(
+        slot: Arc<tokio::sync::Mutex<Arc<VideoPipeline>>>,
+        new_pipeline: Arc<VideoPipeline>,
+        video_forwarder: &mut Option<tokio::task::JoinHandle<()>>,
+        peer: Arc<PeerHandle>,
+        session_id: &str,
+        reason: &str,
+    ) {
+        if let Some(h) = video_forwarder.take() {
+            h.abort();
+        }
+        {
+            let mut g = slot.lock().await;
+            *g = Arc::clone(&new_pipeline);
+        }
+        new_pipeline.request_keyframe();
+        *video_forwarder = Some(spawn_video_forwarder(peer, slot));
+        tracing::info!(session_id, reason, "video pipeline swapped");
+    }
+
+    #[cfg(feature = "audio")]
+    fn spawn_audio_forwarder(
+        peer: Arc<PeerHandle>,
+        pipeline: Arc<crate::session::AudioPipeline>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut rx = pipeline.subscribe();
+            loop {
+                match rx.recv().await {
+                    Ok(sample) => {
+                        if peer.send_audio(&sample).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(dropped = n, "audio viewer lagged");
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
     }
 
     // ── Steps ────────────────────────────────────────────────────────────
@@ -499,11 +604,14 @@ mod axum_handlers {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_control_json(
         peer: &Arc<PeerHandle>,
         state: &DesktopState,
         principal: &Principal,
-        pipeline: &Arc<VideoPipeline>,
+        pipeline: Arc<tokio::sync::Mutex<Arc<VideoPipeline>>>,
+        session_id: &str,
+        video_forwarder: &mut Option<tokio::task::JoinHandle<()>>,
         json: &str,
         clip_writes: &mut std::collections::VecDeque<Instant>,
     ) {
@@ -531,14 +639,63 @@ mod axum_handlers {
                     )
                     .await;
             }
-            ControlRequest::RequestKeyFrame => pipeline.request_keyframe(),
-            ControlRequest::SetQuality { quality: _ } => {
-                // Bitrate is driven by the encoder; runtime mutation hook is a
-                // follow-up. The peer connection's own GCC still paces via NACK/PLI.
+            ControlRequest::RequestKeyFrame => {
+                pipeline.lock().await.request_keyframe();
             }
-            ControlRequest::SelectDisplay { display_id: _ } => {
-                // Display switching requires tearing down / adding a new track.
-                // Follow-up: support renegotiation.
+            ControlRequest::SetQuality { quality } => {
+                let current = pipeline.lock().await.clone();
+                // Rebuild the pipeline at the new quality. openh264's Rust binding
+                // cannot change bitrate at runtime, so a full swap is the only way.
+                match state
+                    .session_manager
+                    .rebuild_video_pipeline(current.display().id, quality, None)
+                    .await
+                {
+                    Ok(new_p) => {
+                        swap_pipeline(
+                            pipeline,
+                            new_p,
+                            video_forwarder,
+                            Arc::clone(peer),
+                            session_id,
+                            "quality",
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "set_quality rebuild failed");
+                    }
+                }
+            }
+            ControlRequest::SelectDisplay { display_id } => {
+                match state
+                    .session_manager
+                    .switch_display(display_id, None, None)
+                    .await
+                {
+                    Ok(new_p) => {
+                        swap_pipeline(
+                            pipeline,
+                            new_p,
+                            video_forwarder,
+                            Arc::clone(peer),
+                            session_id,
+                            "display",
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        let _ = peer
+                            .send_control_json(
+                                &serde_json::to_string(&ControlResponse::Error {
+                                    code: e.error_code().into(),
+                                    message: e.to_string(),
+                                })
+                                .unwrap_or_default(),
+                            )
+                            .await;
+                    }
+                }
             }
             ControlRequest::SetCursorMode { mode } => {
                 if state.session_manager.multi_cursor_enabled() {
@@ -643,9 +800,7 @@ mod axum_handlers {
             let mut tracker = state.session_manager.cursor_tracker().write().await;
             match &event {
                 InputEvent::MouseMove { x, y } => tracker.update_position(cursor_id, *x, *y),
-                InputEvent::MouseButton {
-                    x, y, pressed, ..
-                } if *pressed => {
+                InputEvent::MouseButton { x, y, pressed, .. } if *pressed => {
                     tracker.update_position(cursor_id, *x, *y);
                     if tracker.mode == MultiCursorMode::Collaborative {
                         tracker.set_focus(cursor_id);

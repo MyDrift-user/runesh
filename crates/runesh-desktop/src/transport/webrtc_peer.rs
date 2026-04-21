@@ -16,26 +16,26 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use webrtc::api::interceptor_registry::register_default_interceptors;
-use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264, MIME_TYPE_OPUS};
-use webrtc::api::{APIBuilder, API};
+use webrtc::api::media_engine::{MIME_TYPE_H264, MIME_TYPE_OPUS, MediaEngine};
+use webrtc::api::{API, APIBuilder};
+use webrtc::data_channel::RTCDataChannel;
 use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
 use webrtc::interceptor::registry::Registry;
 use webrtc::media::Sample;
+use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_codec::{
     RTCRtpCodecCapability, RTCRtpCodecParameters, RTPCodecType,
 };
 use webrtc::rtp_transceiver::rtp_sender::RTCRtpSender;
-use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::track::track_local::TrackLocal;
+use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 
 use crate::encode::VideoSample;
 #[cfg(feature = "audio")]
@@ -150,6 +150,10 @@ impl PeerBuilder {
         }
 
         // Connection state transitions → Connected / Closed events.
+        //
+        // Note: `Disconnected` is *transient* — WebRTC often recovers from it
+        // back into `Connected` after a brief network blip. We only treat
+        // `Failed` and `Closed` as terminal.
         {
             let tx = event_tx.clone();
             pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
@@ -159,9 +163,10 @@ impl PeerBuilder {
                         RTCPeerConnectionState::Connected => {
                             let _ = tx.send(PeerEvent::Connected).await;
                         }
-                        RTCPeerConnectionState::Failed
-                        | RTCPeerConnectionState::Disconnected
-                        | RTCPeerConnectionState::Closed => {
+                        RTCPeerConnectionState::Disconnected => {
+                            tracing::warn!("peer connection disconnected (transient)");
+                        }
+                        RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed => {
                             let _ = tx.send(PeerEvent::Closed(format!("{s:?}"))).await;
                         }
                         _ => {}

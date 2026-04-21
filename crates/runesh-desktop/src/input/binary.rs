@@ -9,8 +9,8 @@ use crate::protocol::input_binary::{InputEvent, decode};
 
 /// Feed one binary DataChannel payload into the injector.
 pub fn dispatch(bytes: &[u8], injector: &mut dyn InputInjector) -> Result<(), DesktopError> {
-    let event = decode(bytes)
-        .map_err(|e| DesktopError::Input(format!("binary input decode: {e}")))?;
+    let event =
+        decode(bytes).map_err(|e| DesktopError::Input(format!("binary input decode: {e}")))?;
     match event {
         InputEvent::MouseMove { x, y } => injector.mouse_move(x, y),
         InputEvent::MouseButton {

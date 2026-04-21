@@ -429,9 +429,10 @@ impl DesktopSessionManager {
         if !still_needed {
             let mut map = self.video_pipelines.write().await;
             if let Some(p) = map.get(&removed.display_id)
-                && p.subscribers() == 0 {
-                    map.remove(&removed.display_id);
-                }
+                && p.subscribers() == 0
+            {
+                map.remove(&removed.display_id);
+            }
         }
 
         tracing::info!(session_id = %session_id, "desktop session stopped");
@@ -455,5 +456,64 @@ impl DesktopSessionManager {
     /// handlers that want to peek at pipelines without knowing the display id.
     pub async fn video_pipelines_snapshot(&self) -> HashMap<u32, Arc<VideoPipeline>> {
         self.video_pipelines.read().await.clone()
+    }
+
+    /// Tear down and rebuild the pipeline for a given display at new
+    /// quality/fps settings. Used for runtime quality changes since
+    /// OpenH264's Rust binding cannot mutate bitrate in place.
+    pub async fn rebuild_video_pipeline(
+        &self,
+        display_id: u32,
+        quality: Quality,
+        max_fps: Option<u32>,
+    ) -> Result<Arc<VideoPipeline>, DesktopError> {
+        let displays = crate::display::enumerate_displays()?;
+        let display = displays
+            .into_iter()
+            .find(|d| d.id == display_id)
+            .ok_or(DesktopError::DisplayNotFound(display_id))?;
+        let max_fps = max_fps.unwrap_or(self.config.default_max_fps);
+
+        let new_pipeline = Arc::new(spawn_video_pipeline(
+            display,
+            quality,
+            max_fps,
+            Arc::clone(&self.cursor_tracker),
+        )?);
+
+        let mut map = self.video_pipelines.write().await;
+        // Drop the old pipeline; its capture thread exits when the sender is dropped.
+        map.insert(display_id, Arc::clone(&new_pipeline));
+        Ok(new_pipeline)
+    }
+
+    /// Switch to a different display. Starts the target display's pipeline if
+    /// one isn't already running, and returns a shared pointer to it.
+    pub async fn switch_display(
+        &self,
+        display_id: u32,
+        quality: Option<Quality>,
+        max_fps: Option<u32>,
+    ) -> Result<Arc<VideoPipeline>, DesktopError> {
+        let displays = crate::display::enumerate_displays()?;
+        let display = displays
+            .into_iter()
+            .find(|d| d.id == display_id)
+            .ok_or(DesktopError::DisplayNotFound(display_id))?;
+        let quality = quality.unwrap_or(self.config.default_quality);
+        let max_fps = max_fps.unwrap_or(self.config.default_max_fps);
+
+        let mut map = self.video_pipelines.write().await;
+        if let Some(p) = map.get(&display_id) {
+            return Ok(Arc::clone(p));
+        }
+        let p = Arc::new(spawn_video_pipeline(
+            display,
+            quality,
+            max_fps,
+            Arc::clone(&self.cursor_tracker),
+        )?);
+        map.insert(display_id, Arc::clone(&p));
+        Ok(p)
     }
 }

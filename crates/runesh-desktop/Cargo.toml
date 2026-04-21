@@ -8,7 +8,7 @@ authors.workspace = true
 description = "WebRTC-based cross-platform remote desktop with H.264 video, Opus audio, DataChannel input, dirty-rect capture, and xdg-desktop-portal Wayland support"
 
 [features]
-default = ["axum", "webrtc-transport", "h264", "clipboard", "input", "wayland"]
+default = ["axum", "webrtc-transport", "h264", "clipboard", "input"]
 
 # Axum WebSocket signaling handlers.
 axum = ["dep:axum", "dep:futures-util"]

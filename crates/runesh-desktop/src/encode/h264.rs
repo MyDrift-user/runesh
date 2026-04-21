@@ -6,11 +6,11 @@
 
 use std::time::Duration;
 
+use openh264::OpenH264API;
 use openh264::encoder::{
     BitRate, Encoder, EncoderConfig, FrameRate, IntraFramePeriod, RateControlMode,
 };
 use openh264::formats::{BgraSliceU8, YUVBuffer};
-use openh264::OpenH264API;
 
 use super::{VideoEncoder, VideoSample};
 use crate::capture::CapturedFrame;
@@ -55,7 +55,11 @@ impl OpenH264Encoder {
             .map_err(|e| DesktopError::Encoding(format!("openh264 init: {e}")))?;
 
         tracing::info!(
-            width, height, fps, bitrate_kbps, codec = "openh264-software",
+            width,
+            height,
+            fps,
+            bitrate_kbps,
+            codec = "openh264-software",
             "H.264 encoder initialised"
         );
 
@@ -107,9 +111,13 @@ impl OpenH264Encoder {
         let mut out = Vec::with_capacity(bitstream.num_layers().saturating_mul(64));
         let mut is_keyframe = false;
         for layer_idx in 0..bitstream.num_layers() {
-            let Some(layer) = bitstream.layer(layer_idx) else { continue };
+            let Some(layer) = bitstream.layer(layer_idx) else {
+                continue;
+            };
             for nal_idx in 0..layer.nal_count() {
-                let Some(nal) = layer.nal_unit(nal_idx) else { continue };
+                let Some(nal) = layer.nal_unit(nal_idx) else {
+                    continue;
+                };
                 if nal.is_empty() {
                     continue;
                 }

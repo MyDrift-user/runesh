@@ -49,7 +49,19 @@ impl AudioCapturer {
             .default_output_device()
             .ok_or_else(|| DesktopError::Capture("no default output device".into()))?;
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "macos")]
+        let device = {
+            tracing::warn!(
+                "macOS: cpal captures the default input device; true system-audio \
+                 loopback requires an Aggregate Device (e.g. BlackHole or Loopback.app). \
+                 Route the system output through that device and set it as the default \
+                 input to capture host audio."
+            );
+            host.default_input_device()
+                .ok_or_else(|| DesktopError::Capture("no default input device".into()))?
+        };
+
+        #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
         let device = host
             .default_input_device()
             .ok_or_else(|| DesktopError::Capture("no default input device".into()))?;
