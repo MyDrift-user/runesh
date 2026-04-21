@@ -35,21 +35,16 @@ impl BroadcastRegistry {
     }
 
     /// Get or create a broadcast sender for a room.
+    ///
+    /// Uses a single write-lock `entry().or_insert_with(...)` to avoid a TOCTOU
+    /// race where two tasks would both see the room missing under a read lock
+    /// and then each insert a fresh channel (dropping any existing receivers).
     pub async fn get_or_create(&self, room: &str) -> broadcast::Sender<String> {
-        {
-            let channels = self.channels.read().await;
-            if let Some(tx) = channels.get(room) {
-                if tx.receiver_count() > 0 {
-                    return tx.clone();
-                }
-            }
-        }
-
         let mut channels = self.channels.write().await;
-        let tx = channels
+        channels
             .entry(room.to_string())
-            .or_insert_with(|| broadcast::channel(self.capacity).0);
-        tx.clone()
+            .or_insert_with(|| broadcast::channel(self.capacity).0)
+            .clone()
     }
 
     /// Subscribe to a room. Returns a receiver.
@@ -62,7 +57,17 @@ impl BroadcastRegistry {
     pub async fn send(&self, room: &str, message: String) -> usize {
         let channels = self.channels.read().await;
         if let Some(tx) = channels.get(room) {
-            tx.send(message).unwrap_or(0)
+            match tx.send(message) {
+                Ok(n) => n,
+                Err(_) => {
+                    // `SendError` from `broadcast::Sender::send` only means
+                    // there are zero active receivers, which is a normal
+                    // steady state for an empty room. Log at trace so we
+                    // don't spam when rooms idle.
+                    tracing::trace!(room = %room, "no active WebSocket subscribers for broadcast");
+                    0
+                }
+            }
         } else {
             0
         }

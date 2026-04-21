@@ -84,6 +84,21 @@ impl InMemoryRateLimiter {
     }
 }
 
+/// Behavior when the Redis backend is unreachable.
+///
+/// - `Closed` (default): reject the request (503/429). Prevents abuse during a
+///   Redis outage but may briefly block legitimate traffic.
+/// - `Open`: allow the request through and log a warning. Use only when
+///   availability is strictly prioritized over rate-limit correctness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FailMode {
+    /// Reject requests when the rate-limit backend is unreachable (secure default).
+    #[default]
+    Closed,
+    /// Allow requests through when the rate-limit backend is unreachable.
+    Open,
+}
+
 /// Redis-backed distributed sliding window rate limiter.
 ///
 /// Uses a Lua script with sorted sets for atomic sliding window counting.
@@ -96,11 +111,13 @@ pub struct RedisRateLimiter {
     max_requests: usize,
     window_ms: u64,
     key_prefix: String,
+    fail_mode: FailMode,
 }
 
 #[cfg(feature = "redis")]
 impl RedisRateLimiter {
-    /// Create a new Redis-backed rate limiter.
+    /// Create a new Redis-backed rate limiter with the secure default
+    /// ([`FailMode::Closed`]: reject when Redis is unavailable).
     ///
     /// - `pool`: a deadpool-redis connection pool.
     /// - `max_requests`: maximum requests allowed per key within the window.
@@ -112,12 +129,35 @@ impl RedisRateLimiter {
         window_secs: u64,
         key_prefix: &str,
     ) -> Self {
+        Self::with_fail_mode(
+            pool,
+            max_requests,
+            window_secs,
+            key_prefix,
+            FailMode::Closed,
+        )
+    }
+
+    /// Same as [`Self::new`] but lets callers choose the fail mode.
+    pub fn with_fail_mode(
+        pool: deadpool_redis::Pool,
+        max_requests: usize,
+        window_secs: u64,
+        key_prefix: &str,
+        fail_mode: FailMode,
+    ) -> Self {
         Self {
             pool,
             max_requests,
             window_ms: window_secs * 1000,
             key_prefix: key_prefix.to_string(),
+            fail_mode,
         }
+    }
+
+    /// Current fail-mode for this limiter.
+    pub fn fail_mode(&self) -> FailMode {
+        self.fail_mode
     }
 
     /// Check whether the given key is within the rate limit.
@@ -155,8 +195,16 @@ return 0
         let mut conn = match self.pool.get().await {
             Ok(c) => c,
             Err(e) => {
-                tracing::error!(error = %e, "Failed to get Redis connection for rate limiting, allowing request");
-                return true; // Fail open: allow request if Redis is down
+                return match self.fail_mode {
+                    FailMode::Open => {
+                        tracing::warn!(error = %e, fail_mode = "open", "Redis rate limiter backend unreachable, allowing request");
+                        true
+                    }
+                    FailMode::Closed => {
+                        tracing::warn!(error = %e, fail_mode = "closed", "Redis rate limiter backend unreachable, rejecting request");
+                        false
+                    }
+                };
             }
         };
 
@@ -173,10 +221,16 @@ return 0
         match result {
             Ok(1) => true,
             Ok(_) => false,
-            Err(e) => {
-                tracing::error!(error = %e, "Redis rate limit script failed, allowing request");
-                true // Fail open
-            }
+            Err(e) => match self.fail_mode {
+                FailMode::Open => {
+                    tracing::warn!(error = %e, fail_mode = "open", "Redis rate limit script failed, allowing request");
+                    true
+                }
+                FailMode::Closed => {
+                    tracing::warn!(error = %e, fail_mode = "closed", "Redis rate limit script failed, rejecting request");
+                    false
+                }
+            },
         }
     }
 }
@@ -229,26 +283,26 @@ pub type RateLimiter = InMemoryRateLimiter;
 #[cfg(feature = "axum")]
 pub fn extract_client_ip(req: &axum::extract::Request, trust_proxy: bool) -> String {
     if trust_proxy {
-        if let Some(forwarded) = req.headers().get("x-forwarded-for") {
-            if let Ok(val) = forwarded.to_str() {
-                // Leftmost entry is the original client per RFC 7239.
-                // Relies on the trusted proxy having stripped/rewritten any
-                // inbound XFF header — see function docs.
-                if let Some(ip) = val.split(',').next() {
-                    let trimmed = ip.trim();
-                    if !trimmed.is_empty() {
-                        return trimmed.to_string();
-                    }
+        if let Some(forwarded) = req.headers().get("x-forwarded-for")
+            && let Ok(val) = forwarded.to_str()
+        {
+            // Leftmost entry is the original client per RFC 7239.
+            // Relies on the trusted proxy having stripped/rewritten any
+            // inbound XFF header — see function docs.
+            if let Some(ip) = val.split(',').next() {
+                let trimmed = ip.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
                 }
             }
         }
 
-        if let Some(real_ip) = req.headers().get("x-real-ip") {
-            if let Ok(val) = real_ip.to_str() {
-                let trimmed = val.trim();
-                if !trimmed.is_empty() {
-                    return trimmed.to_string();
-                }
+        if let Some(real_ip) = req.headers().get("x-real-ip")
+            && let Ok(val) = real_ip.to_str()
+        {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
             }
         }
     }

@@ -25,6 +25,7 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 rand = "0.10"
+bytes = { workspace = true }
 
 # Optional: Axum integration
 axum = { version = "0.8", features = ["ws", "multipart"], optional = true }
