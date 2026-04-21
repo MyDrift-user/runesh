@@ -291,9 +291,10 @@ async fn run_tcp_check(host: &str, port: u16, timeout: Duration) -> (CheckStatus
 
 /// ICMP ping implementation.
 ///
-/// Raw ICMP requires elevated privileges on Linux/macOS, so we return
-/// `Unknown` with a descriptive message when the platform path is not
-/// available. Windows uses IcmpSendEcho via the IP Helper API.
+/// Windows uses IcmpSendEcho via the IP Helper API. Linux and macOS shell
+/// out to the system `ping` binary with a single probe; this is reliable
+/// on any stock distro and does not need CAP_NET_RAW, unprivileged ICMP
+/// sockets, or a raw-socket dependency.
 async fn run_ping_check(host: &str, timeout: Duration) -> (CheckStatus, String) {
     #[cfg(windows)]
     {
@@ -301,13 +302,68 @@ async fn run_ping_check(host: &str, timeout: Duration) -> (CheckStatus, String) 
     }
     #[cfg(not(windows))]
     {
-        let _ = timeout;
+        return ping_unix(host, timeout).await;
+    }
+}
+
+#[cfg(not(windows))]
+async fn ping_unix(host: &str, timeout: Duration) -> (CheckStatus, String) {
+    // Validate host to prevent argument-injection. ping accepts hostnames
+    // and IP literals; both are well-inside [A-Za-z0-9.:_-].
+    if !host
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '_' | '-'))
+    {
         return (
-            CheckStatus::Unknown,
-            format!(
-                "ping for '{host}' requires raw ICMP privilege; grant CAP_NET_RAW or use DGRAM ICMP"
-            ),
+            CheckStatus::Critical,
+            format!("ping host '{host}' contains disallowed characters"),
         );
+    }
+
+    // Per-packet timeout in seconds (minimum 1). macOS and Linux disagree
+    // on the unit of -W: Linux uses seconds, macOS and the BSDs use
+    // milliseconds. We use tokio::time::timeout to bound the whole process
+    // and omit -W, which is the portable move.
+    let timeout_secs = timeout.as_secs().max(1);
+    let host = host.to_string();
+    let fut = async move {
+        let out = tokio::process::Command::new("ping")
+            .args(["-c", "1", "-n", &host])
+            .kill_on_drop(true)
+            .output()
+            .await;
+        match out {
+            Ok(o) if o.status.success() => {
+                // Try to extract `time=<ms>` from the reply line so the
+                // status message is informative without reformatting the
+                // whole block.
+                let stdout = String::from_utf8_lossy(&o.stdout);
+                let rtt = stdout
+                    .split_whitespace()
+                    .find_map(|w| w.strip_prefix("time="))
+                    .unwrap_or("?ms");
+                (CheckStatus::Ok, format!("ping {host} {rtt}"))
+            }
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                let msg = stderr
+                    .lines()
+                    .next()
+                    .unwrap_or("no reply")
+                    .trim()
+                    .to_string();
+                (CheckStatus::Critical, format!("ping {host} failed: {msg}"))
+            }
+            Err(e) => (
+                CheckStatus::Unknown,
+                format!("ping subprocess error: {e}"),
+            ),
+        }
+    };
+
+    match tokio::time::timeout(Duration::from_secs(timeout_secs + 1), fut).await {
+        Ok(result) => result,
+        Err(_) => (CheckStatus::Critical, format!("ping {host} timeout")),
     }
 }
 
