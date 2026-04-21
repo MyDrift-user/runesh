@@ -12,11 +12,13 @@ default = ["axum"]
 axum = ["dep:axum", "dep:tokio", "dep:tower"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
+async-trait = "0.1"
+url = { workspace = true }
 
 # Optional: Axum HTTP handlers
 axum = { version = "0.8", optional = true }

@@ -11,9 +11,21 @@ pub mod collector;
 pub use checker::{SystemState, check_compliance};
 pub use collector::collect_system_state;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
+
+/// Opaque identifier for a baseline, used for inheritance cycle detection.
+pub type BaselineId = String;
+
+/// Errors produced by baseline composition.
+#[derive(Debug, thiserror::Error)]
+pub enum BaselineError {
+    #[error("inheritance cycle: {}", chain.join(" -> "))]
+    InheritanceCycle { chain: Vec<BaselineId> },
+    #[error("parent baseline not found: {0}")]
+    ParentNotFound(BaselineId),
+}
 
 /// A composable baseline definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +152,9 @@ pub enum DriftSeverity {
     Missing,
     /// Unexpected item found (not declared).
     Extra,
+    /// Check type not implemented on this platform/runtime. Treated as neither
+    /// compliant nor drifted in aggregations.
+    Unknown,
 }
 
 /// Result of evaluating a baseline against actual state.
@@ -150,6 +165,10 @@ pub struct ComplianceReport {
     pub compliant: usize,
     pub drifted: usize,
     pub missing: usize,
+    /// Declarations whose check type is not implemented. Not counted as
+    /// compliant.
+    #[serde(default)]
+    pub unknown: usize,
     pub entries: Vec<Drift>,
 }
 
@@ -169,16 +188,73 @@ impl ComplianceReport {
 }
 
 impl Baseline {
-    /// Merge a parent baseline into this one (inheritance).
+    /// Merge a parent baseline into this one (single-level inheritance).
+    ///
+    /// Child declarations override parent declarations with the same
+    /// `(resource_type, resource_identity)` key; overrides are logged at debug.
+    /// For full inheritance chains with cycle detection, use
+    /// [`Baseline::compose`].
     pub fn merge_parent(&mut self, parent: &Baseline) {
         // Parent vars are defaults; child overrides
         for (k, v) in &parent.vars {
             self.vars.entry(k.clone()).or_insert_with(|| v.clone());
         }
-        // Prepend parent state (child declarations take precedence)
-        let mut merged = parent.state.clone();
-        merged.extend(self.state.drain(..));
-        self.state = merged;
+
+        let mut by_key: std::collections::HashMap<(&'static str, String), StateDeclaration> =
+            std::collections::HashMap::new();
+        let mut order: Vec<(&'static str, String)> = Vec::new();
+
+        for decl in parent.state.iter().chain(self.state.iter()) {
+            let key = declaration_key(decl);
+            if by_key.contains_key(&key) {
+                tracing::debug!(
+                    resource_type = key.0,
+                    resource_identity = %key.1,
+                    "baseline child override"
+                );
+            } else {
+                order.push(key.clone());
+            }
+            by_key.insert(key, decl.clone());
+        }
+
+        self.state = order
+            .into_iter()
+            .filter_map(|k| by_key.remove(&k))
+            .collect();
+    }
+
+    /// Compose this baseline with its ancestor chain, looked up via `lookup`.
+    /// Returns an error if a cycle is detected.
+    ///
+    /// `lookup` should return the baseline for a given `BaselineId`, or `None`
+    /// if the parent is not known (which produces [`BaselineError::ParentNotFound`]).
+    pub fn compose<F>(mut self, lookup: &F) -> Result<Baseline, BaselineError>
+    where
+        F: Fn(&BaselineId) -> Option<Baseline>,
+    {
+        let mut chain: Vec<BaselineId> = vec![self.name.clone()];
+        let mut visited: HashSet<BaselineId> = HashSet::from([self.name.clone()]);
+
+        // Walk ancestry from child upward; remember parents in order.
+        let mut ancestors: Vec<Baseline> = Vec::new();
+        let mut current_parent = self.inherits.clone();
+        while let Some(parent_id) = current_parent {
+            if !visited.insert(parent_id.clone()) {
+                chain.push(parent_id.clone());
+                return Err(BaselineError::InheritanceCycle { chain });
+            }
+            chain.push(parent_id.clone());
+            let parent = lookup(&parent_id).ok_or(BaselineError::ParentNotFound(parent_id))?;
+            current_parent = parent.inherits.clone();
+            ancestors.push(parent);
+        }
+
+        // Merge from oldest ancestor down to self (root first).
+        for ancestor in ancestors.into_iter().rev() {
+            self.merge_parent(&ancestor);
+        }
+        Ok(self)
     }
 
     /// Substitute ${var} references in string values.
@@ -186,19 +262,34 @@ impl Baseline {
         let vars = self.vars.clone();
         for decl in &mut self.state {
             match decl {
-                StateDeclaration::File { content, .. } => {
-                    if let Some(c) = content {
-                        *c = substitute(c, &vars);
-                    }
+                StateDeclaration::File {
+                    content: Some(c), ..
+                } => {
+                    *c = substitute(c, &vars);
                 }
-                StateDeclaration::Setting { value, .. } => {
-                    if let serde_json::Value::String(s) = value {
-                        *s = substitute(s, &vars);
-                    }
+                StateDeclaration::Setting {
+                    value: serde_json::Value::String(s),
+                    ..
+                } => {
+                    *s = substitute(s, &vars);
                 }
                 _ => {}
             }
         }
+    }
+}
+
+/// Stable key identifying a declaration by resource type and identity, used
+/// for dedup during inheritance merging.
+fn declaration_key(decl: &StateDeclaration) -> (&'static str, String) {
+    match decl {
+        StateDeclaration::Package { name, .. } => ("package", name.clone()),
+        StateDeclaration::Service { name, .. } => ("service", name.clone()),
+        StateDeclaration::File { path, .. } => ("file", path.clone()),
+        StateDeclaration::Firewall { rule, .. } => ("firewall", rule.clone()),
+        StateDeclaration::User { name, .. } => ("user", name.clone()),
+        StateDeclaration::Setting { key, .. } => ("setting", key.clone()),
+        StateDeclaration::Custom { name, .. } => ("custom", name.clone()),
     }
 }
 
@@ -309,6 +400,7 @@ state:
             compliant: 8,
             drifted: 1,
             missing: 1,
+            unknown: 0,
             entries: vec![],
         };
         assert_eq!(report.compliance_percent(), 80.0);
@@ -329,6 +421,80 @@ state:
         let parsed: Baseline = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.name, "linux/server");
         assert_eq!(parsed.state.len(), 5);
+    }
+
+    #[test]
+    fn compose_detects_inheritance_cycle() {
+        let a = Baseline {
+            name: "a".into(),
+            inherits: Some("b".into()),
+            mode: EnforcementMode::Audit,
+            vars: HashMap::new(),
+            state: vec![],
+        };
+        let b = Baseline {
+            name: "b".into(),
+            inherits: Some("a".into()),
+            mode: EnforcementMode::Audit,
+            vars: HashMap::new(),
+            state: vec![],
+        };
+
+        let store: HashMap<String, Baseline> =
+            HashMap::from([("a".into(), a.clone()), ("b".into(), b.clone())]);
+        let lookup = |id: &BaselineId| store.get(id).cloned();
+
+        let err = a.compose(&lookup).unwrap_err();
+        match err {
+            BaselineError::InheritanceCycle { chain } => {
+                assert_eq!(chain.first().map(|s| s.as_str()), Some("a"));
+                assert!(chain.iter().any(|s| s == "a"));
+                assert!(chain.iter().any(|s| s == "b"));
+            }
+            other => panic!("expected InheritanceCycle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_parent_dedups_and_child_overrides() {
+        let parent = Baseline {
+            name: "p".into(),
+            inherits: None,
+            mode: EnforcementMode::Audit,
+            vars: HashMap::new(),
+            state: vec![
+                StateDeclaration::Package {
+                    name: "nginx".into(),
+                    version: Some("1.20".into()),
+                    present: true,
+                },
+                StateDeclaration::Service {
+                    name: "nginx".into(),
+                    state: ServiceState::Running,
+                    enabled: true,
+                },
+            ],
+        };
+        let mut child = Baseline {
+            name: "c".into(),
+            inherits: Some("p".into()),
+            mode: EnforcementMode::Audit,
+            vars: HashMap::new(),
+            state: vec![StateDeclaration::Package {
+                name: "nginx".into(),
+                version: Some("1.24".into()),
+                present: true,
+            }],
+        };
+        child.merge_parent(&parent);
+        assert_eq!(child.state.len(), 2);
+        // Child's nginx version wins.
+        match &child.state[0] {
+            StateDeclaration::Package { version, .. } => {
+                assert_eq!(version.as_deref(), Some("1.24"));
+            }
+            _ => panic!("expected package declaration at index 0"),
+        }
     }
 
     #[test]

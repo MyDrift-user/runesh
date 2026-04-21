@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use crate::runner::run_pkg_command;
+use crate::runner::{require_package_name, run_pkg_command};
 use crate::{PackageInfo, PackageManager, PackageResult, PkgError};
 
 pub struct AptManager;
@@ -69,25 +69,28 @@ impl PackageManager for AptManager {
     }
 
     async fn install(&self, package: &str) -> Result<PackageResult, PkgError> {
+        require_package_name(package)?;
         run_pkg_command("apt-get", &["install", "-y", package], "install", package).await
     }
 
     async fn remove(&self, package: &str) -> Result<PackageResult, PkgError> {
+        require_package_name(package)?;
         run_pkg_command("apt-get", &["remove", "-y", package], "remove", package).await
     }
 
     async fn upgrade(&self, package: &str) -> Result<PackageResult, PkgError> {
-        if package.is_empty() {
-            run_pkg_command("apt-get", &["upgrade", "-y"], "upgrade", "all").await
-        } else {
-            run_pkg_command(
-                "apt-get",
-                &["install", "-y", "--only-upgrade", package],
-                "upgrade",
-                package,
-            )
-            .await
-        }
+        require_package_name(package)?;
+        run_pkg_command(
+            "apt-get",
+            &["install", "-y", "--only-upgrade", package],
+            "upgrade",
+            package,
+        )
+        .await
+    }
+
+    async fn upgrade_all(&self) -> Result<PackageResult, PkgError> {
+        run_pkg_command("apt-get", &["upgrade", "-y"], "upgrade", "all").await
     }
 
     async fn available_updates(&self) -> Result<Vec<PackageInfo>, PkgError> {
