@@ -91,9 +91,6 @@ impl From<serde_json::Error> for RemoteError {
 
 impl From<walkdir::Error> for RemoteError {
     fn from(e: walkdir::Error) -> Self {
-        RemoteError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        ))
+        RemoteError::Io(std::io::Error::other(e.to_string()))
     }
 }

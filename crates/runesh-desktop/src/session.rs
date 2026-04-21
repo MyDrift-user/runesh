@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, broadcast};
 
 use crate::capture;
+use crate::clipboard::ClipboardSettings;
 use crate::cursor::CursorTracker;
 use crate::encode;
 use crate::error::DesktopError;
@@ -26,10 +27,15 @@ pub struct DesktopConfig {
     pub default_max_fps: u32,
     /// Session idle timeout.
     pub idle_timeout_secs: u64,
-    /// Whether to allow remote input injection.
+    /// Whether to allow remote input injection by default. Even when true,
+    /// a [`crate::auth::ConsentBroker`] must still grant per-session consent
+    /// before injection actually happens.
     pub allow_input: bool,
-    /// Whether to enable clipboard sharing.
+    /// Whether to enable clipboard sharing at all (further constrained by
+    /// `clipboard.direction`).
     pub allow_clipboard: bool,
+    /// Detailed clipboard sync policy (direction, caps, rate limit).
+    pub clipboard: ClipboardSettings,
     /// Default multi-cursor mode.
     pub multi_cursor_mode: MultiCursorMode,
     /// Whether to enable multi-cursor support.
@@ -45,6 +51,7 @@ impl Default for DesktopConfig {
             idle_timeout_secs: 3600,
             allow_input: true,
             allow_clipboard: true,
+            clipboard: ClipboardSettings::default(),
             multi_cursor_mode: MultiCursorMode::Collaborative,
             enable_multi_cursor: true,
         }
@@ -194,14 +201,20 @@ impl DesktopSessionManager {
         Ok(())
     }
 
-    /// Check if input injection is allowed.
+    /// Check if input injection is allowed by configuration (does not
+    /// imply the connected user has consent).
     pub fn allow_input(&self) -> bool {
         self.config.allow_input
     }
 
-    /// Check if clipboard sharing is allowed.
+    /// Check if clipboard sharing is allowed at all.
     pub fn allow_clipboard(&self) -> bool {
         self.config.allow_clipboard
+    }
+
+    /// Access to the full clipboard policy (direction, caps, rate limits).
+    pub fn clipboard_settings(&self) -> &ClipboardSettings {
+        &self.config.clipboard
     }
 }
 

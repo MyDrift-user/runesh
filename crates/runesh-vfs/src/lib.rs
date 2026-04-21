@@ -69,7 +69,7 @@ pub mod provider;
 pub mod registry;
 
 pub use cache::CacheManager;
-pub use config::{ProviderRole, VfsConfig, WriteMode};
+pub use config::{MountConfig, ProviderRole, VfsConfig, WriteMode};
 pub use error::VfsError;
 pub use overlay::OverlayProvider;
 pub use provider::{FileProvider, VfsEntry};

@@ -36,6 +36,14 @@ pub struct VfsEntry {
     pub content_hash: Option<String>,
     /// MIME type hint (e.g., "application/pdf").
     pub content_type: Option<String>,
+    /// Unix owner uid, if the provider tracks it. Falls back to
+    /// [`crate::config::MountConfig::default_uid`] (then process uid).
+    /// **Multi-tenant deployments MUST provide per-tenant uids here.**
+    #[serde(default)]
+    pub uid: Option<u32>,
+    /// Unix group gid, same fallback chain as `uid`.
+    #[serde(default)]
+    pub gid: Option<u32>,
 }
 
 impl VfsEntry {
@@ -53,6 +61,8 @@ impl VfsEntry {
             is_hydrated: true,
             content_hash: None,
             content_type: None,
+            uid: None,
+            gid: None,
         }
     }
 
@@ -70,6 +80,8 @@ impl VfsEntry {
             is_hydrated: false,
             content_hash: None,
             content_type: None,
+            uid: None,
+            gid: None,
         }
     }
 }

@@ -29,6 +29,7 @@
 //!     .with_state(state);
 //! ```
 
+pub mod auth;
 pub mod error;
 pub mod protocol;
 
@@ -40,6 +41,7 @@ pub mod cli;
 #[cfg(feature = "axum")]
 pub mod handlers;
 
+pub use auth::{AllowAllAuth, AuthError, DenyAllAuth, Operation, Principal, RemoteAuth};
 pub use error::RemoteError;
 
 #[cfg(feature = "axum")]

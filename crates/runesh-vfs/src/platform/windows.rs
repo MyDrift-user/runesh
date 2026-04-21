@@ -72,10 +72,10 @@ impl super::VfsMountInner for WindowsCloudFilter {
 
 impl Drop for WindowsCloudFilter {
     fn drop(&mut self) {
-        if self.is_connected {
-            if let Err(e) = unregister_sync_root(&self.mount_point) {
-                tracing::error!(error = %e, "Failed to unregister sync root");
-            }
+        if self.is_connected
+            && let Err(e) = unregister_sync_root(&self.mount_point)
+        {
+            tracing::error!(error = %e, "Failed to unregister sync root");
         }
         tracing::info!(
             mount_point = %self.mount_point.display(),
