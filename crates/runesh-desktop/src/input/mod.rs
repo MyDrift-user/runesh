@@ -65,3 +65,5 @@ pub mod x11;
 
 #[cfg(target_os = "linux")]
 pub mod mpx;
+
+pub mod binary;

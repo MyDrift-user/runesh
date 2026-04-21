@@ -91,11 +91,11 @@ mod clipboard_impl {
         /// Check if clipboard content has changed since last check.
         /// Returns Some(new_content) if changed, None otherwise.
         pub fn poll_change(&mut self) -> Option<String> {
-            if let Ok(current) = self.get_text() {
-                if current != self.last_content {
-                    self.last_content = current.clone();
-                    return Some(current);
-                }
+            if let Ok(current) = self.get_text()
+                && current != self.last_content
+            {
+                self.last_content = current.clone();
+                return Some(current);
             }
             None
         }

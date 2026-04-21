@@ -5,16 +5,37 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Cross-platform remote desktop sharing with screen capture, encoding, and input injection"
+description = "WebRTC-based cross-platform remote desktop with H.264 video, Opus audio, DataChannel input, dirty-rect capture, and xdg-desktop-portal Wayland support"
 
 [features]
-default = ["axum"]
+default = ["axum", "webrtc-transport", "h264", "clipboard", "input"]
+
+# Axum WebSocket signaling handlers.
 axum = ["dep:axum", "dep:futures-util"]
+# WebRTC peer connection / RTP tracks / DataChannel.
+webrtc-transport = ["dep:webrtc", "dep:tokio-util"]
+# Software H.264 encoder via openh264.
+h264 = ["dep:openh264"]
+# Audio capture + Opus encoding.
+# - Windows / Linux: cpal (WASAPI loopback / default input).
+# - macOS: ScreenCaptureKit `SCStream` for real system-audio loopback on
+#   macOS 13+. The screencapturekit dep is declared under the macOS target
+#   block; enabling `audio` activates it there automatically.
+#
+# Opus encoding uses `mousiki`, a pure-Rust port of the Xiph Opus reference
+# implementation. No cmake, no bindgen, no libclang, no system libopus — just
+# `cargo build --features audio` works on a stock toolchain.
+audio = ["dep:cpal", "dep:mousiki", "dep:screencapturekit"]
+# Clipboard sharing.
 clipboard = ["dep:arboard"]
+# Input injection kept on by default; legacy flag retained for consumers.
 input = []
+# Real Wayland capture via xdg-desktop-portal + PipeWire (Linux only, also gated at build time).
+wayland = ["dep:ashpd", "dep:pipewire", "dep:libc"]
 
 [dependencies]
 tokio = { workspace = true }
+tokio-util = { version = "0.7", optional = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 bytes = { workspace = true }
@@ -35,7 +56,22 @@ futures-util = { version = "0.3", optional = true }
 # Optional: Clipboard sharing
 arboard = { version = "3", optional = true }
 
-# Windows screen capture + input
+# Optional: WebRTC transport (pure Rust).
+webrtc = { version = "0.14", optional = true }
+
+# Optional: Software H.264 encoder (OpenH264, vendored source build).
+openh264 = { version = "0.9", optional = true }
+
+# Optional: Audio capture and Opus encoding.
+# `mousiki` is a pure-Rust Opus codec (port of the Xiph reference
+# implementation) — chosen over the `opus` / `shiguredo_opus` / `libopus_sys`
+# crates because they all transitively require cmake + libclang + llvm-tools,
+# which are not shipped with the Rust toolchain and differ by platform.
+# `mousiki` only pulls in pure-Rust deps (libm, bitflags, log).
+cpal = { version = "0.17", optional = true }
+mousiki = { version = "0.2", optional = true }
+
+# Windows screen capture + input + WASAPI loopback.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = [
     "Win32_Graphics_Dxgi",
@@ -47,15 +83,26 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_System_Com",
     "Win32_System_Threading",
     "Win32_System_StationsAndDesktops",
+    "Win32_Media_Audio",
+    "Win32_Media_KernelStreaming",
 ] }
 
 # macOS screen capture + input
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = { version = "0.25", features = ["highsierra"] }
 core-foundation = "0.10"
+# Real system-audio loopback on macOS 13+ via ScreenCaptureKit. Only pulled
+# in when the `audio` feature is on. cpal can't do system audio loopback
+# on macOS without an aggregate device.
+screencapturekit = { version = "1", optional = true, features = ["macos_13_0"] }
 
-# Linux X11 screen capture + input
+# Linux X11 screen capture + input.
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "0.13", features = ["shm", "xtest", "randr", "xinput"] }
+# Wayland / PipeWire support is only compiled when the `wayland` feature is on.
+ashpd = { version = "0.13", optional = true, default-features = false, features = ["tokio"] }
+pipewire = { version = "0.9", optional = true }
+libc = { version = "0.2", optional = true }

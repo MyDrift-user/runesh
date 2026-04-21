@@ -1,32 +1,37 @@
-//! Cross-platform remote desktop sharing.
+//! WebRTC-based cross-platform remote desktop.
 //!
-//! Provides screen capture, frame encoding, input injection, and clipboard
-//! sharing across Windows, macOS, and Linux (X11 + Wayland architecture).
+//! Replaces the old JSON-frame-over-WebSocket pipeline with a proper WebRTC
+//! peer connection per viewer:
 //!
-//! # Features
+//! - **Video**: H.264 (software via OpenH264) on an RTP track. Adaptive bitrate
+//!   comes for free from the `webrtc` crate's bandwidth estimation.
+//! - **Audio**: Opus on an RTP track. `cpal` captures the default output
+//!   (loopback on Windows) or input device.
+//! - **Control + Input**: a single ordered DataChannel carries JSON control
+//!   messages *and* compact binary input frames (mouse, keyboard, scroll).
+//! - **Signaling**: a WebSocket endpoint exchanges SDP and trickled ICE.
 //!
-//! - **Screen Capture**: DXGI (Windows), CoreGraphics (macOS), XShm/XGetImage (X11)
-//! - **Encoding**: JPEG, PNG, Zstd-compressed raw, with quality presets
-//! - **Input Injection**: SendInput (Windows), CGEvent (macOS), XTest (X11)
-//! - **Clipboard Sharing**: Bidirectional text clipboard sync
-//! - **Multi-Monitor**: Display enumeration and per-display capture
-//!
-//! # Quick Start
+//! # Quick start
 //!
 //! ```ignore
+//! use std::sync::Arc;
 //! use axum::{Router, routing::get};
-//! use runesh_desktop::{DesktopState, handlers};
-//! use runesh_desktop::session::DesktopConfig;
+//! use runesh_desktop::{DesktopConfig, handlers::{DesktopState, ws_desktop_handler}};
+//! use runesh_desktop::auth::{AllowAllAuth, AlwaysDeny};
 //!
-//! let state = DesktopState::new(DesktopConfig::default());
-//!
+//! let state = DesktopState::new(
+//!     DesktopConfig::default(),
+//!     Arc::new(AllowAllAuth),
+//!     Arc::new(AlwaysDeny),
+//! );
 //! let app = Router::new()
-//!     .route("/ws/desktop", get(handlers::ws_desktop_handler))
+//!     .route("/ws/desktop", get(ws_desktop_handler))
 //!     .with_state(state);
 //! ```
 
 pub mod auth;
 pub mod capture;
+pub mod clipboard;
 pub mod cursor;
 pub mod display;
 pub mod encode;
@@ -34,10 +39,7 @@ pub mod error;
 pub mod input;
 pub mod protocol;
 pub mod session;
-
-// Clipboard module is always compiled (for direction/settings types).
-// The platform `ClipboardManager` backend is still feature-gated internally.
-pub mod clipboard;
+pub mod transport;
 
 #[cfg(feature = "axum")]
 pub mod handlers;
