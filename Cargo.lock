@@ -5586,20 +5586,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "runesh-edr"
-version = "0.16.0"
-dependencies = [
- "chrono",
- "notify",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "runesh-flow"
 version = "0.16.0"
 dependencies = [
