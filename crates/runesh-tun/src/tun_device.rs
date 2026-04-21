@@ -47,20 +47,44 @@ mod platform {
     #[allow(unused_imports)]
     use tracing::{error, info, warn};
 
-    /// SHA-256 of the known-good Wintun DLL (WireGuard-signed build). This
-    /// pin must match the shipped wintun.dll byte-for-byte.
+    /// SHA-256 of the known-good Wintun DLL (hex, 64 characters). Supplied
+    /// at build time via the `RUNESH_WINTUN_SHA256_HEX` environment variable
+    /// so the consumer pins the exact byte-for-byte DLL they verified.
     ///
-    /// To update: compute `sha256sum wintun.dll` of the new signed build and
-    /// replace the value below.
-    const PINNED_WINTUN_SHA256: [u8; 32] = [
-        // NOTE: This is a placeholder value. Production builds must replace
-        // this with the real hash of the shipped wintun.dll. With the
-        // default feature set the check is enforced; with the
-        // `unpinned-wintun` feature it is only logged.
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00,
-    ];
+    /// Example (PowerShell):
+    /// ```text
+    /// $env:RUNESH_WINTUN_SHA256_HEX = "07c256185d6ee3..."; cargo build
+    /// ```
+    ///
+    /// If this is unset at build time the default-feature build refuses to
+    /// load wintun.dll at runtime. The `unpinned-wintun` feature is the
+    /// explicit dev escape hatch.
+    const PINNED_WINTUN_SHA256_HEX: Option<&str> = option_env!("RUNESH_WINTUN_SHA256_HEX");
+
+    fn pinned_wintun_sha256() -> Result<Option<[u8; 32]>, TunError> {
+        match PINNED_WINTUN_SHA256_HEX {
+            None => Ok(None),
+            Some(hex) => {
+                let hex = hex.trim();
+                if hex.len() != 64 {
+                    return Err(TunError::Network(format!(
+                        "RUNESH_WINTUN_SHA256_HEX must be 64 hex chars, got {}",
+                        hex.len()
+                    )));
+                }
+                let mut out = [0u8; 32];
+                for (i, chunk) in hex.as_bytes().chunks(2).enumerate() {
+                    let s = std::str::from_utf8(chunk).map_err(|e| {
+                        TunError::Network(format!("invalid RUNESH_WINTUN_SHA256_HEX: {e}"))
+                    })?;
+                    out[i] = u8::from_str_radix(s, 16).map_err(|e| {
+                        TunError::Network(format!("invalid RUNESH_WINTUN_SHA256_HEX: {e}"))
+                    })?;
+                }
+                Ok(Some(out))
+            }
+        }
+    }
 
     pub struct TunDevice {
         name: String,
@@ -85,27 +109,65 @@ mod platform {
     }
 
     fn check_wintun_pin(path: &Path) -> Result<(), TunError> {
+        let pin = pinned_wintun_sha256()?;
         let actual = hash_file(path)?;
-        if actual == PINNED_WINTUN_SHA256 {
-            return Ok(());
+        if let Some(pin) = pin {
+            if actual == pin {
+                return Ok(());
+            }
+            #[cfg(feature = "unpinned-wintun")]
+            {
+                warn!(
+                    path = %path.display(),
+                    actual = %hex_encode(&actual),
+                    "wintun.dll hash does not match RUNESH_WINTUN_SHA256_HEX; \
+                     continuing because feature `unpinned-wintun` is enabled. \
+                     Never enable this feature on a shipped binary."
+                );
+                return Ok(());
+            }
+            #[cfg(not(feature = "unpinned-wintun"))]
+            {
+                return Err(TunError::Network(format!(
+                    "wintun.dll at {} does not match the pinned SHA-256 \
+                     (actual {}). Refusing to load. Rebuild with the correct \
+                     RUNESH_WINTUN_SHA256_HEX, or enable feature \
+                     `unpinned-wintun` for dev only.",
+                    path.display(),
+                    hex_encode(&actual),
+                )));
+            }
         }
+
+        // No pin supplied at build time.
         #[cfg(feature = "unpinned-wintun")]
         {
             warn!(
                 path = %path.display(),
-                "WINTUN DLL HASH DOES NOT MATCH PIN AND unpinned-wintun IS ENABLED; \
-                 continuing but this is UNSAFE for production"
+                actual = %hex_encode(&actual),
+                "RUNESH_WINTUN_SHA256_HEX was not set at build time and feature \
+                 `unpinned-wintun` is enabled; loading wintun.dll without \
+                 verification. Never ship with this configuration."
             );
             return Ok(());
         }
         #[cfg(not(feature = "unpinned-wintun"))]
         {
             Err(TunError::Network(format!(
-                "wintun.dll at {} does not match the pinned SHA-256. \
-                 Refusing to load. Enable feature `unpinned-wintun` only for dev.",
-                path.display()
+                "RUNESH_WINTUN_SHA256_HEX was not set at build time and feature \
+                 `unpinned-wintun` is not enabled. Refusing to load wintun.dll \
+                 at {}. Rebuild with the env var set to the verified DLL hash.",
+                path.display(),
             )))
         }
+    }
+
+    fn hex_encode(bytes: &[u8]) -> String {
+        let mut s = String::with_capacity(bytes.len() * 2);
+        for b in bytes {
+            s.push_str(&format!("{b:02x}"));
+        }
+        s
     }
 
     impl TunDevice {
