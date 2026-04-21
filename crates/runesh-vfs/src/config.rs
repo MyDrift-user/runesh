@@ -7,15 +7,24 @@ use serde::{Deserialize, Serialize};
 /// Platform mount options that affect security. Ownership settings are
 /// explicit because the old default of `allow_other` with the process uid
 /// is unsafe in multi-tenant contexts.
+///
+/// The field names carry a loud `_unsafe` suffix so that turning them on
+/// is visible in code review and in any JSON config file. Serde aliases
+/// accept the legacy `allow_other` / `allow_root` names so existing
+/// configs keep loading.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MountConfig {
-    /// Allow users other than the mounter to access the mount. **Default
-    /// false.** Setting this true emits a loud warning at mount time.
-    #[serde(default)]
-    pub allow_other: bool,
-    /// Allow root to access the mount. Default false.
-    #[serde(default)]
-    pub allow_root: bool,
+    /// Allow users other than the mounter to access the mount (FUSE
+    /// `allow_other`). **Default false.** Only enable on a single-user
+    /// workstation or a mount that is intentionally shared. Never enable
+    /// on a multi-tenant host where other local uids belong to other
+    /// tenants. Emits a warning at mount time.
+    #[serde(default, alias = "allow_other")]
+    pub allow_other_users_unsafe: bool,
+    /// Allow root to access the mount (FUSE `allow_root`, requires
+    /// `user_allow_other` in /etc/fuse.conf). **Default false.**
+    #[serde(default, alias = "allow_root")]
+    pub allow_root_unsafe: bool,
     /// Fallback uid used for entries whose provider does not supply one.
     /// When None, the process uid is used (not recommended for multi-tenant).
     #[serde(default)]
