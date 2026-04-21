@@ -55,8 +55,6 @@ RUNESH/
 │   ├── runesh-backup/                   # Backup engine: content-addressed chunking, dedup, snapshots, retention
 │   ├── runesh-baseline/                 # Declarative baselines with inheritance, drift detection, enforcement
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
-│   ├── helvetia-agentd/                 # Helvetia agent daemon (consumer binary, will move to own repo)
-│   ├── helvetia-server/                 # Helvetia coordination server (consumer binary, will move to own repo)
 │   ├── runesh-coord/                    # Tailscale-compatible coordination: Noise IK handshake, node registry, map builder
 │   ├── runesh-dns/                      # MagicDNS, split DNS, zone management, service discovery
 │   ├── runesh-edr/                      # Endpoint detection: file integrity monitoring, IoC matching, security events
