@@ -512,14 +512,20 @@ dependencies = [
  "futures-core",
  "futures-util",
  "hex",
+ "home",
  "http",
  "http-body-util",
  "hyper",
  "hyper-named-pipe",
+ "hyper-rustls",
  "hyper-util",
  "hyperlocal",
  "log",
  "pin-project-lite",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pemfile",
+ "rustls-pki-types",
  "serde",
  "serde_derive",
  "serde_json",
@@ -5425,6 +5431,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "reqwest 0.12.28",
+ "secrecy",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5624,6 +5631,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -5650,6 +5658,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -5811,6 +5820,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -5974,12 +5984,14 @@ name = "runesh-vmware"
 version = "0.16.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "reqwest 0.12.28",
  "runesh-workload",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -6007,6 +6019,8 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio-util",
+ "url",
 ]
 
 [[package]]
@@ -6103,6 +6117,15 @@ dependencies = [
  "rustls-pki-types",
  "schannel",
  "security-framework",
+]
+
+[[package]]
+name = "rustls-pemfile"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]
@@ -6261,6 +6284,7 @@ version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e891af845473308773346dc847b2c23ee78fe442e0472ac50e22a18a93d3ae5a"
 dependencies = [
+ "serde",
  "zeroize",
 ]
 

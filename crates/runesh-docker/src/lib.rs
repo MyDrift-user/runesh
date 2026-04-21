@@ -11,11 +11,36 @@ use bollard::container::{
     RestartContainerOptions, StopContainerOptions,
 };
 use futures_util::StreamExt;
+use tokio_util::sync::CancellationToken;
 
 use runesh_workload::{
-    RunResult, Workload, WorkloadDriver, WorkloadError, WorkloadSnapshot, WorkloadState,
-    WorkloadType,
+    CreateSpec, RunResult, Workload, WorkloadDriver, WorkloadError, WorkloadSnapshot,
+    WorkloadState, WorkloadType,
 };
+
+/// TLS material for TCP-based Docker connections.
+/// All three files must be PEM-encoded and readable by the process.
+#[derive(Debug, Clone)]
+pub struct TlsConfig {
+    pub ca: std::path::PathBuf,
+    pub cert: std::path::PathBuf,
+    pub key: std::path::PathBuf,
+}
+
+/// How to reach the Docker daemon.
+#[derive(Debug, Clone)]
+pub enum DockerConnect {
+    /// Local socket (Unix socket on Unix, named pipe on Windows).
+    /// Caller is responsible for restricting socket ACLs.
+    NamedPipe,
+    /// Remote TCP endpoint. TLS is mandatory. Set `addr` to `tcp://host:2376`.
+    Tcp {
+        addr: String,
+        tls: TlsConfig,
+        /// Optional per-request timeout in seconds. Defaults to 120.
+        timeout_secs: Option<u64>,
+    },
+}
 
 /// Docker workload driver.
 pub struct DockerDriver {
@@ -24,9 +49,56 @@ pub struct DockerDriver {
 
 impl DockerDriver {
     /// Connect to the local Docker daemon using platform defaults.
+    ///
+    /// Uses a Unix socket on Linux/macOS and a named pipe on Windows.
+    /// The caller is responsible for socket ACLs since this transport
+    /// has no built-in authentication.
     pub fn connect() -> Result<Self, WorkloadError> {
+        tracing::warn!(
+            "DockerDriver connecting via local socket / named pipe: access is governed by socket ACLs only. Ensure the pipe/socket is not world-accessible."
+        );
         let client = Docker::connect_with_local_defaults()
             .map_err(|e| WorkloadError::DriverError(format!("docker connect: {e}")))?;
+        Ok(Self { client })
+    }
+
+    /// Connect using an explicit configuration. TCP connections require TLS.
+    pub fn connect_with(config: DockerConnect) -> Result<Self, WorkloadError> {
+        let client = match config {
+            DockerConnect::NamedPipe => {
+                tracing::warn!(
+                    "DockerDriver connecting via local socket / named pipe: access is governed by socket ACLs only."
+                );
+                Docker::connect_with_local_defaults()
+                    .map_err(|e| WorkloadError::DriverError(format!("docker connect: {e}")))?
+            }
+            DockerConnect::Tcp {
+                addr,
+                tls,
+                timeout_secs,
+            } => {
+                // Plaintext TCP is never allowed by this API; TlsConfig is mandatory
+                // by type. Verify the paths exist so we fail early instead of at
+                // first request.
+                for p in [&tls.ca, &tls.cert, &tls.key] {
+                    if !p.exists() {
+                        return Err(WorkloadError::DriverError(format!(
+                            "docker tls material missing: {}",
+                            p.display()
+                        )));
+                    }
+                }
+                Docker::connect_with_ssl(
+                    &addr,
+                    &tls.key,
+                    &tls.cert,
+                    &tls.ca,
+                    timeout_secs.unwrap_or(120),
+                    bollard::API_DEFAULT_VERSION,
+                )
+                .map_err(|e| WorkloadError::DriverError(format!("docker tls connect: {e}")))?
+            }
+        };
         Ok(Self { client })
     }
 
@@ -127,14 +199,22 @@ impl WorkloadDriver for DockerDriver {
         })
     }
 
-    async fn create(&self, spec: &serde_json::Value) -> Result<Workload, WorkloadError> {
-        let image = spec["image"]
+    async fn create(&self, spec: &CreateSpec) -> Result<Workload, WorkloadError> {
+        let image = spec.spec["image"]
             .as_str()
-            .ok_or_else(|| WorkloadError::OperationFailed("missing 'image' in spec".into()))?;
-        let name = spec["name"].as_str().unwrap_or("runesh-container");
+            .ok_or_else(|| WorkloadError::permanent("missing 'image' in spec"))?;
+        let name = spec.spec["name"].as_str().unwrap_or("runesh-container");
+
+        // Build labels: tags + idempotency key so retries can find the existing container.
+        let mut labels: std::collections::HashMap<String, String> = spec.tags.clone();
+        labels.insert(
+            "runesh.idempotency_key".into(),
+            spec.idempotency_key.clone(),
+        );
 
         let config = Config {
             image: Some(image.to_string()),
+            labels: Some(labels),
             ..Default::default()
         };
 
@@ -147,7 +227,15 @@ impl WorkloadDriver for DockerDriver {
             .client
             .create_container(Some(opts), config)
             .await
-            .map_err(|e| WorkloadError::OperationFailed(format!("create: {e}")))?;
+            .map_err(|e| {
+                let msg = format!("create: {e}");
+                // Name conflicts on Docker come back as 409.
+                if msg.contains("409") || msg.to_lowercase().contains("conflict") {
+                    WorkloadError::conflict(msg)
+                } else {
+                    WorkloadError::permanent(msg)
+                }
+            })?;
 
         self.get(&resp.id).await
     }
@@ -156,21 +244,21 @@ impl WorkloadDriver for DockerDriver {
         self.client
             .start_container::<String>(id, None)
             .await
-            .map_err(|e| WorkloadError::OperationFailed(format!("start {id}: {e}")))
+            .map_err(|e| WorkloadError::transient(format!("start {id}: {e}")))
     }
 
     async fn stop(&self, id: &str) -> Result<(), WorkloadError> {
         self.client
             .stop_container(id, Some(StopContainerOptions { t: 10 }))
             .await
-            .map_err(|e| WorkloadError::OperationFailed(format!("stop {id}: {e}")))
+            .map_err(|e| WorkloadError::transient(format!("stop {id}: {e}")))
     }
 
     async fn restart(&self, id: &str) -> Result<(), WorkloadError> {
         self.client
             .restart_container(id, Some(RestartContainerOptions { t: 10 }))
             .await
-            .map_err(|e| WorkloadError::OperationFailed(format!("restart {id}: {e}")))
+            .map_err(|e| WorkloadError::transient(format!("restart {id}: {e}")))
     }
 
     async fn destroy(&self, id: &str) -> Result<(), WorkloadError> {
@@ -183,10 +271,15 @@ impl WorkloadDriver for DockerDriver {
                 }),
             )
             .await
-            .map_err(|e| WorkloadError::OperationFailed(format!("destroy {id}: {e}")))
+            .map_err(|e| WorkloadError::permanent(format!("destroy {id}: {e}")))
     }
 
-    async fn snapshot(&self, _id: &str, _name: &str) -> Result<WorkloadSnapshot, WorkloadError> {
+    async fn snapshot(
+        &self,
+        _id: &str,
+        _name: &str,
+        _cancel: Option<CancellationToken>,
+    ) -> Result<WorkloadSnapshot, WorkloadError> {
         Err(WorkloadError::NotSupported(
             "use docker commit for container snapshots".into(),
         ))
@@ -196,7 +289,11 @@ impl WorkloadDriver for DockerDriver {
         Ok(vec![])
     }
 
-    async fn restore_snapshot(&self, _snapshot_id: &str) -> Result<(), WorkloadError> {
+    async fn restore_snapshot(
+        &self,
+        _snapshot_id: &str,
+        _cancel: Option<CancellationToken>,
+    ) -> Result<(), WorkloadError> {
         Err(WorkloadError::NotSupported(
             "container snapshot restore not supported".into(),
         ))
@@ -216,35 +313,45 @@ impl WorkloadDriver for DockerDriver {
             .client
             .create_exec(id, create_opts)
             .await
-            .map_err(|e| WorkloadError::OperationFailed(format!("create exec: {e}")))?;
+            .map_err(|e| WorkloadError::transient(format!("create exec: {e}")))?;
 
         let mut stdout = String::new();
         let mut stderr = String::new();
+        let mut stream_err: Option<String> = None;
 
         if let StartExecResults::Attached { mut output, .. } = self
             .client
             .start_exec(&exec_instance.id, None)
             .await
-            .map_err(|e| WorkloadError::OperationFailed(format!("start exec: {e}")))?
+            .map_err(|e| WorkloadError::transient(format!("start exec: {e}")))?
         {
-            while let Some(Ok(msg)) = output.next().await {
-                match msg {
-                    bollard::container::LogOutput::StdOut { message } => {
+            while let Some(item) = output.next().await {
+                match item {
+                    Ok(bollard::container::LogOutput::StdOut { message }) => {
                         stdout.push_str(&String::from_utf8_lossy(&message));
                     }
-                    bollard::container::LogOutput::StdErr { message } => {
+                    Ok(bollard::container::LogOutput::StdErr { message }) => {
                         stderr.push_str(&String::from_utf8_lossy(&message));
                     }
-                    _ => {}
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(error = %e, "docker exec stream error");
+                        stream_err = Some(format!("stream error: {e}"));
+                        break;
+                    }
                 }
             }
+        }
+
+        if let Some(msg) = stream_err {
+            return Err(WorkloadError::transient(msg));
         }
 
         let inspect = self
             .client
             .inspect_exec(&exec_instance.id)
             .await
-            .map_err(|e| WorkloadError::OperationFailed(format!("inspect exec: {e}")))?;
+            .map_err(|e| WorkloadError::transient(format!("inspect exec: {e}")))?;
 
         Ok(RunResult {
             exit_code: inspect.exit_code.unwrap_or(-1) as i32,
@@ -264,8 +371,14 @@ impl WorkloadDriver for DockerDriver {
         let mut stream = self.client.logs(id, Some(opts));
         let mut output = String::new();
 
-        while let Some(Ok(msg)) = stream.next().await {
-            output.push_str(&String::from_utf8_lossy(&msg.into_bytes()));
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(msg) => output.push_str(&String::from_utf8_lossy(&msg.into_bytes())),
+                Err(e) => {
+                    tracing::warn!(error = %e, "docker logs stream error");
+                    return Err(WorkloadError::transient(format!("stream error: {e}")));
+                }
+            }
         }
 
         Ok(output)
@@ -285,7 +398,7 @@ impl WorkloadDriver for DockerDriver {
             self.client
                 .update_container(id, update)
                 .await
-                .map_err(|e| WorkloadError::OperationFailed(format!("resize {id}: {e}")))?;
+                .map_err(|e| WorkloadError::permanent(format!("resize {id}: {e}")))?;
         }
         Ok(())
     }
