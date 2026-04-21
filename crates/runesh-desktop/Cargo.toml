@@ -5,16 +5,29 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Cross-platform remote desktop sharing with screen capture, encoding, and input injection"
+description = "WebRTC-based cross-platform remote desktop with H.264 video, Opus audio, DataChannel input, dirty-rect capture, and xdg-desktop-portal Wayland support"
 
 [features]
-default = ["axum"]
+default = ["axum", "webrtc-transport", "h264", "clipboard", "input", "wayland"]
+
+# Axum WebSocket signaling handlers.
 axum = ["dep:axum", "dep:futures-util"]
+# WebRTC peer connection / RTP tracks / DataChannel.
+webrtc-transport = ["dep:webrtc", "dep:tokio-util"]
+# Software H.264 encoder via openh264.
+h264 = ["dep:openh264"]
+# Audio capture (cpal) + Opus encoding.
+audio = ["dep:cpal", "dep:opus"]
+# Clipboard sharing.
 clipboard = ["dep:arboard"]
+# Input injection kept on by default; legacy flag retained for consumers.
 input = []
+# Real Wayland capture via xdg-desktop-portal + PipeWire (Linux only, also gated at build time).
+wayland = ["dep:ashpd", "dep:pipewire", "dep:libc"]
 
 [dependencies]
 tokio = { workspace = true }
+tokio-util = { version = "0.7", optional = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 bytes = { workspace = true }
@@ -35,7 +48,17 @@ futures-util = { version = "0.3", optional = true }
 # Optional: Clipboard sharing
 arboard = { version = "3", optional = true }
 
-# Windows screen capture + input
+# Optional: WebRTC transport (pure Rust).
+webrtc = { version = "0.14", optional = true }
+
+# Optional: Software H.264 encoder (OpenH264, vendored source build).
+openh264 = { version = "0.9", optional = true }
+
+# Optional: Audio capture and Opus encoding.
+cpal = { version = "0.17", optional = true }
+opus = { version = "0.3", optional = true }
+
+# Windows screen capture + input + WASAPI loopback.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = [
     "Win32_Graphics_Dxgi",
@@ -47,8 +70,11 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_System_Com",
     "Win32_System_Threading",
     "Win32_System_StationsAndDesktops",
+    "Win32_Media_Audio",
+    "Win32_Media_KernelStreaming",
 ] }
 
 # macOS screen capture + input
@@ -56,6 +82,10 @@ windows = { version = "0.62", features = [
 core-graphics = { version = "0.25", features = ["highsierra"] }
 core-foundation = "0.10"
 
-# Linux X11 screen capture + input
+# Linux X11 screen capture + input.
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "0.13", features = ["shm", "xtest", "randr", "xinput"] }
+# Wayland / PipeWire support is only compiled when the `wayland` feature is on.
+ashpd = { version = "0.13", optional = true, default-features = false, features = ["tokio"] }
+pipewire = { version = "0.9", optional = true }
+libc = { version = "0.2", optional = true }

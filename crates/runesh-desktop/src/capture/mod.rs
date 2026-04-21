@@ -34,6 +34,12 @@ pub fn create_capturer(display_id: u32) -> Result<Box<dyn ScreenCapture>, Deskto
 
     #[cfg(target_os = "linux")]
     {
+        #[cfg(feature = "wayland")]
+        {
+            if wayland::is_wayland() {
+                return Ok(Box::new(wayland::WaylandCapturer::new(display_id)?));
+            }
+        }
         Ok(Box::new(x11::X11Capturer::new(display_id)?))
     }
 
@@ -55,5 +61,8 @@ pub mod macos;
 #[cfg(target_os = "linux")]
 pub mod x11;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "wayland"))]
 pub mod wayland;
+
+#[cfg(feature = "audio")]
+pub mod audio;
