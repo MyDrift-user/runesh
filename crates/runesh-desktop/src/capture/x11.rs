@@ -1,6 +1,7 @@
 //! Linux X11 screen capture using XShm (shared memory extension).
 
 use x11rb::connection::{Connection, RequestConnection};
+use x11rb::protocol::screensaver::{self, ConnectionExt as ScreenSaverExt, State as ScreenSaverState};
 use x11rb::protocol::shm::{self, ConnectionExt as ShmExt};
 use x11rb::protocol::xproto::*;
 
@@ -14,6 +15,11 @@ pub struct X11Capturer {
     width: u32,
     height: u32,
     use_shm: bool,
+    /// Whether the X11 MIT-SCREEN-SAVER extension is present. Used to
+    /// detect that the screensaver / lock screen is active so the capturer
+    /// can refuse to read the framebuffer while credentials may be on
+    /// screen.
+    screensaver_available: bool,
 }
 
 impl X11Capturer {
@@ -39,6 +45,19 @@ impl X11Capturer {
             tracing::debug!("X11 SHM not available, using GetImage (slower)");
         }
 
+        let screensaver_available = conn
+            .extension_information(screensaver::X11_EXTENSION_NAME)
+            .ok()
+            .flatten()
+            .is_some();
+        if !screensaver_available {
+            tracing::warn!(
+                "MIT-SCREEN-SAVER extension not available on this X11 display; \
+                 lock-state detection disabled, capture will proceed even if \
+                 the session is locked"
+            );
+        }
+
         Ok(Self {
             conn,
             screen_num,
@@ -46,7 +65,26 @@ impl X11Capturer {
             width,
             height,
             use_shm,
+            screensaver_available,
         })
+    }
+
+    /// Returns true when the X11 screensaver is on. Treats "disabled",
+    /// "off" and protocol errors as "not locked" (fail permissive) because
+    /// a lot of environments do not actually drive the MIT-SCREEN-SAVER
+    /// state machine. The extension must be present; we check that on
+    /// construction.
+    fn is_locked(&self) -> bool {
+        if !self.screensaver_available {
+            return false;
+        }
+        match self.conn.screensaver_query_info(self.root) {
+            Ok(cookie) => match cookie.reply() {
+                Ok(reply) => matches!(reply.state, ScreenSaverState::ON),
+                Err(_) => false,
+            },
+            Err(_) => false,
+        }
     }
 
     /// Capture using XGetImage (slower but always works).
@@ -82,6 +120,11 @@ impl X11Capturer {
 
 impl ScreenCapture for X11Capturer {
     fn capture_frame(&mut self) -> Result<CapturedFrame, DesktopError> {
+        if self.is_locked() {
+            return Err(DesktopError::Capture(
+                "X11 screensaver active; capture suppressed".into(),
+            ));
+        }
         // For now, use GetImage. SHM requires more setup with shmget/shmat
         // which needs unsafe blocks and OS-level shared memory management.
         self.capture_getimage()
