@@ -57,7 +57,6 @@ RUNESH/
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
 │   ├── runesh-coord/                    # Tailscale-compatible coordination: Noise IK handshake, node registry, map builder
 │   ├── runesh-dns/                      # MagicDNS, split DNS, zone management, service discovery
-│   ├── runesh-edr/                      # Endpoint detection: file integrity monitoring, IoC matching, security events
 │   ├── runesh-flow/                     # Network flow collector: NetFlow/sFlow/IPFIX, top-N aggregations
 │   ├── runesh-mdm/                      # Mobile device management: enrollment, config profiles, remote actions
 │   ├── runesh-core/                     # AppError, RateLimiter, WS broadcast, file upload, DB pool
