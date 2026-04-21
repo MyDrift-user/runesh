@@ -150,29 +150,53 @@ pub fn collect_battery_wmi() -> Option<BatteryInfo> {
     })
 }
 
-/// Collect installed software via WMI Win32_Product (slow) and registry fallback.
+/// Collect installed software by enumerating Windows Registry Uninstall keys.
+///
+/// Avoids `Win32_Product`, which is slow and triggers an MSI `Reconfigure` on
+/// every query (which can repair/reset the installer state). Reads from:
+/// - `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*`
+/// - `HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*`
+/// - `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*`
 pub fn collect_software_wmi() -> Vec<InstalledSoftware> {
-    let Some(conn) = wmi_connect() else {
-        return Vec::new();
-    };
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 
-    // Win32Reg_AddRemovePrograms is faster than Win32_Product
-    // Fall back to Win32_Product if needed
-    let results = wmi_query(
-        &conn,
-        "SELECT Name, Version, Vendor, InstallDate, InstallLocation FROM Win32_Product",
-    );
+    const UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
+    const UNINSTALL_WOW: &str = r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall";
 
-    results
-        .iter()
-        .filter(|sw| !get_str(sw, "Name").is_empty())
-        .map(|sw| InstalledSoftware {
-            name: get_str(sw, "Name"),
-            version: get_str(sw, "Version"),
-            publisher: get_str(sw, "Vendor"),
-            install_date: get_str(sw, "InstallDate"),
-            install_location: get_str(sw, "InstallLocation"),
-            size_bytes: None,
-        })
-        .collect()
+    fn read_str(key: &winreg::RegKey, name: &str) -> String {
+        key.get_value::<String, _>(name).unwrap_or_default()
+    }
+
+    fn enumerate(root: winreg::RegKey, subkey: &str, out: &mut Vec<InstalledSoftware>) {
+        let Ok(base) = root.open_subkey_with_flags(subkey, KEY_READ) else {
+            return;
+        };
+        for sub in base.enum_keys().flatten() {
+            let Ok(entry) = base.open_subkey_with_flags(&sub, KEY_READ) else {
+                continue;
+            };
+            let name = read_str(&entry, "DisplayName");
+            if name.is_empty() {
+                continue;
+            }
+            out.push(InstalledSoftware {
+                name,
+                version: read_str(&entry, "DisplayVersion"),
+                publisher: read_str(&entry, "Publisher"),
+                install_date: read_str(&entry, "InstallDate"),
+                install_location: read_str(&entry, "InstallLocation"),
+                size_bytes: entry
+                    .get_value::<u32, _>("EstimatedSize")
+                    .ok()
+                    .map(|kb| (kb as u64) * 1024),
+            });
+        }
+    }
+
+    let mut out = Vec::new();
+    enumerate(RegKey::predef(HKEY_LOCAL_MACHINE), UNINSTALL, &mut out);
+    enumerate(RegKey::predef(HKEY_LOCAL_MACHINE), UNINSTALL_WOW, &mut out);
+    enumerate(RegKey::predef(HKEY_CURRENT_USER), UNINSTALL, &mut out);
+    out
 }

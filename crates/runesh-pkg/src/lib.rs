@@ -68,8 +68,17 @@ pub trait PackageManager: Send + Sync {
     /// Remove a package.
     async fn remove(&self, package: &str) -> Result<PackageResult, PkgError>;
 
-    /// Upgrade a package (or all packages if name is empty).
+    /// Upgrade a specific package. `package` must be non-empty.
+    /// For upgrading every installed package, use [`PackageManager::upgrade_all`].
     async fn upgrade(&self, package: &str) -> Result<PackageResult, PkgError>;
+
+    /// Upgrade every installed package.
+    ///
+    /// Default implementation delegates to `upgrade("")` so existing backends
+    /// that use the "empty name means all" convention continue to work.
+    async fn upgrade_all(&self) -> Result<PackageResult, PkgError> {
+        self.upgrade("").await
+    }
 
     /// Check for available updates.
     async fn available_updates(&self) -> Result<Vec<PackageInfo>, PkgError>;

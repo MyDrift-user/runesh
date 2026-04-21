@@ -8,7 +8,9 @@ authors.workspace = true
 description = "Patch management: ring-based rollout, CVE correlation, maintenance windows"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
+regex = "1"

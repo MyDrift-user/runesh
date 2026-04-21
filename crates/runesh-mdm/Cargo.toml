@@ -8,7 +8,12 @@ authors.workspace = true
 description = "Mobile device management: enrollment, config profiles, remote lock/wipe"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
+base64 = { workspace = true }
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -2,12 +2,15 @@
 
 use crate::{PackageResult, PkgError};
 
-/// Validate a package name to prevent command injection.
-/// Allows: alphanumeric, hyphens, dots, underscores, forward slashes, @, plus signs.
-/// Rejects: semicolons, backticks, pipes, ampersands, dollar signs, etc.
+/// Validate a package name's character set to prevent command injection.
+///
+/// Allows: alphanumeric, hyphens, dots, underscores, forward slashes, @, plus
+/// signs, colons. The empty string is accepted as a placeholder (for example,
+/// `upgrade_all` may pass `""`). Use [`require_package_name`] when empty is
+/// not acceptable.
 pub fn validate_package_name(name: &str) -> Result<(), PkgError> {
     if name.is_empty() {
-        return Ok(()); // empty name is valid (used for "upgrade all")
+        return Ok(());
     }
     if name.len() > 256 {
         return Err(PkgError::CommandFailed("package name too long".into()));
@@ -23,6 +26,17 @@ pub fn validate_package_name(name: &str) -> Result<(), PkgError> {
     Ok(())
 }
 
+/// Validate a package name and require it to be non-empty. Intended for
+/// `install`, `remove`, and the single-package form of `upgrade`.
+pub fn require_package_name(name: &str) -> Result<(), PkgError> {
+    if name.is_empty() {
+        return Err(PkgError::CommandFailed(
+            "package name must not be empty".into(),
+        ));
+    }
+    validate_package_name(name)
+}
+
 /// Run a package manager command and capture output.
 pub async fn run_pkg_command(
     command: &str,
@@ -30,10 +44,28 @@ pub async fn run_pkg_command(
     action: &str,
     package: &str,
 ) -> Result<PackageResult, PkgError> {
+    run_pkg_command_env(command, args, action, package, &[]).await
+}
+
+/// Run a package manager command with extra environment overrides (useful for
+/// forcing locales, for example `LC_ALL=C` on winget so column-based parsing
+/// is stable).
+pub async fn run_pkg_command_env(
+    command: &str,
+    args: &[&str],
+    action: &str,
+    package: &str,
+    env: &[(&str, &str)],
+) -> Result<PackageResult, PkgError> {
     validate_package_name(package)?;
 
-    let output = tokio::process::Command::new(command)
-        .args(args)
+    let mut cmd = tokio::process::Command::new(command);
+    cmd.args(args);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+
+    let output = cmd
         .output()
         .await
         .map_err(|e| PkgError::CommandFailed(format!("{command}: {e}")))?;
@@ -72,5 +104,11 @@ mod tests {
             .unwrap();
         assert!(result.success);
         assert!(result.output.contains("test"));
+    }
+
+    #[test]
+    fn require_package_name_rejects_empty() {
+        assert!(require_package_name("").is_err());
+        assert!(require_package_name("ok").is_ok());
     }
 }
