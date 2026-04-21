@@ -5,10 +5,21 @@
 //! - Block comments: `/* comment */`
 //! - Trailing commas in arrays and objects
 //!
-//! This module strips these extensions to produce valid JSON,
-//! then delegates to serde_json for parsing.
+//! This module strips these extensions to produce valid JSON in a single
+//! pass over the input, then delegates to serde_json for parsing.
 
 use crate::AclError;
+
+/// Internal tokenizer state.
+#[derive(Clone, Copy)]
+enum State {
+    Normal,
+    InString,
+    InStringEscape,
+    InLineComment,
+    InBlockComment,
+    InBlockCommentStar,
+}
 
 /// Strip HuJSON extensions from input, producing valid JSON.
 ///
@@ -16,144 +27,141 @@ use crate::AclError;
 /// - `// line comments` (removed with the newline)
 /// - `/* block comments */` (removed entirely)
 /// - Trailing commas before `]` or `}` (removed)
-/// - Preserves strings containing `//` or `/*` literally
+/// - Preserves strings containing `//` or `/*` or escaped quotes literally
+///
+/// This is a single-pass tokenizer that tracks string state once. Trailing
+/// commas are buffered: when a comma is encountered outside a string, it is
+/// deferred. If the next non-whitespace character is `]` or `}` the comma is
+/// discarded; otherwise it is emitted.
 pub fn to_json(input: &str) -> Result<String, AclError> {
     let mut out = String::with_capacity(input.len());
+    let mut state = State::Normal;
+    // A comma waiting to be emitted; we hold trailing whitespace alongside it
+    // so we can strip the comma while still preserving newlines etc.
+    let mut pending_comma: Option<String> = None;
+
     let mut chars = input.chars().peekable();
-    let mut in_string = false;
-    let mut escape_next = false;
-
     while let Some(c) = chars.next() {
-        if escape_next {
-            out.push(c);
-            escape_next = false;
-            continue;
-        }
-
-        if in_string {
-            out.push(c);
-            if c == '\\' {
-                escape_next = true;
-            } else if c == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-
-        match c {
-            '"' => {
-                in_string = true;
-                out.push(c);
-            }
-            '/' => {
-                match chars.peek() {
-                    Some('/') => {
-                        // Line comment: skip until newline
-                        chars.next();
-                        for nc in chars.by_ref() {
-                            if nc == '\n' {
-                                out.push('\n');
-                                break;
-                            }
-                        }
+        match state {
+            State::Normal => {
+                // If we have a pending comma, decide what to do with it now.
+                if let Some(buf) = pending_comma.as_mut() {
+                    if c.is_whitespace() {
+                        buf.push(c);
+                        continue;
                     }
-                    Some('*') => {
-                        // Block comment: skip until */
-                        chars.next();
-                        let mut found_end = false;
-                        while let Some(nc) = chars.next() {
-                            if nc == '*' && chars.peek() == Some(&'/') {
+                    // Comments must not flush the pending comma: they are
+                    // invisible in the final JSON, so a trailing comma
+                    // followed by a comment then `}` or `]` is still
+                    // a trailing comma and must be dropped.
+                    if c == '/' {
+                        match chars.peek() {
+                            Some('/') => {
                                 chars.next();
-                                found_end = true;
-                                break;
+                                state = State::InLineComment;
+                                continue;
                             }
-                            // Preserve newlines for line counting
-                            if nc == '\n' {
-                                out.push('\n');
+                            Some('*') => {
+                                chars.next();
+                                state = State::InBlockComment;
+                                continue;
                             }
-                        }
-                        if !found_end {
-                            return Err(AclError::InvalidHuJson(
-                                "unterminated block comment".into(),
-                            ));
+                            _ => {}
                         }
                     }
-                    _ => {
+                    if c == ']' || c == '}' {
+                        // Trailing comma: drop the comma, keep whitespace.
+                        let ws: String = buf.chars().skip(1).collect();
+                        out.push_str(&ws);
+                        pending_comma = None;
                         out.push(c);
+                        continue;
                     }
+                    // Not a trailing comma: flush the buffer unchanged.
+                    out.push_str(buf);
+                    pending_comma = None;
+                }
+
+                match c {
+                    '"' => {
+                        out.push(c);
+                        state = State::InString;
+                    }
+                    '/' => match chars.peek() {
+                        Some('/') => {
+                            chars.next();
+                            state = State::InLineComment;
+                        }
+                        Some('*') => {
+                            chars.next();
+                            state = State::InBlockComment;
+                        }
+                        _ => out.push(c),
+                    },
+                    ',' => {
+                        // Defer the comma until we know what follows.
+                        pending_comma = Some(String::from(','));
+                    }
+                    _ => out.push(c),
                 }
             }
-            _ => {
+            State::InString => {
                 out.push(c);
+                match c {
+                    '\\' => state = State::InStringEscape,
+                    '"' => state = State::Normal,
+                    _ => {}
+                }
+            }
+            State::InStringEscape => {
+                out.push(c);
+                state = State::InString;
+            }
+            State::InLineComment => {
+                if c == '\n' {
+                    out.push('\n');
+                    state = State::Normal;
+                }
+            }
+            State::InBlockComment => {
+                if c == '*' {
+                    state = State::InBlockCommentStar;
+                } else if c == '\n' {
+                    out.push('\n');
+                }
+            }
+            State::InBlockCommentStar => {
+                if c == '/' {
+                    state = State::Normal;
+                } else if c == '*' {
+                    // stay in star state
+                } else {
+                    if c == '\n' {
+                        out.push('\n');
+                    }
+                    state = State::InBlockComment;
+                }
             }
         }
     }
 
-    if in_string {
-        return Err(AclError::InvalidHuJson("unterminated string".into()));
+    // Flush any pending comma at EOF (it was not a trailing comma, so keep it).
+    if let Some(buf) = pending_comma {
+        out.push_str(&buf);
     }
 
-    // Remove trailing commas: ,\s*] or ,\s*}
-    let result = remove_trailing_commas(&out);
-
-    Ok(result)
-}
-
-/// Remove trailing commas before `]` or `}`.
-fn remove_trailing_commas(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let chars: Vec<char> = input.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
-    let mut in_string = false;
-    let mut escape_next = false;
-
-    while i < len {
-        let c = chars[i];
-
-        if escape_next {
-            out.push(c);
-            escape_next = false;
-            i += 1;
-            continue;
+    match state {
+        State::Normal => Ok(out),
+        State::InString | State::InStringEscape => {
+            Err(AclError::InvalidHuJson("unterminated string".into()))
         }
-
-        if in_string {
-            out.push(c);
-            if c == '\\' {
-                escape_next = true;
-            } else if c == '"' {
-                in_string = false;
-            }
-            i += 1;
-            continue;
+        State::InBlockComment | State::InBlockCommentStar => {
+            Err(AclError::InvalidHuJson("unterminated block comment".into()))
         }
-
-        if c == '"' {
-            in_string = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-
-        if c == ',' {
-            // Look ahead: skip whitespace/newlines, check if next non-ws is ] or }
-            let mut j = i + 1;
-            while j < len && chars[j].is_whitespace() {
-                j += 1;
-            }
-            if j < len && (chars[j] == ']' || chars[j] == '}') {
-                // Trailing comma: skip it, but preserve whitespace
-                i += 1;
-                continue;
-            }
-        }
-
-        out.push(c);
-        i += 1;
+        // An unterminated line comment just means the file ended without a newline,
+        // which is perfectly fine.
+        State::InLineComment => Ok(out),
     }
-
-    out
 }
 
 /// Parse a HuJSON string into a serde_json::Value.
@@ -235,5 +243,60 @@ mod tests {
         let result: serde_json::Value = parse(input).unwrap();
         assert_eq!(result["groups"]["group:admin"][0], "user@example.com");
         assert_eq!(result["acls"][0]["action"], "accept");
+    }
+
+    #[test]
+    fn escaped_quotes_adjacent_to_commas() {
+        // Pathological: escaped quote immediately before comma before bracket.
+        let input = r#"{"a": ["he said \"hi,\"", "bye",]}"#;
+        let result: serde_json::Value = parse(input).unwrap();
+        assert_eq!(result["a"][0], "he said \"hi,\"");
+        assert_eq!(result["a"][1], "bye");
+    }
+
+    #[test]
+    fn escaped_backslash_then_quote() {
+        // String containing a backslash and then ending; trailing comma after.
+        let input = r#"{"p": "c:\\path\\", "q": 1,}"#;
+        let result: serde_json::Value = parse(input).unwrap();
+        assert_eq!(result["p"], "c:\\path\\");
+        assert_eq!(result["q"], 1);
+    }
+
+    #[test]
+    fn comment_markers_inside_string() {
+        // // and /* inside strings must not be mistaken for comments.
+        let input = r#"{"a": "// not a comment", "b": "/* also not */"}"#;
+        let result: serde_json::Value = parse(input).unwrap();
+        assert_eq!(result["a"], "// not a comment");
+        assert_eq!(result["b"], "/* also not */");
+    }
+
+    #[test]
+    fn nested_block_comment_stars() {
+        // Multiple stars before the closing slash.
+        let input = r#"{"a": 1 /*** hi ***/}"#;
+        let result: serde_json::Value = parse(input).unwrap();
+        assert_eq!(result["a"], 1);
+    }
+
+    #[test]
+    fn trailing_comma_after_string_ending_in_quote() {
+        let input = r#"{"a": "x",}"#;
+        let result: serde_json::Value = parse(input).unwrap();
+        assert_eq!(result["a"], "x");
+    }
+
+    #[test]
+    fn comma_between_values_preserved() {
+        let input = r#"{"a": 1, "b": 2}"#;
+        let json = to_json(input).unwrap();
+        assert_eq!(json, r#"{"a": 1, "b": 2}"#);
+    }
+
+    #[test]
+    fn unterminated_string_rejected() {
+        let input = r#"{"a": "unterminated"#;
+        assert!(parse(input).is_err());
     }
 }

@@ -20,6 +20,9 @@ pub enum CoordError {
     #[error("registration failed: {0}")]
     Registration(String),
 
+    #[error("tag not owned by identity: {0}")]
+    UnauthorizedTag(String),
+
     #[error("serialization error: {0}")]
     Serialization(String),
 

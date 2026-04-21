@@ -67,11 +67,17 @@ impl MagicDns {
         }
     }
 
-    /// Register a device. Returns the FQDN.
-    pub fn register(&mut self, hostname: &str, ip: Ipv4Addr) -> String {
+    /// Register a device. Returns the FQDN, or an error if the hostname is
+    /// not a valid DNS label. Valid hostnames:
+    /// - length 1..=253 characters
+    /// - no null bytes or control characters
+    /// - only letters, digits, hyphens and dots (LDH)
+    /// - no leading/trailing dots
+    pub fn register(&mut self, hostname: &str, ip: Ipv4Addr) -> Result<String, DnsError> {
+        validate_hostname(hostname)?;
         let fqdn = format!("{}.{}", hostname, self.domain);
         self.entries.insert(hostname.to_string(), ip);
-        fqdn
+        Ok(fqdn)
     }
 
     /// Remove a device.
@@ -144,6 +150,57 @@ fn default_ttl() -> u32 {
     3600
 }
 
+/// Validate a hostname for DNS registration.
+///
+/// Rejects empty strings, names longer than 253 chars, names with null
+/// bytes, control characters, or characters outside the letter-digit-hyphen
+/// (LDH) set (dots are allowed between labels).
+pub fn validate_hostname(hostname: &str) -> Result<(), DnsError> {
+    if hostname.is_empty() {
+        return Err(DnsError::InvalidHostname("empty".into()));
+    }
+    if hostname.len() > 253 {
+        return Err(DnsError::InvalidHostname(format!(
+            "{} chars exceeds max 253",
+            hostname.len()
+        )));
+    }
+    if hostname.starts_with('.') || hostname.ends_with('.') {
+        return Err(DnsError::InvalidHostname("leading or trailing dot".into()));
+    }
+    for ch in hostname.chars() {
+        if ch == '\0' {
+            return Err(DnsError::InvalidHostname("contains null byte".into()));
+        }
+        if ch.is_control() {
+            return Err(DnsError::InvalidHostname(
+                "contains control character".into(),
+            ));
+        }
+        // LDH plus dot separator. No underscores, no unicode, no punctuation.
+        if !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '.') {
+            return Err(DnsError::InvalidHostname(format!(
+                "contains disallowed character: {ch:?}"
+            )));
+        }
+    }
+    // No double dots, no label starting/ending with hyphen.
+    for label in hostname.split('.') {
+        if label.is_empty() {
+            return Err(DnsError::InvalidHostname("empty label".into()));
+        }
+        if label.len() > 63 {
+            return Err(DnsError::InvalidHostname("label exceeds 63 chars".into()));
+        }
+        if label.starts_with('-') || label.ends_with('-') {
+            return Err(DnsError::InvalidHostname(
+                "label starts or ends with hyphen".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DnsError {
     #[error("zone not found: {0}")]
@@ -152,6 +209,8 @@ pub enum DnsError {
     RecordNotFound(String),
     #[error("duplicate record: {0}")]
     DuplicateRecord(String),
+    #[error("invalid hostname: {0}")]
+    InvalidHostname(String),
 }
 
 #[cfg(test)]
@@ -161,7 +220,9 @@ mod tests {
     #[test]
     fn magic_dns_register_resolve() {
         let mut dns = MagicDns::new("mesh.local");
-        let fqdn = dns.register("laptop-alice", Ipv4Addr::new(100, 64, 0, 1));
+        let fqdn = dns
+            .register("laptop-alice", Ipv4Addr::new(100, 64, 0, 1))
+            .unwrap();
         assert_eq!(fqdn, "laptop-alice.mesh.local");
         assert_eq!(
             dns.resolve("laptop-alice"),
@@ -177,7 +238,7 @@ mod tests {
     #[test]
     fn magic_dns_unregister() {
         let mut dns = MagicDns::new("mesh.local");
-        dns.register("tmp", Ipv4Addr::new(100, 64, 0, 5));
+        dns.register("tmp", Ipv4Addr::new(100, 64, 0, 5)).unwrap();
         dns.unregister("tmp");
         assert_eq!(dns.resolve("tmp"), None);
     }
@@ -185,11 +246,54 @@ mod tests {
     #[test]
     fn magic_dns_to_records() {
         let mut dns = MagicDns::new("mesh.local");
-        dns.register("a", Ipv4Addr::new(100, 64, 0, 1));
-        dns.register("b", Ipv4Addr::new(100, 64, 0, 2));
+        dns.register("a", Ipv4Addr::new(100, 64, 0, 1)).unwrap();
+        dns.register("b", Ipv4Addr::new(100, 64, 0, 2)).unwrap();
         let records = dns.to_records();
         assert_eq!(records.len(), 2);
         assert!(records.iter().all(|r| r.record_type == RecordType::A));
+    }
+
+    #[test]
+    fn rejects_invalid_hostnames() {
+        let mut dns = MagicDns::new("mesh.local");
+        assert!(dns.register("", Ipv4Addr::new(100, 64, 0, 1)).is_err());
+        assert!(
+            dns.register("bad\0name", Ipv4Addr::new(100, 64, 0, 1))
+                .is_err()
+        );
+        assert!(
+            dns.register("under_score", Ipv4Addr::new(100, 64, 0, 1))
+                .is_err()
+        );
+        assert!(
+            dns.register("-leadinghyphen", Ipv4Addr::new(100, 64, 0, 1))
+                .is_err()
+        );
+        assert!(
+            dns.register("trailing-", Ipv4Addr::new(100, 64, 0, 1))
+                .is_err()
+        );
+        assert!(
+            dns.register(".leadingdot", Ipv4Addr::new(100, 64, 0, 1))
+                .is_err()
+        );
+        let long = "a".repeat(254);
+        assert!(dns.register(&long, Ipv4Addr::new(100, 64, 0, 1)).is_err());
+        assert!(
+            dns.register("ctrl\x01char", Ipv4Addr::new(100, 64, 0, 1))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn accepts_valid_hostnames() {
+        let mut dns = MagicDns::new("mesh.local");
+        assert!(dns.register("ok", Ipv4Addr::new(100, 64, 0, 1)).is_ok());
+        assert!(
+            dns.register("host1.sub", Ipv4Addr::new(100, 64, 0, 2))
+                .is_ok()
+        );
+        assert!(dns.register("a-b-c", Ipv4Addr::new(100, 64, 0, 3)).is_ok());
     }
 
     #[test]

@@ -16,4 +16,16 @@ pub enum RelayError {
 
     #[error("frame too large: {0} bytes (max {1})")]
     FrameTooLarge(usize, usize),
+
+    #[error("authentication failed")]
+    AuthFailed,
+
+    #[error("server full")]
+    ServerFull,
+
+    #[error("handshake timeout")]
+    HandshakeTimeout,
+
+    #[error("protocol violation: {0}")]
+    Protocol(String),
 }

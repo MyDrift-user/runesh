@@ -13,5 +13,16 @@ tracing = { workspace = true }
 bytes = { workspace = true }
 thiserror = { workspace = true }
 
+[features]
+default = []
+# When enabled, skip the pinned SHA-256 check on wintun.dll. Unsafe for
+# production. Logs a loud warning at startup. Use only when bundling a
+# differently-signed build of Wintun.
+unpinned-wintun = []
+
 [target.'cfg(windows)'.dependencies]
 wintun = "0.5"
+sha2 = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
