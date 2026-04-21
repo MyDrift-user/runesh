@@ -5300,12 +5300,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams 0.4.2",
  "web-sys",
  "webpki-roots 1.0.6",
 ]
@@ -5351,7 +5353,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams",
+ "wasm-streams 0.5.0",
  "web-sys",
 ]
 
@@ -5490,15 +5492,18 @@ name = "runesh-backup"
 version = "0.16.0"
 dependencies = [
  "async-recursion",
+ "async-trait",
  "chrono",
  "fastcdc",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
+ "zstd",
 ]
 
 [[package]]
@@ -5524,6 +5529,7 @@ dependencies = [
  "indicatif 0.18.4",
  "runesh-telemetry",
  "self_update",
+ "toml 0.8.2",
 ]
 
 [[package]]
@@ -5733,14 +5739,21 @@ dependencies = [
 name = "runesh-monitor"
 version = "0.16.0"
 dependencies = [
+ "async-trait",
+ "bytes",
  "chrono",
+ "futures",
+ "libc",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sysinfo 0.35.2",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5748,13 +5761,18 @@ name = "runesh-notify"
 version = "0.16.0"
 dependencies = [
  "async-trait",
+ "hex",
+ "hmac 0.12.1",
  "lettre",
+ "rand 0.8.5",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -8588,6 +8606,19 @@ dependencies = [
  "indexmap 2.13.1",
  "wasm-encoder",
  "wasmparser",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

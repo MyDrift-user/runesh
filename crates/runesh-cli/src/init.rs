@@ -570,19 +570,46 @@ fn relink_runesh_ui(pkg_dir: &Path, runesh_relative: &str) {
 
 #[cfg(windows)]
 fn create_dir_link(src: &Path, dst: &Path) -> Result<(), String> {
-    // Use `mklink /J` for a directory junction. Junctions don't need admin
-    // and survive across drives but only on the local machine.
-    let src_str = src.to_string_lossy().replace('/', "\\");
-    let dst_str = dst.to_string_lossy().replace('/', "\\");
-    let status = Command::new("cmd")
-        .args(["/c", "mklink", "/J", &dst_str, &src_str])
-        .status()
-        .map_err(|e| format!("mklink spawn: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("mklink exit code {:?}", status.code()))
+    // Prefer the native API (`symlink_dir`) over shelling out to `cmd /c mklink`.
+    // Creating a directory symlink on Windows requires either the "Create
+    // symbolic links" privilege OR Developer Mode. If symlink creation fails
+    // (commonly ERROR_PRIVILEGE_NOT_HELD, code 1314), fall back to copying
+    // the directory tree so consumers can still build. We never fall back to
+    // hard-linking a directory -- Windows does not support hard links on
+    // directories.
+    match std::os::windows::fs::symlink_dir(src, dst) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // Try a recursive copy as a fallback. This duplicates storage
+            // but produces a working tree.
+            match copy_dir_recursive(src, dst) {
+                Ok(()) => Ok(()),
+                Err(copy_err) => Err(format!(
+                    "symlink_dir failed ({e}); copy fallback failed ({copy_err}). \
+                     Enable Developer Mode or run as Administrator."
+                )),
+            }
+        }
     }
+}
+
+#[cfg(windows)]
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| format!("mkdir {}: {e}", dst.display()))?;
+    let entries = fs::read_dir(src).map_err(|e| format!("read_dir {}: {e}", src.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("entry: {e}"))?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        let ft = entry.file_type().map_err(|e| format!("file_type: {e}"))?;
+        if ft.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else if ft.is_file() {
+            fs::copy(&from, &to).map_err(|e| format!("copy: {e}"))?;
+        }
+        // Skip symlinks and other special types.
+    }
+    Ok(())
 }
 
 #[cfg(unix)]

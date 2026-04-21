@@ -12,19 +12,19 @@ use std::process::Command;
 /// 2. System PATH
 pub fn find_binary(name: &str) -> Option<PathBuf> {
     // Check next to current executable
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join(name);
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let candidate = dir.join(name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        // Windows: try with .exe extension
+        #[cfg(windows)]
+        {
+            let candidate = dir.join(format!("{name}.exe"));
             if candidate.exists() {
                 return Some(candidate);
-            }
-            // Windows: try with .exe extension
-            #[cfg(windows)]
-            {
-                let candidate = dir.join(format!("{name}.exe"));
-                if candidate.exists() {
-                    return Some(candidate);
-                }
             }
         }
     }

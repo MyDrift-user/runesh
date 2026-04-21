@@ -2,36 +2,42 @@
 //! Backup engine with content-addressed storage, deduplication, and retention.
 
 pub mod scan;
+pub mod store;
 
 pub use scan::{ScannedFile, backup_directory, scan_directory};
+pub use store::{BackupStore, FileBackupStore, InMemoryBackupStore};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// A backup snapshot (point-in-time reference to chunks).
+/// A backup manifest: an ordered list of chunk references that reassemble a
+/// snapshot, plus file paths and metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Snapshot {
+pub struct Manifest {
     pub id: String,
     pub hostname: String,
     pub paths: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub total_size: u64,
-    pub chunk_count: usize,
-    /// SHA-256 hashes of chunks in this snapshot.
     pub chunk_ids: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
 }
+
+/// A backup snapshot (point-in-time reference to chunks).
+///
+/// Backwards-compatible alias for `Manifest`. New code should prefer `Manifest`.
+pub type Snapshot = Manifest;
 
 /// A content-addressed chunk.
 #[derive(Debug, Clone)]
 pub struct Chunk {
     /// SHA-256 hash of the content (content address).
     pub id: String,
-    /// Raw (or compressed) content.
+    /// Raw content.
     pub data: Vec<u8>,
-    /// Original size before compression.
+    /// Size of the content.
     pub original_size: usize,
 }
 
@@ -57,13 +63,6 @@ pub fn chunk_data(data: &[u8], chunk_size: usize) -> Vec<Chunk> {
 }
 
 /// Content-defined chunker using FastCDC (rolling hash).
-///
-/// Produces variable-size chunks with boundaries determined by content,
-/// so inserting/deleting data only affects nearby chunks instead of
-/// shifting all subsequent chunk boundaries. This maximizes dedup.
-///
-/// `min_size` / `avg_size` / `max_size` control chunk boundaries.
-/// Typical values: 8KB / 16KB / 64KB.
 pub fn chunk_data_cdc(data: &[u8], min_size: u32, avg_size: u32, max_size: u32) -> Vec<Chunk> {
     use fastcdc::ronomon::FastCDC;
 
@@ -106,11 +105,12 @@ impl Default for RetentionPolicy {
     }
 }
 
-/// In-memory backup repository (trait implementations for real backends).
+/// In-memory backup repository (for tests and small deployments).
+///
+/// New code should prefer implementations of [`BackupStore`] for storage.
 #[derive(Debug, Default)]
 pub struct BackupRepo {
     snapshots: Vec<Snapshot>,
-    /// Content-addressed chunk store (hash -> data).
     chunks: std::collections::HashMap<String, Vec<u8>>,
 }
 
@@ -122,7 +122,7 @@ impl BackupRepo {
     /// Store a chunk. Returns true if it was new (not deduplicated).
     pub fn store_chunk(&mut self, chunk: &Chunk) -> bool {
         if self.chunks.contains_key(&chunk.id) {
-            false // already exists, dedup
+            false
         } else {
             self.chunks.insert(chunk.id.clone(), chunk.data.clone());
             true
@@ -145,18 +145,16 @@ impl BackupRepo {
         let chunk_ids: Vec<String> = chunks.iter().map(|c| c.id.clone()).collect();
         let total_size: u64 = chunks.iter().map(|c| c.original_size as u64).sum();
 
-        // Store chunks (dedup happens automatically)
         for chunk in chunks {
             self.store_chunk(chunk);
         }
 
-        let snapshot = Snapshot {
+        let snapshot = Manifest {
             id: uuid::Uuid::new_v4().to_string(),
             hostname: hostname.to_string(),
             paths,
             created_at: Utc::now(),
             total_size,
-            chunk_count: chunk_ids.len(),
             chunk_ids,
             tags,
         };
@@ -164,7 +162,48 @@ impl BackupRepo {
         snapshot
     }
 
-    /// Restore a snapshot: reassemble chunks into original data.
+    /// Restore a snapshot: reassemble chunks into the provided writer.
+    /// Each chunk's content hash is verified before writing.
+    pub async fn restore_to<W: tokio::io::AsyncWrite + Unpin>(
+        &self,
+        snapshot_id: &str,
+        writer: &mut W,
+    ) -> Result<(), BackupError> {
+        use tokio::io::AsyncWriteExt;
+        let snapshot = self
+            .snapshots
+            .iter()
+            .find(|s| s.id == snapshot_id)
+            .ok_or_else(|| BackupError::SnapshotNotFound(snapshot_id.into()))?;
+
+        for chunk_id in &snapshot.chunk_ids {
+            let chunk_data = self
+                .chunks
+                .get(chunk_id)
+                .ok_or_else(|| BackupError::ChunkMissing(chunk_id.clone()))?;
+            let computed = content_hash(chunk_data);
+            if computed != *chunk_id {
+                return Err(BackupError::HashMismatch {
+                    expected: chunk_id.clone(),
+                    actual: computed,
+                });
+            }
+            writer
+                .write_all(chunk_data)
+                .await
+                .map_err(|e| BackupError::Storage(format!("write: {e}")))?;
+        }
+        writer
+            .flush()
+            .await
+            .map_err(|e| BackupError::Storage(format!("flush: {e}")))?;
+        Ok(())
+    }
+
+    /// Restore a snapshot: reassemble chunks into a Vec.
+    ///
+    /// Prefer `restore_to` to stream to an `AsyncWrite`; this helper is
+    /// retained for tests and tiny snapshots.
     pub fn restore(&self, snapshot_id: &str) -> Result<Vec<u8>, BackupError> {
         let snapshot = self
             .snapshots
@@ -178,6 +217,13 @@ impl BackupRepo {
                 .chunks
                 .get(chunk_id)
                 .ok_or_else(|| BackupError::ChunkMissing(chunk_id.clone()))?;
+            let computed = content_hash(chunk_data);
+            if computed != *chunk_id {
+                return Err(BackupError::HashMismatch {
+                    expected: chunk_id.clone(),
+                    actual: computed,
+                });
+            }
             data.extend_from_slice(chunk_data);
         }
         Ok(data)
@@ -206,6 +252,10 @@ impl BackupRepo {
     }
 
     /// Garbage collect: remove chunks not referenced by any snapshot.
+    ///
+    /// This is a mark-and-sweep pass. The caller is responsible for holding
+    /// a lock that excludes concurrent snapshot creation: GC is an offline
+    /// operation.
     pub fn gc(&mut self) -> usize {
         let referenced: std::collections::HashSet<&str> = self
             .snapshots
@@ -224,8 +274,12 @@ pub enum BackupError {
     SnapshotNotFound(String),
     #[error("chunk missing: {0}")]
     ChunkMissing(String),
+    #[error("chunk hash mismatch: expected {expected}, actual {actual}")]
+    HashMismatch { expected: String, actual: String },
     #[error("storage error: {0}")]
     Storage(String),
+    #[error("serde: {0}")]
+    Serde(String),
 }
 
 #[cfg(test)]
@@ -246,7 +300,6 @@ mod tests {
         let data = b"hello world this is test data for chunking";
         let chunks = chunk_data(data, 10);
         assert!(chunks.len() >= 4);
-        // Reassemble
         let reassembled: Vec<u8> = chunks.iter().flat_map(|c| c.data.clone()).collect();
         assert_eq!(reassembled, data);
     }
@@ -259,8 +312,8 @@ mod tests {
             data: b"data".to_vec(),
             original_size: 4,
         };
-        assert!(repo.store_chunk(&chunk)); // new
-        assert!(!repo.store_chunk(&chunk)); // dedup
+        assert!(repo.store_chunk(&chunk));
+        assert!(!repo.store_chunk(&chunk));
         assert_eq!(repo.chunk_count(), 1);
     }
 
@@ -287,7 +340,6 @@ mod tests {
         repo.create_snapshot("host-a", vec!["/a".into()], &chunks, vec![]);
         repo.create_snapshot("host-b", vec!["/b".into()], &chunks, vec![]);
 
-        // Two snapshots but chunks stored only once
         assert_eq!(repo.list_snapshots().len(), 2);
         assert_eq!(repo.chunk_count(), chunks.len());
     }
@@ -311,5 +363,22 @@ mod tests {
     fn snapshot_not_found() {
         let repo = BackupRepo::new();
         assert!(repo.restore("nonexistent").is_err());
+    }
+
+    #[tokio::test]
+    async fn restore_verifies_chunk_hash() {
+        // Build a repo, poison a chunk to simulate corruption, and confirm
+        // restore rejects it.
+        let mut repo = BackupRepo::new();
+        let chunks = chunk_data(b"alpha beta gamma", 6);
+        let snap = repo.create_snapshot("h", vec![], &chunks, vec![]);
+        // Corrupt one chunk in place (keep the id, mutate the data).
+        let target = snap.chunk_ids[0].clone();
+        if let Some(bytes) = repo.chunks.get_mut(&target) {
+            bytes[0] ^= 0xFF;
+        }
+        let mut out: Vec<u8> = Vec::new();
+        let err = repo.restore_to(&snap.id, &mut out).await.unwrap_err();
+        matches!(err, BackupError::HashMismatch { .. });
     }
 }

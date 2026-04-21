@@ -7,6 +7,10 @@
 //!   Firing -> Resolved (threshold consecutive successes)
 //!   Resolved -> OK (after notification sent)
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -137,7 +141,13 @@ impl Alert {
 /// Manages alerts for multiple checks.
 #[derive(Debug, Default)]
 pub struct AlertManager {
-    alerts: std::collections::HashMap<String, Alert>,
+    alerts: HashMap<String, Alert>,
+}
+
+/// Persistable snapshot of all tracked alerts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AlertSnapshot {
+    pub alerts: HashMap<String, Alert>,
 }
 
 impl AlertManager {
@@ -146,6 +156,11 @@ impl AlertManager {
     }
 
     /// Register a check for alert tracking.
+    ///
+    /// If an alert with the same `check_id` already exists (for example, loaded
+    /// from an `AlertStore`), this preserves its state and only updates
+    /// thresholds and display name. This is important for persistence: on
+    /// startup we load persisted state then re-register every configured check.
     pub fn register(
         &mut self,
         check_id: &str,
@@ -153,10 +168,16 @@ impl AlertManager {
         failure_threshold: u32,
         recovery_threshold: u32,
     ) {
-        self.alerts.insert(
-            check_id.to_string(),
-            Alert::new(check_id, check_name, failure_threshold, recovery_threshold),
-        );
+        if let Some(existing) = self.alerts.get_mut(check_id) {
+            existing.check_name = check_name.to_string();
+            existing.failure_threshold = failure_threshold;
+            existing.recovery_threshold = recovery_threshold;
+        } else {
+            self.alerts.insert(
+                check_id.to_string(),
+                Alert::new(check_id, check_name, failure_threshold, recovery_threshold),
+            );
+        }
     }
 
     /// Process a check result. Returns an alert event if state changed.
@@ -182,6 +203,112 @@ impl AlertManager {
     /// Get a specific alert by check ID.
     pub fn get(&self, check_id: &str) -> Option<&Alert> {
         self.alerts.get(check_id)
+    }
+
+    /// Build a serializable snapshot of the entire alert table.
+    pub fn snapshot(&self) -> AlertSnapshot {
+        AlertSnapshot {
+            alerts: self.alerts.clone(),
+        }
+    }
+
+    /// Replace in-memory state with a loaded snapshot.
+    pub fn restore_from(&mut self, snap: AlertSnapshot) {
+        self.alerts = snap.alerts;
+    }
+}
+
+/// Persistent alert-state backing store.
+///
+/// Implementations must serialize a snapshot and return it on `load`. The
+/// scheduler calls `save` after every check cycle, and `load` once on startup.
+#[async_trait]
+pub trait AlertStore: Send + Sync + std::fmt::Debug {
+    async fn save(&self, snap: &AlertSnapshot) -> Result<(), AlertStoreError>;
+    async fn load(&self) -> Result<AlertSnapshot, AlertStoreError>;
+}
+
+/// Errors returned by `AlertStore` implementations.
+#[derive(Debug, thiserror::Error)]
+pub enum AlertStoreError {
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("serde: {0}")]
+    Serde(#[from] serde_json::Error),
+}
+
+/// In-memory alert store -- test-only.
+#[derive(Debug, Default)]
+pub struct InMemoryAlertStore {
+    inner: tokio::sync::Mutex<AlertSnapshot>,
+}
+
+#[async_trait]
+impl AlertStore for InMemoryAlertStore {
+    async fn save(&self, snap: &AlertSnapshot) -> Result<(), AlertStoreError> {
+        *self.inner.lock().await = snap.clone();
+        Ok(())
+    }
+    async fn load(&self) -> Result<AlertSnapshot, AlertStoreError> {
+        Ok(self.inner.lock().await.clone())
+    }
+}
+
+/// JSON-on-disk alert store with atomic-rename writes.
+#[derive(Debug)]
+pub struct FileAlertStore {
+    path: PathBuf,
+}
+
+impl FileAlertStore {
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        Self {
+            path: path.as_ref().to_path_buf(),
+        }
+    }
+}
+
+#[async_trait]
+impl AlertStore for FileAlertStore {
+    async fn save(&self, snap: &AlertSnapshot) -> Result<(), AlertStoreError> {
+        let path = self.path.clone();
+        let data = serde_json::to_vec_pretty(snap)?;
+        tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            // Write to a sibling tmp file and atomically rename.
+            let mut tmp = path.clone();
+            let name = tmp
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("alerts")
+                .to_string();
+            tmp.set_file_name(format!(".{name}.tmp"));
+            std::fs::write(&tmp, &data)?;
+            std::fs::rename(&tmp, &path)?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| std::io::Error::other(e.to_string()))??;
+        Ok(())
+    }
+
+    async fn load(&self) -> Result<AlertSnapshot, AlertStoreError> {
+        let path = self.path.clone();
+        let bytes = tokio::task::spawn_blocking(move || -> std::io::Result<Option<Vec<u8>>> {
+            match std::fs::read(&path) {
+                Ok(b) => Ok(Some(b)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e),
+            }
+        })
+        .await
+        .map_err(|e| std::io::Error::other(e.to_string()))??;
+        match bytes {
+            None => Ok(AlertSnapshot::default()),
+            Some(b) => Ok(serde_json::from_slice(&b)?),
+        }
     }
 }
 

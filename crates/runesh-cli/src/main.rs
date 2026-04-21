@@ -4,6 +4,7 @@ mod init;
 mod new_project;
 mod self_update;
 mod sync;
+mod validate;
 
 /// Default GitHub repo for RUNESH shared code.
 /// Override with --repo flag or RUNESH_REPO env var.
