@@ -172,9 +172,31 @@ pub struct RolloutPlan {
 }
 
 impl RolloutPlan {
-    pub fn affected_device_count(&self) -> usize {
-        // Placeholder: real impl queries device inventory
-        0
+    /// Sum of devices in every ring's target selector, using the supplied
+    /// resolver. The library does not know what a "target" means to the
+    /// consumer (device group, tag, dynamic query), so the caller plugs in
+    /// the lookup. Pass a closure that returns the count for a target name,
+    /// or use [`Self::affected_device_count_from_counts`] when ring counts
+    /// are already known.
+    pub fn affected_device_count<F>(&self, count_in_target: F) -> usize
+    where
+        F: Fn(&str) -> usize,
+    {
+        self.rings
+            .iter()
+            .map(|ring| count_in_target(&ring.target))
+            .sum()
+    }
+
+    /// Convenience for when the caller already has a pre-computed count per
+    /// ring in the same order as `self.rings`. Extra entries are ignored,
+    /// missing entries are counted as zero.
+    pub fn affected_device_count_from_counts(&self, per_ring: &[usize]) -> usize {
+        self.rings
+            .iter()
+            .enumerate()
+            .map(|(i, _)| per_ring.get(i).copied().unwrap_or(0))
+            .sum()
     }
 
     /// Advance to the next ring, gated by the current ring's soak window and
@@ -332,6 +354,40 @@ mod tests {
         // 2025-01-04 07:00 Zurich = 06:00 UTC, just past end.
         let outside = Utc.with_ymd_and_hms(2025, 1, 4, 6, 0, 0).unwrap();
         assert!(!w.is_active_at(outside));
+    }
+
+    #[test]
+    fn affected_device_count_sums_rings_via_resolver() {
+        let plan = RolloutPlan {
+            patches: vec![],
+            rings: vec![
+                RolloutRing {
+                    name: "test".into(),
+                    order: 0,
+                    soak_hours: 0,
+                    target: "env:test".into(),
+                    abort_threshold_percent: 5.0,
+                },
+                RolloutRing {
+                    name: "broad".into(),
+                    order: 1,
+                    soak_hours: 0,
+                    target: "env:prod".into(),
+                    abort_threshold_percent: 1.0,
+                },
+            ],
+            window: sample_window("UTC"),
+            current_ring: 0,
+        };
+
+        let count = plan.affected_device_count(|target| match target {
+            "env:test" => 3,
+            "env:prod" => 100,
+            _ => 0,
+        });
+        assert_eq!(count, 103);
+        assert_eq!(plan.affected_device_count_from_counts(&[3, 100]), 103);
+        assert_eq!(plan.affected_device_count_from_counts(&[3]), 3);
     }
 
     #[test]
