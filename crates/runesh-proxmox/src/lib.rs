@@ -6,11 +6,13 @@
 
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 use runesh_workload::{
-    RunResult, Workload, WorkloadDriver, WorkloadError, WorkloadSnapshot, WorkloadState,
-    WorkloadType,
+    CreateSpec, RunResult, TlsConfig, Workload, WorkloadDriver, WorkloadError, WorkloadSnapshot,
+    WorkloadState, WorkloadType, redact_sensitive, validate_host,
 };
 
 /// Proxmox VE connection.
@@ -49,9 +51,47 @@ struct PveResponse<T> {
 struct PveSnapshot {
     name: String,
     #[serde(default)]
+    #[allow(dead_code)]
     description: Option<String>,
     #[serde(default)]
     snaptime: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PveTaskStatus {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    exitstatus: Option<String>,
+}
+
+fn build_client(tls: &TlsConfig) -> Result<Client, WorkloadError> {
+    let mut builder = Client::builder();
+    match tls {
+        TlsConfig::Verify => {}
+        TlsConfig::AcceptInvalidCerts => {
+            tracing::warn!(
+                "ProxmoxDriver: TLS verification disabled by caller (AcceptInvalidCerts)."
+            );
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+        TlsConfig::CustomCa(path) => {
+            let pem = std::fs::read(path).map_err(|e| {
+                WorkloadError::DriverError(format!("read CA {}: {e}", path.display()))
+            })?;
+            let cert = reqwest::Certificate::from_pem(&pem)
+                .map_err(|e| WorkloadError::DriverError(format!("parse CA: {e}")))?;
+            builder = builder.add_root_certificate(cert);
+        }
+        TlsConfig::PinnedFingerprint(_) => {
+            return Err(WorkloadError::NotSupported(
+                "pinned fingerprint TLS not implemented for proxmox".into(),
+            ));
+        }
+    }
+    builder
+        .build()
+        .map_err(|e| WorkloadError::DriverError(format!("http client: {e}")))
 }
 
 impl ProxmoxDriver {
@@ -63,10 +103,19 @@ impl ProxmoxDriver {
         token_id: &str,
         token_secret: &str,
     ) -> Result<Self, WorkloadError> {
-        let client = Client::builder()
-            .danger_accept_invalid_certs(true) // self-signed certs common
-            .build()
-            .map_err(|e| WorkloadError::DriverError(format!("http client: {e}")))?;
+        Self::with_token_tls(host, node, token_id, token_secret, TlsConfig::Verify)
+    }
+
+    /// Connect with API token and explicit TLS configuration.
+    pub fn with_token_tls(
+        host: &str,
+        node: &str,
+        token_id: &str,
+        token_secret: &str,
+        tls: TlsConfig,
+    ) -> Result<Self, WorkloadError> {
+        validate_host(host)?;
+        let client = build_client(&tls)?;
         Ok(Self {
             client,
             base_url: format!("https://{host}:8006/api2/json"),
@@ -85,27 +134,57 @@ impl ProxmoxDriver {
         username: &str,
         password: &str,
     ) -> Result<Self, WorkloadError> {
-        let client = Client::builder()
-            .danger_accept_invalid_certs(true)
-            .build()
-            .map_err(|e| WorkloadError::DriverError(format!("http client: {e}")))?;
+        Self::with_password_tls(host, node, username, password, TlsConfig::Verify).await
+    }
+
+    /// Authenticate with username/password and explicit TLS configuration.
+    pub async fn with_password_tls(
+        host: &str,
+        node: &str,
+        username: &str,
+        password: &str,
+        tls: TlsConfig,
+    ) -> Result<Self, WorkloadError> {
+        validate_host(host)?;
+        let client = build_client(&tls)?;
         let base_url = format!("https://{host}:8006/api2/json");
 
-        let resp: PveResponse<serde_json::Value> = client
+        let resp = client
             .post(format!("{base_url}/access/ticket"))
             .form(&[("username", username), ("password", password)])
             .send()
             .await
-            .map_err(|e| WorkloadError::DriverError(format!("auth: {e}")))?
+            .map_err(|e| WorkloadError::transient(format!("auth: {e}")))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            let msg = redact_sensitive(&format!("auth failed {status}: {body}"));
+            return if status.as_u16() == 401 || status.as_u16() == 403 {
+                Err(WorkloadError::auth(msg))
+            } else if status.is_server_error() || status.as_u16() == 429 {
+                Err(WorkloadError::transient(msg))
+            } else {
+                Err(WorkloadError::permanent(msg))
+            };
+        }
+
+        let parsed: PveResponse<serde_json::Value> = resp
             .json()
             .await
-            .map_err(|e| WorkloadError::DriverError(format!("auth parse: {e}")))?;
+            .map_err(|e| WorkloadError::transient(format!("auth parse: {e}")))?;
 
-        let ticket = resp.data["ticket"].as_str().unwrap_or("").to_string();
-        let csrf = resp.data["CSRFPreventionToken"]
+        let ticket = parsed.data["ticket"].as_str().unwrap_or("").to_string();
+        let csrf = parsed.data["CSRFPreventionToken"]
             .as_str()
             .unwrap_or("")
             .to_string();
+
+        if ticket.is_empty() || csrf.is_empty() {
+            return Err(WorkloadError::auth(
+                "Proxmox returned empty ticket/CSRF".to_string(),
+            ));
+        }
 
         Ok(Self {
             client,
@@ -126,31 +205,116 @@ impl ProxmoxDriver {
         }
     }
 
+    fn classify_status(&self, status: reqwest::StatusCode, body: &str) -> WorkloadError {
+        let msg = redact_sensitive(&format!("HTTP {status}: {body}"));
+        match status.as_u16() {
+            401 | 403 => WorkloadError::auth(msg),
+            404 => WorkloadError::NotFound(msg),
+            409 => WorkloadError::conflict(msg),
+            429 => WorkloadError::transient(msg),
+            s if (500..600).contains(&s) => WorkloadError::transient(msg),
+            _ => WorkloadError::permanent(msg),
+        }
+    }
+
     async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, WorkloadError> {
         let url = format!("{}/{}", self.base_url, path.trim_start_matches('/'));
-        let resp: PveResponse<T> = self
+        let resp = self
             .auth_request(self.client.get(&url))
             .send()
             .await
-            .map_err(|e| WorkloadError::DriverError(format!("GET {path}: {e}")))?
+            .map_err(|e| WorkloadError::transient(format!("GET {path}: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(self.classify_status(status, &body));
+        }
+        let parsed: PveResponse<T> = resp
             .json()
             .await
-            .map_err(|e| WorkloadError::DriverError(format!("parse {path}: {e}")))?;
-        Ok(resp.data)
+            .map_err(|e| WorkloadError::permanent(format!("parse {path}: {e}")))?;
+        Ok(parsed.data)
     }
 
-    async fn post_action(&self, path: &str) -> Result<(), WorkloadError> {
+    async fn post_action(&self, path: &str) -> Result<String, WorkloadError> {
         let url = format!("{}/{}", self.base_url, path.trim_start_matches('/'));
         let resp = self
             .auth_request(self.client.post(&url))
             .send()
             .await
-            .map_err(|e| WorkloadError::OperationFailed(format!("POST {path}: {e}")))?;
-        if !resp.status().is_success() {
+            .map_err(|e| WorkloadError::transient(format!("POST {path}: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(WorkloadError::OperationFailed(format!("{path}: {body}")));
+            return Err(self.classify_status(status, &body));
         }
-        Ok(())
+        // Proxmox long-running ops return a `data: "UPID:..."` string.
+        let body = resp.text().await.unwrap_or_default();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
+        Ok(parsed["data"].as_str().unwrap_or("").to_string())
+    }
+
+    /// Poll a Proxmox task UPID until it completes or we time out.
+    async fn wait_task(
+        &self,
+        upid: &str,
+        timeout: Duration,
+        cancel: Option<CancellationToken>,
+    ) -> Result<(), WorkloadError> {
+        if !upid.starts_with("UPID:") {
+            // Not a task response (e.g. synchronous endpoint). Nothing to wait on.
+            return Ok(());
+        }
+        let path = format!("nodes/{}/tasks/{}/status", self.node, upid);
+        let url = format!("{}/{}", self.base_url, path);
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if let Some(c) = &cancel
+                && c.is_cancelled()
+            {
+                return Err(WorkloadError::Cancelled);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(WorkloadError::transient(format!(
+                    "task {} timed out after {:?}",
+                    redact_sensitive(upid),
+                    timeout
+                )));
+            }
+            let resp = self
+                .auth_request(self.client.get(&url))
+                .send()
+                .await
+                .map_err(|e| WorkloadError::transient(format!("task status: {e}")))?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                return Err(self.classify_status(status, &body));
+            }
+            let parsed: PveResponse<PveTaskStatus> = resp
+                .json()
+                .await
+                .map_err(|e| WorkloadError::transient(format!("task parse: {e}")))?;
+
+            match parsed.data.status.as_deref() {
+                Some("stopped") => {
+                    if parsed.data.exitstatus.as_deref() == Some("OK") {
+                        return Ok(());
+                    } else {
+                        return Err(WorkloadError::permanent(format!(
+                            "task failed: {}",
+                            redact_sensitive(
+                                parsed.data.exitstatus.as_deref().unwrap_or("unknown")
+                            )
+                        )));
+                    }
+                }
+                _ => {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            }
+        }
     }
 
     fn map_status(status: &str) -> WorkloadState {
@@ -208,45 +372,77 @@ impl WorkloadDriver for ProxmoxDriver {
         })
     }
 
-    async fn create(&self, _spec: &serde_json::Value) -> Result<Workload, WorkloadError> {
+    async fn create(&self, _spec: &CreateSpec) -> Result<Workload, WorkloadError> {
         Err(WorkloadError::NotSupported(
             "VM creation requires complex config; use Proxmox UI or API directly".into(),
         ))
     }
 
     async fn start(&self, id: &str) -> Result<(), WorkloadError> {
-        self.post_action(&self.vm_path(id, "/status/start")).await
+        let upid = self.post_action(&self.vm_path(id, "/status/start")).await?;
+        self.wait_task(&upid, Duration::from_secs(600), None).await
     }
 
     async fn stop(&self, id: &str) -> Result<(), WorkloadError> {
-        self.post_action(&self.vm_path(id, "/status/stop")).await
+        let upid = self.post_action(&self.vm_path(id, "/status/stop")).await?;
+        self.wait_task(&upid, Duration::from_secs(600), None).await
     }
 
     async fn restart(&self, id: &str) -> Result<(), WorkloadError> {
-        self.post_action(&self.vm_path(id, "/status/reboot")).await
+        let upid = self
+            .post_action(&self.vm_path(id, "/status/reboot"))
+            .await?;
+        self.wait_task(&upid, Duration::from_secs(600), None).await
     }
 
     async fn destroy(&self, id: &str) -> Result<(), WorkloadError> {
-        self.post_action(&format!("nodes/{}/qemu/{}", self.node, id))
+        // DELETE instead of POST for destroy.
+        let url = format!("{}/nodes/{}/qemu/{}", self.base_url, self.node, id);
+        let resp = self
+            .auth_request(self.client.delete(&url))
+            .send()
             .await
+            .map_err(|e| WorkloadError::transient(format!("destroy: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(self.classify_status(status, &body));
+        }
+        let body = resp.text().await.unwrap_or_default();
+        let upid = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v["data"].as_str().map(|s| s.to_string()))
+            .unwrap_or_default();
+        self.wait_task(&upid, Duration::from_secs(600), None).await
     }
 
-    async fn snapshot(&self, id: &str, name: &str) -> Result<WorkloadSnapshot, WorkloadError> {
+    async fn snapshot(
+        &self,
+        id: &str,
+        name: &str,
+        cancel: Option<CancellationToken>,
+    ) -> Result<WorkloadSnapshot, WorkloadError> {
         let url = format!("{}/{}", self.base_url, self.vm_path(id, "/snapshot"));
         let resp = self
             .auth_request(self.client.post(&url))
-            .form(&[
-                ("snapname", name),
-                ("description", &format!("Created by runesh")),
-            ])
+            .form(&[("snapname", name), ("description", "Created by runesh")])
             .send()
             .await
-            .map_err(|e| WorkloadError::OperationFailed(format!("snapshot: {e}")))?;
-        if !resp.status().is_success() {
-            return Err(WorkloadError::OperationFailed("snapshot failed".into()));
+            .map_err(|e| WorkloadError::transient(format!("snapshot: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(self.classify_status(status, &body));
         }
+        let body = resp.text().await.unwrap_or_default();
+        let upid = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v["data"].as_str().map(|s| s.to_string()))
+            .unwrap_or_default();
+        self.wait_task(&upid, Duration::from_secs(600), cancel)
+            .await?;
         Ok(WorkloadSnapshot {
-            id: name.to_string(),
+            id: format!("{id}:{name}"),
             workload_id: id.to_string(),
             name: name.to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -260,7 +456,7 @@ impl WorkloadDriver for ProxmoxDriver {
             .into_iter()
             .filter(|s| s.name != "current")
             .map(|s| WorkloadSnapshot {
-                id: s.name.clone(),
+                id: format!("{id}:{}", s.name),
                 workload_id: id.to_string(),
                 name: s.name,
                 created_at: s.snaptime.map(|t| t.to_string()).unwrap_or_default(),
@@ -269,15 +465,22 @@ impl WorkloadDriver for ProxmoxDriver {
             .collect())
     }
 
-    async fn restore_snapshot(&self, snapshot_id: &str) -> Result<(), WorkloadError> {
+    async fn restore_snapshot(
+        &self,
+        snapshot_id: &str,
+        cancel: Option<CancellationToken>,
+    ) -> Result<(), WorkloadError> {
         // snapshot_id format: "vmid:snapname"
         let parts: Vec<&str> = snapshot_id.splitn(2, ':').collect();
         if parts.len() != 2 {
-            return Err(WorkloadError::OperationFailed(
-                "snapshot_id format: vmid:snapname".into(),
+            return Err(WorkloadError::permanent(
+                "snapshot_id format: vmid:snapname".to_string(),
             ));
         }
-        self.post_action(&self.vm_path(parts[0], &format!("/snapshot/{}/rollback", parts[1])))
+        let upid = self
+            .post_action(&self.vm_path(parts[0], &format!("/snapshot/{}/rollback", parts[1])))
+            .await?;
+        self.wait_task(&upid, Duration::from_secs(600), cancel)
             .await
     }
 
@@ -316,9 +519,11 @@ impl WorkloadDriver for ProxmoxDriver {
             .form(&form)
             .send()
             .await
-            .map_err(|e| WorkloadError::OperationFailed(format!("resize: {e}")))?;
-        if !resp.status().is_success() {
-            return Err(WorkloadError::OperationFailed("resize failed".into()));
+            .map_err(|e| WorkloadError::transient(format!("resize: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(self.classify_status(status, &body));
         }
         Ok(())
     }

@@ -5,23 +5,74 @@
 
 use async_trait::async_trait;
 use reqwest::Client;
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::{
     ApplianceDriver, ApplianceError, ConfigSavepoint, Credentials, DeviceIdentity, FirewallRule,
     HealthStatus, NetInterface,
 };
 
+/// TLS behaviour for OPNsense HTTPS.
+#[derive(Debug, Clone, Default)]
+pub enum TlsConfig {
+    /// Standard CA-based verification. Default.
+    #[default]
+    Verify,
+    /// Accept any certificate. Self-signed on-prem only; must be set
+    /// explicitly by the caller.
+    AcceptInvalidCerts,
+    /// Verify against a custom CA bundle (PEM file).
+    CustomCa(std::path::PathBuf),
+}
+
 pub struct OPNsenseDriver {
     client: Client,
     base_url: String,
     key: String,
-    secret: String,
+    secret: SecretString,
+}
+
+fn build_client(tls: &TlsConfig) -> Result<Client, ApplianceError> {
+    let mut builder = Client::builder();
+    match tls {
+        TlsConfig::Verify => {}
+        TlsConfig::AcceptInvalidCerts => {
+            tracing::warn!(
+                "OPNsenseDriver: TLS verification disabled by caller (AcceptInvalidCerts)."
+            );
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+        TlsConfig::CustomCa(path) => {
+            let pem = std::fs::read(path).map_err(|e| {
+                ApplianceError::ConnectionFailed(format!("read CA {}: {e}", path.display()))
+            })?;
+            let cert = reqwest::Certificate::from_pem(&pem)
+                .map_err(|e| ApplianceError::ConnectionFailed(format!("parse CA: {e}")))?;
+            builder = builder.add_root_certificate(cert);
+        }
+    }
+    builder
+        .build()
+        .map_err(|e| ApplianceError::ConnectionFailed(e.to_string()))
 }
 
 impl OPNsenseDriver {
+    /// Construct with default TLS (standard CA verification).
     pub fn new(host: &str, credentials: &Credentials) -> Result<Self, ApplianceError> {
+        Self::with_tls(host, credentials, TlsConfig::Verify)
+    }
+
+    /// Construct with explicit TLS configuration.
+    pub fn with_tls(
+        host: &str,
+        credentials: &Credentials,
+        tls: TlsConfig,
+    ) -> Result<Self, ApplianceError> {
         let (key, secret) = match credentials {
-            Credentials::ApiKeySecret { key, secret } => (key.clone(), secret.clone()),
+            Credentials::ApiKeySecret { key, secret } => (
+                key.clone(),
+                SecretString::from(secret.expose_secret().to_string()),
+            ),
             _ => {
                 return Err(ApplianceError::AuthFailed(
                     "OPNsense requires ApiKeySecret credentials".into(),
@@ -29,10 +80,7 @@ impl OPNsenseDriver {
             }
         };
 
-        let client = Client::builder()
-            .danger_accept_invalid_certs(true) // self-signed certs common on firewalls
-            .build()
-            .map_err(|e| ApplianceError::ConnectionFailed(e.to_string()))?;
+        let client = build_client(&tls)?;
 
         Ok(Self {
             client,
@@ -47,7 +95,7 @@ impl OPNsenseDriver {
         let resp = self
             .client
             .get(&url)
-            .basic_auth(&self.key, Some(&self.secret))
+            .basic_auth(&self.key, Some(self.secret.expose_secret()))
             .send()
             .await?;
 
@@ -73,7 +121,7 @@ impl OPNsenseDriver {
         let resp = self
             .client
             .post(&url)
-            .basic_auth(&self.key, Some(&self.secret))
+            .basic_auth(&self.key, Some(self.secret.expose_secret()))
             .json(body)
             .send()
             .await?;
@@ -156,6 +204,16 @@ impl ApplianceDriver for OPNsenseDriver {
         self.get("core/system/status").await
     }
 
+    async fn apply_config(&mut self, config: serde_json::Value) -> Result<(), ApplianceError> {
+        // OPNsense does not have a single "apply config" endpoint for arbitrary
+        // config shapes; the caller POSTs the intended delta and we trigger
+        // the firmware reload so staged changes take effect.
+        self.post("core/system/setConfig", &config).await?;
+        self.post("core/firmware/reload", &serde_json::json!({}))
+            .await?;
+        Ok(())
+    }
+
     async fn create_savepoint(&self, description: &str) -> Result<ConfigSavepoint, ApplianceError> {
         let result = self
             .post("core/firmware/savepoint", &serde_json::json!({}))
@@ -224,11 +282,39 @@ impl ApplianceDriver for OPNsenseDriver {
         });
         let result = self.post("firewall/filter/addRule", &body).await?;
         let uuid = result["uuid"].as_str().unwrap_or("").to_string();
-        // Apply changes
-        let _ = self
+
+        // Propagate apply failure. If the apply step fails we attempt to
+        // revert the half-added rule so the device is not left in a
+        // partially-configured state.
+        match self
             .post("firewall/filter/apply", &serde_json::json!({}))
-            .await;
-        Ok(uuid)
+            .await
+        {
+            Ok(_) => Ok(uuid),
+            Err(apply_err) => {
+                tracing::error!(%uuid, error = %apply_err, "opnsense apply failed after addRule; attempting revert");
+                if !uuid.is_empty() {
+                    // Best-effort cleanup. The primary error is apply_err.
+                    match self
+                        .post(
+                            &format!("firewall/filter/delRule/{uuid}"),
+                            &serde_json::json!({}),
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            let _ = self
+                                .post("firewall/filter/apply", &serde_json::json!({}))
+                                .await;
+                        }
+                        Err(revert_err) => {
+                            tracing::error!(%uuid, error = %revert_err, "opnsense revert of half-added rule failed");
+                        }
+                    }
+                }
+                Err(apply_err)
+            }
+        }
     }
 
     async fn delete_firewall_rule(&self, rule_id: &str) -> Result<(), ApplianceError> {
@@ -237,9 +323,9 @@ impl ApplianceDriver for OPNsenseDriver {
             &serde_json::json!({}),
         )
         .await?;
-        let _ = self
-            .post("firewall/filter/apply", &serde_json::json!({}))
-            .await;
+        // Propagate apply failure (previously swallowed with `let _ = ...`).
+        self.post("firewall/filter/apply", &serde_json::json!({}))
+            .await?;
         Ok(())
     }
 
@@ -283,7 +369,7 @@ mod tests {
     fn creates_with_correct_credentials() {
         let creds = Credentials::ApiKeySecret {
             key: "test-key".into(),
-            secret: "test-secret".into(),
+            secret: SecretString::from("test-secret".to_string()),
         };
         let driver = OPNsenseDriver::new("192.168.1.1", &creds).unwrap();
         assert_eq!(driver.driver_name(), "opnsense");
@@ -293,7 +379,7 @@ mod tests {
     #[test]
     fn rejects_wrong_credential_type() {
         let creds = Credentials::BearerToken {
-            token: "tok".into(),
+            token: SecretString::from("tok".to_string()),
         };
         assert!(OPNsenseDriver::new("192.168.1.1", &creds).is_err());
     }
