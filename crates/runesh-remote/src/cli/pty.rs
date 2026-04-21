@@ -147,7 +147,10 @@ mod pty_impl {
     fn default_shell() -> String {
         #[cfg(target_os = "windows")]
         {
-            std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string())
+            // COMSPEC points at cmd.exe on every current Windows install;
+            // fall back to the same rather than to PowerShell so the fallback
+            // matches the environment variable's intended value.
+            std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
         }
 
         #[cfg(not(target_os = "windows"))]
