@@ -8,4 +8,4 @@ pub use config::{
     Resource, TlsConfig,
 };
 pub use error::ProxyError;
-pub use router::{ResolvedRoute, Router};
+pub use router::{ResolvedRoute, RouteDecision, Router};

@@ -17,7 +17,7 @@ use fuser::{
 use tokio::sync::RwLock;
 
 use crate::cache::CacheManager;
-use crate::config::{VfsConfig, WriteMode};
+use crate::config::{MountConfig, VfsConfig, WriteMode};
 use crate::error::VfsError;
 use crate::provider::{FileProvider, VfsEntry};
 
@@ -41,14 +41,26 @@ impl LinuxFuseMount {
 
         let runtime = tokio::runtime::Handle::current();
         let write_mode = config.write_mode.clone();
+        let mount_cfg = config.mount.clone();
 
-        let fs = VfsFuse::new(provider, cache, write_mode, runtime);
+        let fs = VfsFuse::new(provider, cache, write_mode, mount_cfg.clone(), runtime);
 
         let mut mount_options = vec![
             MountOption::FSName(config.display_name.clone()),
             MountOption::AutoUnmount,
-            MountOption::CUSTOM("allow_other".into()),
         ];
+
+        if mount_cfg.allow_other {
+            tracing::warn!(
+                mount_point = %mount_point.display(),
+                "FUSE: allow_other is enabled — any local user can access this mount"
+            );
+            mount_options.push(MountOption::CUSTOM("allow_other".into()));
+        }
+        if mount_cfg.allow_root {
+            tracing::warn!("FUSE: allow_root is enabled");
+            mount_options.push(MountOption::CUSTOM("allow_root".into()));
+        }
 
         if matches!(config.write_mode, WriteMode::ReadOnly) {
             mount_options.push(MountOption::RO);
@@ -92,6 +104,7 @@ struct VfsFuse {
     provider: Arc<dyn FileProvider>,
     cache: Arc<CacheManager>,
     write_mode: WriteMode,
+    mount_cfg: MountConfig,
     runtime: tokio::runtime::Handle,
     /// inode -> path mapping
     inodes: RwLock<HashMap<INodeNo, String>>,
@@ -106,6 +119,7 @@ impl VfsFuse {
         provider: Arc<dyn FileProvider>,
         cache: Arc<CacheManager>,
         write_mode: WriteMode,
+        mount_cfg: MountConfig,
         runtime: tokio::runtime::Handle,
     ) -> Self {
         let inodes = RwLock::new(HashMap::from([(ROOT_INO, String::new())]));
@@ -115,11 +129,31 @@ impl VfsFuse {
             provider,
             cache,
             write_mode,
+            mount_cfg,
             runtime,
             inodes,
             paths,
             next_ino: AtomicU64::new(2),
         }
+    }
+
+    /// Resolve uid for an entry. Preference order:
+    /// 1. Per-entry `entry.uid`
+    /// 2. Configured `mount_cfg.default_uid`
+    /// 3. Process uid (last resort; not safe for multi-tenant — see
+    ///    [`MountConfig`] docs).
+    fn resolve_uid(&self, entry: &VfsEntry) -> u32 {
+        entry
+            .uid
+            .or(self.mount_cfg.default_uid)
+            .unwrap_or_else(|| unsafe { libc::getuid() })
+    }
+
+    fn resolve_gid(&self, entry: &VfsEntry) -> u32 {
+        entry
+            .gid
+            .or(self.mount_cfg.default_gid)
+            .unwrap_or_else(|| unsafe { libc::getgid() })
     }
 
     /// Get or assign an inode for a path.
@@ -169,8 +203,8 @@ impl VfsFuse {
             kind,
             perm,
             nlink: if entry.is_dir { 2 } else { 1 },
-            uid: unsafe { libc::getuid() },
-            gid: unsafe { libc::getgid() },
+            uid: self.resolve_uid(entry),
+            gid: self.resolve_gid(entry),
             rdev: 0,
             blksize: 4096,
             flags: 0,
@@ -218,6 +252,21 @@ impl Filesystem for VfsFuse {
 
         // Root directory
         if ino == ROOT_INO {
+            let root_entry = VfsEntry {
+                name: String::new(),
+                path: String::new(),
+                is_dir: true,
+                size: 0,
+                created: None,
+                modified: None,
+                accessed: None,
+                readonly: matches!(self.write_mode, WriteMode::ReadOnly),
+                is_hydrated: true,
+                content_hash: None,
+                content_type: None,
+                uid: None,
+                gid: None,
+            };
             let attr = FileAttr {
                 ino: ROOT_INO,
                 size: 0,
@@ -229,8 +278,8 @@ impl Filesystem for VfsFuse {
                 kind: FileType::Directory,
                 perm: 0o755,
                 nlink: 2,
-                uid: unsafe { libc::getuid() },
-                gid: unsafe { libc::getgid() },
+                uid: self.resolve_uid(&root_entry),
+                gid: self.resolve_gid(&root_entry),
                 rdev: 0,
                 blksize: 4096,
                 flags: 0,

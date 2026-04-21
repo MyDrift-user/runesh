@@ -3,13 +3,17 @@
 //! Files are cached locally after being fetched from the FileProvider.
 //! When cache exceeds the configured maximum, least-recently-accessed files
 //! are evicted (dehydrated) to free disk space.
+//!
+//! `put` and `evict` share a single [`tokio::sync::Mutex`]; a put that
+//! pushes the cache over the limit triggers eviction **before** it is
+//! acknowledged. This means `current_bytes <= max_bytes` always holds on
+//! the boundary between calls.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 
 use crate::error::VfsError;
 
@@ -21,12 +25,18 @@ struct CacheEntry {
     last_access: Instant,
 }
 
+/// Inner state protected by a single async mutex.
+#[derive(Debug, Default)]
+struct Inner {
+    entries: HashMap<String, CacheEntry>,
+    current_bytes: u64,
+}
+
 /// LRU cache manager for locally-hydrated files.
 pub struct CacheManager {
     cache_dir: PathBuf,
     max_bytes: u64,
-    current_bytes: AtomicU64,
-    entries: RwLock<HashMap<String, CacheEntry>>,
+    inner: Mutex<Inner>,
 }
 
 impl CacheManager {
@@ -37,17 +47,18 @@ impl CacheManager {
         let manager = Self {
             cache_dir,
             max_bytes,
-            current_bytes: AtomicU64::new(0),
-            entries: RwLock::new(HashMap::new()),
+            inner: Mutex::new(Inner::default()),
         };
 
-        // Scan existing cache
         manager.scan_existing().await;
 
         Ok(manager)
     }
 
     /// Cache file content after hydration.
+    ///
+    /// Serializes against `evict` and other `put` calls so the cache size
+    /// invariant is not violated by concurrent writers.
     pub async fn put(&self, path: &str, data: &[u8]) -> Result<(), VfsError> {
         let cache_file = self.cache_path(path)?;
 
@@ -58,21 +69,24 @@ impl CacheManager {
         tokio::fs::write(&cache_file, data).await?;
 
         let size = data.len() as u64;
-        self.current_bytes.fetch_add(size, Ordering::Relaxed);
+        let mut inner = self.inner.lock().await;
 
-        self.entries.write().await.insert(
+        // Replace any old entry with the new size.
+        if let Some(old) = inner.entries.insert(
             path.to_string(),
             CacheEntry {
                 path: path.to_string(),
                 size,
                 last_access: Instant::now(),
             },
-        );
+        ) {
+            inner.current_bytes = inner.current_bytes.saturating_sub(old.size);
+        }
+        inner.current_bytes = inner.current_bytes.saturating_add(size);
 
-        // Evict if over limit
-        let current = self.current_bytes.load(Ordering::Relaxed);
-        if current > self.max_bytes {
-            self.evict_lru().await;
+        // Evict before acknowledging the put.
+        if inner.current_bytes > self.max_bytes {
+            self.evict_lru_locked(&mut inner).await;
         }
 
         Ok(())
@@ -87,8 +101,11 @@ impl CacheManager {
         }
 
         // Update access time
-        if let Some(entry) = self.entries.write().await.get_mut(path) {
-            entry.last_access = Instant::now();
+        {
+            let mut inner = self.inner.lock().await;
+            if let Some(entry) = inner.entries.get_mut(path) {
+                entry.last_access = Instant::now();
+            }
         }
 
         tokio::fs::read(&cache_file).await.ok()
@@ -103,17 +120,11 @@ impl CacheManager {
     pub async fn evict(&self, path: &str) -> Result<(), VfsError> {
         let cache_file = self.cache_path(path)?;
 
-        // Atomic remove: handle the file-not-found case gracefully (TOCTOU safe)
         match tokio::fs::remove_file(&cache_file).await {
             Ok(()) => {
-                let size = self
-                    .entries
-                    .write()
-                    .await
-                    .remove(path)
-                    .map(|e| e.size)
-                    .unwrap_or(0);
-                self.current_bytes.fetch_sub(size, Ordering::Relaxed);
+                let mut inner = self.inner.lock().await;
+                let size = inner.entries.remove(path).map(|e| e.size).unwrap_or(0);
+                inner.current_bytes = inner.current_bytes.saturating_sub(size);
                 tracing::debug!(path = %path, size, "Cache: evicted file");
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -123,41 +134,37 @@ impl CacheManager {
         Ok(())
     }
 
-    /// Evict least-recently-used entries until under the max size.
-    async fn evict_lru(&self) {
-        let target = (self.max_bytes as f64 * 0.8) as u64; // Evict to 80% of max
+    /// Evict LRU entries while holding the inner lock. Called from `put`
+    /// when the cache exceeds the configured maximum.
+    async fn evict_lru_locked(&self, inner: &mut Inner) {
+        let target = (self.max_bytes as f64 * 0.8) as u64;
 
-        let mut entries = self.entries.write().await;
-        let mut sorted: Vec<_> = entries.values().cloned().collect();
+        let mut sorted: Vec<_> = inner.entries.values().cloned().collect();
         sorted.sort_by_key(|e| e.last_access);
 
-        let mut current = self.current_bytes.load(Ordering::Relaxed);
-
-        for entry in &sorted {
-            if current <= target {
+        for entry in sorted {
+            if inner.current_bytes <= target {
                 break;
             }
-
             let cache_file = match self.cache_path(&entry.path) {
                 Ok(p) => p,
                 Err(_) => {
-                    entries.remove(&entry.path);
+                    // Drop a bad entry anyway.
+                    inner.entries.remove(&entry.path);
                     continue;
                 }
             };
             if tokio::fs::remove_file(&cache_file).await.is_ok() {
-                current = current.saturating_sub(entry.size);
-                entries.remove(&entry.path);
+                inner.current_bytes = inner.current_bytes.saturating_sub(entry.size);
+                inner.entries.remove(&entry.path);
                 tracing::debug!(path = %entry.path, "Cache: LRU evicted");
             }
         }
-
-        self.current_bytes.store(current, Ordering::Relaxed);
     }
 
     /// Get current cache usage in bytes.
-    pub fn current_bytes(&self) -> u64 {
-        self.current_bytes.load(Ordering::Relaxed)
+    pub async fn current_bytes(&self) -> u64 {
+        self.inner.lock().await.current_bytes
     }
 
     /// Get maximum cache size in bytes.
@@ -168,25 +175,20 @@ impl CacheManager {
     /// Get the cache file path for a given VFS path.
     /// Validates that the result stays within the cache directory.
     fn cache_path(&self, path: &str) -> Result<PathBuf, VfsError> {
-        // Reject paths with traversal components or null bytes
         if path.contains("..") || path.contains('\0') {
             return Err(VfsError::PathTraversal);
         }
 
-        // Lexical check: normalize and verify prefix.
-        // Use components() to resolve any remaining . or redundant separators.
         use std::path::Component;
         let mut normalized = self.cache_dir.clone();
         for component in Path::new(path).components() {
             match component {
                 Component::Normal(c) => normalized.push(c),
                 Component::CurDir => {}
-                // ParentDir, RootDir, Prefix all escape the sandbox
                 _ => return Err(VfsError::PathTraversal),
             }
         }
 
-        // Double-check the result starts with our cache dir
         if !normalized.starts_with(&self.cache_dir) {
             return Err(VfsError::PathTraversal);
         }
@@ -196,14 +198,20 @@ impl CacheManager {
 
     /// Scan existing cache directory and populate entries map.
     async fn scan_existing(&self) {
+        let mut inner = self.inner.lock().await;
         let mut total = 0u64;
-        let mut entries = self.entries.write().await;
 
-        scan_dir_recursive(&self.cache_dir, &self.cache_dir, &mut entries, &mut total).await;
+        scan_dir_recursive(
+            &self.cache_dir,
+            &self.cache_dir,
+            &mut inner.entries,
+            &mut total,
+        )
+        .await;
 
-        self.current_bytes.store(total, Ordering::Relaxed);
+        inner.current_bytes = total;
         tracing::debug!(
-            files = entries.len(),
+            files = inner.entries.len(),
             bytes = total,
             "Cache: scanned existing entries"
         );
@@ -240,5 +248,35 @@ async fn scan_dir_recursive(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_dir() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "runesh-vfs-cache-test-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn put_respects_max_bytes() {
+        let dir = test_dir();
+        let max = 1024u64;
+        let cache = CacheManager::new(dir.clone(), max).await.unwrap();
+
+        // Write 5x 512-byte entries sequentially. Expect eviction to
+        // keep us at or below max.
+        for i in 0..5 {
+            let key = format!("file{i}.bin");
+            cache.put(&key, &vec![0u8; 512]).await.unwrap();
+            let now = cache.current_bytes().await;
+            assert!(now <= max, "cache exceeded max_bytes: now={now} max={max}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

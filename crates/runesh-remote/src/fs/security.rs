@@ -1,6 +1,6 @@
 //! File system security: path traversal prevention, sandboxing, permission checks.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::error::RemoteError;
 
@@ -17,6 +17,8 @@ pub struct FsPolicy {
     pub allow_execute: bool,
     /// Maximum file size for uploads (bytes).
     pub max_upload_size: u64,
+    /// Maximum per-request read size (bytes). Default 100 MiB.
+    pub max_read_bytes: u64,
     /// Maximum directory depth for recursive operations.
     pub max_depth: usize,
     /// Blocked file extensions (e.g., [".exe", ".bat"]).
@@ -36,6 +38,7 @@ impl Default for FsPolicy {
             allow_delete: true,
             allow_execute: false,
             max_upload_size: 100 * 1024 * 1024, // 100 MB
+            max_read_bytes: 100 * 1024 * 1024,  // 100 MiB
             max_depth: 50,
             blocked_extensions: Vec::new(),
             blocked_patterns: vec![".git".into(), ".env".into()],
@@ -57,17 +60,17 @@ impl FsPolicy {
 
     /// Resolve and validate a path against the security policy.
     /// Returns the canonicalized absolute path within the sandbox.
+    ///
+    /// All client input is treated as **relative to the sandbox root**.
+    /// Absolute paths, UNC paths (`\\server\share`), Windows device namespace
+    /// (`\\.\`), NT namespace (`\\?\`), and null bytes are rejected outright.
     pub fn resolve_path(&self, requested: &str) -> Result<PathBuf, RemoteError> {
-        // Reject empty paths
+        // Empty path = root directory
         if requested.is_empty() {
-            return Ok(self.root.clone());
-        }
-
-        // Reject obviously malicious patterns before any path processing
-        if requested.contains("..") {
-            return Err(RemoteError::PathTraversal(
-                "Path must not contain '..'".into(),
-            ));
+            return self
+                .root
+                .canonicalize()
+                .map_err(|e| RemoteError::Internal(format!("Failed to canonicalize root: {e}")));
         }
 
         // Reject null bytes (path injection)
@@ -77,15 +80,53 @@ impl FsPolicy {
             ));
         }
 
-        // Build the full path
-        let full_path = if Path::new(requested).is_absolute() {
-            PathBuf::from(requested)
-        } else {
-            self.root.join(requested)
-        };
+        // Reject Windows UNC / device / NT namespace prefixes. These must be
+        // caught *before* any Path parsing because on non-Windows hosts the
+        // leading backslashes would be treated as normal characters.
+        if requested.starts_with("\\\\")
+            || requested.starts_with("//")
+            || requested.starts_with("\\?\\")
+            || requested.starts_with("\\.\\")
+        {
+            return Err(RemoteError::PathTraversal(
+                "UNC, device, and NT namespace paths are not allowed".into(),
+            ));
+        }
 
-        // Canonicalize to resolve symlinks and normalize
-        // For new files that don't exist yet, canonicalize the parent
+        // Reject absolute paths outright — everything is relative to root.
+        let as_path = Path::new(requested);
+        if as_path.is_absolute() {
+            return Err(RemoteError::PathTraversal(
+                "Absolute paths are not allowed".into(),
+            ));
+        }
+        // Also reject anything with a Prefix or RootDir component (Windows
+        // drive letters like `C:`, or a leading `/`).
+        for comp in as_path.components() {
+            match comp {
+                Component::Prefix(_) | Component::RootDir => {
+                    return Err(RemoteError::PathTraversal(
+                        "Absolute or drive-qualified paths are not allowed".into(),
+                    ));
+                }
+                Component::ParentDir => {
+                    return Err(RemoteError::PathTraversal(
+                        "Path must not contain '..'".into(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+
+        // Build the full path relative to the canonicalized root.
+        let canonical_root = self
+            .root
+            .canonicalize()
+            .map_err(|e| RemoteError::Internal(format!("Failed to canonicalize root: {e}")))?;
+        let full_path = canonical_root.join(as_path);
+
+        // Canonicalize to resolve symlinks and normalize.
+        // For new files that don't exist yet, canonicalize the parent.
         let canonical = if full_path.exists() {
             full_path
                 .canonicalize()
@@ -103,12 +144,8 @@ impl FsPolicy {
             canonical_parent.join(file_name)
         };
 
-        // Ensure the canonical path is within the root
-        let canonical_root = self
-            .root
-            .canonicalize()
-            .map_err(|e| RemoteError::Internal(format!("Failed to canonicalize root: {e}")))?;
-
+        // Ensure the canonical path is within the root (defense in depth
+        // against symlink escapes).
         if !canonical.starts_with(&canonical_root) {
             tracing::warn!(
                 requested = %requested,
@@ -169,31 +206,70 @@ impl FsPolicy {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_path_traversal_blocked() {
+    fn make_tmp_sandbox() -> (FsPolicy, PathBuf) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("runesh-remote-sec-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create sandbox");
         let policy = FsPolicy {
-            root: PathBuf::from("/tmp/sandbox"),
+            root: dir.clone(),
             ..Default::default()
         };
+        (policy, dir)
+    }
 
+    #[test]
+    fn test_path_traversal_blocked() {
+        let (policy, dir) = make_tmp_sandbox();
         assert!(policy.resolve_path("../../etc/passwd").is_err());
         assert!(policy.resolve_path("foo/../../bar").is_err());
         assert!(policy.resolve_path("..").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_null_byte_blocked() {
-        let policy = FsPolicy {
-            root: PathBuf::from("/tmp/sandbox"),
-            ..Default::default()
-        };
-
+        let (policy, dir) = make_tmp_sandbox();
         assert!(policy.resolve_path("file\0.txt").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_absolute_path_blocked() {
+        let (policy, dir) = make_tmp_sandbox();
+        #[cfg(windows)]
+        {
+            assert!(policy.resolve_path("C:\\Windows\\System32").is_err());
+            assert!(policy.resolve_path("C:/Windows/System32").is_err());
+        }
+        #[cfg(unix)]
+        {
+            assert!(policy.resolve_path("/etc/passwd").is_err());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_unc_path_blocked() {
+        let (policy, dir) = make_tmp_sandbox();
+        assert!(policy.resolve_path("\\\\server\\share\\file").is_err());
+        assert!(policy.resolve_path("//server/share/file").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_device_namespace_blocked() {
+        let (policy, dir) = make_tmp_sandbox();
+        assert!(policy.resolve_path("\\\\.\\PhysicalDrive0").is_err());
+        assert!(policy.resolve_path("\\\\?\\C:\\file").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_read_only_blocks_write() {
-        let policy = FsPolicy::read_only(PathBuf::from("/tmp"));
+        let policy = FsPolicy::read_only(std::env::temp_dir());
         assert!(policy.check_write().is_err());
         assert!(policy.check_delete().is_err());
     }

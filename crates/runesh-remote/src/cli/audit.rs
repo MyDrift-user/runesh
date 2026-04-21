@@ -48,19 +48,18 @@ impl AuditLogger {
             "AUDIT"
         );
 
-        if self.log_to_file {
-            if let Some(ref path) = self.file_path {
-                if let Ok(json) = serde_json::to_string(entry) {
-                    use tokio::io::AsyncWriteExt;
-                    if let Ok(mut file) = tokio::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(path)
-                        .await
-                    {
-                        let _ = file.write_all(format!("{json}\n").as_bytes()).await;
-                    }
-                }
+        if self.log_to_file
+            && let Some(ref path) = self.file_path
+            && let Ok(json) = serde_json::to_string(entry)
+        {
+            use tokio::io::AsyncWriteExt;
+            if let Ok(mut file) = tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .await
+            {
+                let _ = file.write_all(format!("{json}\n").as_bytes()).await;
             }
         }
     }

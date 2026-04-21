@@ -4,6 +4,27 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// Platform mount options that affect security. Ownership settings are
+/// explicit because the old default of `allow_other` with the process uid
+/// is unsafe in multi-tenant contexts.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MountConfig {
+    /// Allow users other than the mounter to access the mount. **Default
+    /// false.** Setting this true emits a loud warning at mount time.
+    #[serde(default)]
+    pub allow_other: bool,
+    /// Allow root to access the mount. Default false.
+    #[serde(default)]
+    pub allow_root: bool,
+    /// Fallback uid used for entries whose provider does not supply one.
+    /// When None, the process uid is used (not recommended for multi-tenant).
+    #[serde(default)]
+    pub default_uid: Option<u32>,
+    /// Fallback gid used for entries whose provider does not supply one.
+    #[serde(default)]
+    pub default_gid: Option<u32>,
+}
+
 /// Configuration for a virtual filesystem mount point.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VfsConfig {
@@ -26,6 +47,9 @@ pub struct VfsConfig {
     pub provider_id: String,
     /// Provider version string.
     pub provider_version: String,
+    /// Platform mount options (FUSE `allow_other`, default uid/gid, ...).
+    #[serde(default)]
+    pub mount: MountConfig,
 }
 
 fn default_cache_max() -> u64 {
@@ -116,6 +140,7 @@ impl Default for VfsConfig {
             cache_max_bytes: default_cache_max(),
             provider_id: "com.runesh.vfs".into(),
             provider_version: "1.0".into(),
+            mount: MountConfig::default(),
         }
     }
 }

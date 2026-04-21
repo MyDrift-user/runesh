@@ -25,6 +25,7 @@
 //!     .with_state(state);
 //! ```
 
+pub mod auth;
 pub mod capture;
 pub mod cursor;
 pub mod display;
@@ -34,12 +35,17 @@ pub mod input;
 pub mod protocol;
 pub mod session;
 
-#[cfg(feature = "clipboard")]
+// Clipboard module is always compiled (for direction/settings types).
+// The platform `ClipboardManager` backend is still feature-gated internally.
 pub mod clipboard;
 
 #[cfg(feature = "axum")]
 pub mod handlers;
 
+pub use auth::{
+    AllowAllAuth, AlwaysDeny, AuthError, ConsentBroker, DenyAllAuth, DesktopAuth, Operation,
+    Principal,
+};
 pub use error::DesktopError;
 pub use session::DesktopConfig;
 

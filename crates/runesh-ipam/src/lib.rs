@@ -3,10 +3,20 @@
 //!
 //! Tracks prefixes, VLANs, individual IP assignments, and utilization.
 //! NetBox-style data model for network planning.
+//!
+//! # Concurrency
+//!
+//! A single [`IpamStore`] instance is safe to share across threads: all
+//! mutating operations acquire an internal lock so allocate/release races
+//! cannot produce duplicate assignments (TOCTOU safe).
+//!
+//! For multi-instance deployments (e.g. multiple processes / replicas),
+//! external coordination (database, Redis, etcd) is required. That is out
+//! of scope for this crate.
 
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
-use std::str::FromStr;
+use std::sync::Mutex;
 
 use ipnet::Ipv4Net;
 use serde::{Deserialize, Serialize};
@@ -73,12 +83,21 @@ pub struct PrefixUtilization {
     pub utilization_percent: f64,
 }
 
-/// IPAM store.
 #[derive(Debug, Default)]
-pub struct IpamStore {
+struct IpamState {
     prefixes: HashMap<String, Prefix>,
     vlans: HashMap<u16, Vlan>,
     assignments: Vec<IpAssignment>,
+}
+
+/// IPAM store.
+///
+/// Internally synchronized. All methods take `&self`; a single store is
+/// safe to share across threads. See the crate-level docs for multi-process
+/// guidance.
+#[derive(Debug, Default)]
+pub struct IpamStore {
+    state: Mutex<IpamState>,
 }
 
 impl IpamStore {
@@ -86,28 +105,36 @@ impl IpamStore {
         Self::default()
     }
 
-    pub fn add_prefix(&mut self, prefix: Prefix) {
-        self.prefixes.insert(prefix.id.clone(), prefix);
+    pub fn add_prefix(&self, prefix: Prefix) {
+        let mut s = self.state.lock().expect("ipam mutex poisoned");
+        s.prefixes.insert(prefix.id.clone(), prefix);
     }
 
-    pub fn add_vlan(&mut self, vlan: Vlan) {
-        self.vlans.insert(vlan.id, vlan);
+    pub fn add_vlan(&self, vlan: Vlan) {
+        let mut s = self.state.lock().expect("ipam mutex poisoned");
+        s.vlans.insert(vlan.id, vlan);
     }
 
     /// Allocate the next available IP in a prefix.
+    ///
+    /// The lookup for a free address and the insert of the new assignment
+    /// happen under the same lock, so concurrent callers cannot both be
+    /// handed the same address.
     pub fn allocate(
-        &mut self,
+        &self,
         prefix_id: &str,
         assigned_to: &str,
         description: &str,
     ) -> Result<Ipv4Addr, IpamError> {
-        let prefix = self
+        let mut s = self.state.lock().expect("ipam mutex poisoned");
+
+        let network = s
             .prefixes
             .get(prefix_id)
-            .ok_or_else(|| IpamError::PrefixNotFound(prefix_id.into()))?;
+            .ok_or_else(|| IpamError::PrefixNotFound(prefix_id.into()))?
+            .network;
 
-        let network = prefix.network;
-        let assigned_in_prefix: std::collections::HashSet<Ipv4Addr> = self
+        let assigned_in_prefix: std::collections::HashSet<Ipv4Addr> = s
             .assignments
             .iter()
             .filter(|a| a.prefix_id == prefix_id)
@@ -117,7 +144,7 @@ impl IpamStore {
         // Skip network address and broadcast
         for host in network.hosts() {
             if !assigned_in_prefix.contains(&host) {
-                self.assignments.push(IpAssignment {
+                s.assignments.push(IpAssignment {
                     address: host,
                     prefix_id: prefix_id.into(),
                     assigned_to: assigned_to.into(),
@@ -133,13 +160,15 @@ impl IpamStore {
 
     /// Assign a specific IP.
     pub fn assign_specific(
-        &mut self,
+        &self,
         prefix_id: &str,
         ip: Ipv4Addr,
         assigned_to: &str,
         description: &str,
     ) -> Result<(), IpamError> {
-        let prefix = self
+        let mut s = self.state.lock().expect("ipam mutex poisoned");
+
+        let prefix = s
             .prefixes
             .get(prefix_id)
             .ok_or_else(|| IpamError::PrefixNotFound(prefix_id.into()))?;
@@ -148,15 +177,14 @@ impl IpamStore {
             return Err(IpamError::OutOfRange(ip.to_string()));
         }
 
-        if self
-            .assignments
+        if s.assignments
             .iter()
             .any(|a| a.address == ip && a.prefix_id == prefix_id)
         {
             return Err(IpamError::AlreadyAssigned(ip.to_string()));
         }
 
-        self.assignments.push(IpAssignment {
+        s.assignments.push(IpAssignment {
             address: ip,
             prefix_id: prefix_id.into(),
             assigned_to: assigned_to.into(),
@@ -166,18 +194,36 @@ impl IpamStore {
         Ok(())
     }
 
-    /// Release an IP back to the pool.
-    pub fn release(&mut self, ip: Ipv4Addr) -> bool {
-        let before = self.assignments.len();
-        self.assignments.retain(|a| a.address != ip);
-        self.assignments.len() < before
+    /// Release a single `(prefix_id, ip)` assignment.
+    ///
+    /// Returns `true` when an assignment matching exactly that prefix and
+    /// address was removed. Use [`IpamStore::release_all`] if you want the
+    /// legacy "remove every assignment with this IP in any prefix" behavior.
+    pub fn release(&self, prefix_id: &str, ip: Ipv4Addr) -> bool {
+        let mut s = self.state.lock().expect("ipam mutex poisoned");
+        let before = s.assignments.len();
+        s.assignments
+            .retain(|a| !(a.address == ip && a.prefix_id == prefix_id));
+        s.assignments.len() < before
+    }
+
+    /// Release every assignment with the given IP across all prefixes.
+    ///
+    /// Use this only when you know you want the global behavior; prefer
+    /// [`IpamStore::release`] for normal use.
+    pub fn release_all(&self, ip: Ipv4Addr) -> bool {
+        let mut s = self.state.lock().expect("ipam mutex poisoned");
+        let before = s.assignments.len();
+        s.assignments.retain(|a| a.address != ip);
+        s.assignments.len() < before
     }
 
     /// Get utilization for a prefix.
     pub fn utilization(&self, prefix_id: &str) -> Option<PrefixUtilization> {
-        let prefix = self.prefixes.get(prefix_id)?;
+        let s = self.state.lock().expect("ipam mutex poisoned");
+        let prefix = s.prefixes.get(prefix_id)?;
         let total = prefix.network.hosts().count() as u32;
-        let assigned = self
+        let assigned = s
             .assignments
             .iter()
             .filter(|a| a.prefix_id == prefix_id)
@@ -199,24 +245,38 @@ impl IpamStore {
         })
     }
 
-    /// Find which prefix an IP belongs to.
-    pub fn find_prefix(&self, ip: Ipv4Addr) -> Option<&Prefix> {
-        self.prefixes.values().find(|p| p.network.contains(&ip))
+    /// Find which prefix an IP belongs to (returns a clone).
+    pub fn find_prefix(&self, ip: Ipv4Addr) -> Option<Prefix> {
+        let s = self.state.lock().expect("ipam mutex poisoned");
+        s.prefixes
+            .values()
+            .find(|p| p.network.contains(&ip))
+            .cloned()
     }
 
-    /// Get all assignments for a device/user.
-    pub fn assignments_for(&self, assigned_to: &str) -> Vec<&IpAssignment> {
-        self.assignments
+    /// Get all assignments for a device/user (returns clones).
+    pub fn assignments_for(&self, assigned_to: &str) -> Vec<IpAssignment> {
+        let s = self.state.lock().expect("ipam mutex poisoned");
+        s.assignments
             .iter()
             .filter(|a| a.assigned_to == assigned_to)
+            .cloned()
             .collect()
     }
 
     pub fn prefix_count(&self) -> usize {
-        self.prefixes.len()
+        self.state
+            .lock()
+            .expect("ipam mutex poisoned")
+            .prefixes
+            .len()
     }
     pub fn assignment_count(&self) -> usize {
-        self.assignments.len()
+        self.state
+            .lock()
+            .expect("ipam mutex poisoned")
+            .assignments
+            .len()
     }
 }
 
@@ -237,7 +297,7 @@ mod tests {
     use super::*;
 
     fn setup() -> IpamStore {
-        let mut store = IpamStore::new();
+        let store = IpamStore::new();
         store.add_prefix(Prefix {
             id: "lan".into(),
             network: "192.168.1.0/24".parse().unwrap(),
@@ -257,7 +317,7 @@ mod tests {
 
     #[test]
     fn allocate_sequential() {
-        let mut store = setup();
+        let store = setup();
         let ip1 = store.allocate("lan", "server-1", "Web server").unwrap();
         let ip2 = store.allocate("lan", "server-2", "DB server").unwrap();
         assert_eq!(ip1, Ipv4Addr::new(192, 168, 1, 1));
@@ -266,7 +326,7 @@ mod tests {
 
     #[test]
     fn assign_specific_ip() {
-        let mut store = setup();
+        let store = setup();
         store
             .assign_specific("lan", Ipv4Addr::new(192, 168, 1, 100), "printer", "Printer")
             .unwrap();
@@ -275,7 +335,7 @@ mod tests {
 
     #[test]
     fn duplicate_rejected() {
-        let mut store = setup();
+        let store = setup();
         store
             .assign_specific("lan", Ipv4Addr::new(192, 168, 1, 50), "a", "")
             .unwrap();
@@ -288,7 +348,7 @@ mod tests {
 
     #[test]
     fn out_of_range_rejected() {
-        let mut store = setup();
+        let store = setup();
         assert!(
             store
                 .assign_specific("lan", Ipv4Addr::new(10, 0, 0, 1), "x", "")
@@ -298,15 +358,59 @@ mod tests {
 
     #[test]
     fn release_ip() {
-        let mut store = setup();
+        let store = setup();
         let ip = store.allocate("lan", "tmp", "Temp").unwrap();
-        assert!(store.release(ip));
+        assert!(store.release("lan", ip));
+        assert_eq!(store.assignment_count(), 0);
+    }
+
+    #[test]
+    fn release_rejects_other_prefix() {
+        let store = setup();
+        store.add_prefix(Prefix {
+            id: "dmz".into(),
+            network: "10.0.0.0/24".parse().unwrap(),
+            description: "DMZ".into(),
+            vlan_id: None,
+            site: None,
+            status: PrefixStatus::Active,
+        });
+
+        let lan_ip = store.allocate("lan", "a", "").unwrap();
+        // Wrong prefix id should not release the lan assignment.
+        assert!(!store.release("dmz", lan_ip));
+        assert_eq!(store.assignment_count(), 1);
+        assert!(store.release("lan", lan_ip));
+        assert_eq!(store.assignment_count(), 0);
+    }
+
+    #[test]
+    fn release_all_across_prefixes() {
+        let store = setup();
+        store.add_prefix(Prefix {
+            id: "lan2".into(),
+            // Overlapping network on purpose to simulate dual assignment.
+            network: "192.168.1.0/24".parse().unwrap(),
+            description: "Alt LAN".into(),
+            vlan_id: None,
+            site: None,
+            status: PrefixStatus::Active,
+        });
+
+        store
+            .assign_specific("lan", Ipv4Addr::new(192, 168, 1, 5), "a", "")
+            .unwrap();
+        store
+            .assign_specific("lan2", Ipv4Addr::new(192, 168, 1, 5), "b", "")
+            .unwrap();
+        assert_eq!(store.assignment_count(), 2);
+        assert!(store.release_all(Ipv4Addr::new(192, 168, 1, 5)));
         assert_eq!(store.assignment_count(), 0);
     }
 
     #[test]
     fn utilization_tracking() {
-        let mut store = setup();
+        let store = setup();
         store.allocate("lan", "a", "").unwrap();
         store.allocate("lan", "b", "").unwrap();
         let util = store.utilization("lan").unwrap();
@@ -324,10 +428,44 @@ mod tests {
 
     #[test]
     fn assignments_for_device() {
-        let mut store = setup();
+        let store = setup();
         store.allocate("lan", "server-1", "").unwrap();
         store.allocate("lan", "server-1", "").unwrap();
         store.allocate("lan", "server-2", "").unwrap();
         assert_eq!(store.assignments_for("server-1").len(), 2);
+    }
+
+    #[test]
+    fn concurrent_allocation_no_duplicates() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let store = Arc::new(setup());
+        let n_threads = 16;
+        let per_thread = 10;
+
+        let mut handles = Vec::new();
+        for _ in 0..n_threads {
+            let s = Arc::clone(&store);
+            handles.push(thread::spawn(move || {
+                let mut mine = Vec::new();
+                for _ in 0..per_thread {
+                    let ip = s.allocate("lan", "worker", "").unwrap();
+                    mine.push(ip);
+                }
+                mine
+            }));
+        }
+
+        let mut all = Vec::new();
+        for h in handles {
+            all.extend(h.join().unwrap());
+        }
+
+        let expected = n_threads * per_thread;
+        assert_eq!(all.len(), expected);
+        let unique: std::collections::HashSet<_> = all.into_iter().collect();
+        assert_eq!(unique.len(), expected, "duplicate IPs handed out");
+        assert_eq!(store.assignment_count(), expected);
     }
 }
