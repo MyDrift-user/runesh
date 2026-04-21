@@ -91,10 +91,16 @@ pub struct UploadedFile {
 /// - `allowed_extensions`: optional allowlist of extensions (e.g. `&["jpg", "png", "pdf"]`).
 ///   Pass `None` to allow all extensions.
 ///
-/// SECURITY: The file extension is validated against the allowlist if provided.
-/// The content-type comes from the client and should NOT be trusted for
-/// security decisions. Use the `infer` crate to verify file type from magic bytes
-/// if serving files back to browsers.
+/// SECURITY:
+/// - The file extension is validated against the allowlist if provided.
+/// - The client-supplied `Content-Type` is NEVER trusted; type is determined
+///   by magic-byte inspection on the first 512 bytes BEFORE any bytes are
+///   written to the final storage path.
+/// - Bytes are streamed to a `.tmp-<uuid>` sibling file and only renamed to
+///   the final `storage_key` after the complete write + a second magic-byte
+///   validation pass on the persisted buffer. A handler crash after the
+///   initial validation leaves only the temp file, which the caller can
+///   clean with a periodic sweep of `.tmp-*` files older than N minutes.
 #[cfg(feature = "axum")]
 pub async fn save_upload(
     mut field: axum::extract::multipart::Field<'_>,
@@ -135,57 +141,138 @@ pub async fn save_upload(
     };
 
     let storage_path = storage_dir.join(&storage_key);
+    let temp_path = storage_dir.join(format!(".tmp-{}-{}", uuid::Uuid::new_v4(), storage_key));
 
     // Ensure directory exists
     tokio::fs::create_dir_all(storage_dir)
         .await
         .map_err(|e| AppError::Internal(format!("Failed to create storage dir: {e}")))?;
 
-    // Stream chunks to disk with a running byte counter, rejecting early if exceeded
-    let mut file = tokio::fs::File::create(&storage_path)
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to create file: {e}")))?;
-
-    let mut total_size: u64 = 0;
-    let mut magic_buf: Vec<u8> = Vec::new();
+    // Buffer the first 512 bytes in memory and validate BEFORE opening a file
+    // on disk. This way a crash during upload never leaves an unvalidated file
+    // at the final storage path.
+    const MAGIC_BUFFER: usize = 512;
     let needs_magic_check = !ext.is_empty();
-    // We need at most 8 bytes for magic byte validation (PNG header is longest at 8)
-    const MAGIC_BYTES_NEEDED: usize = 8;
+    let mut preamble: Vec<u8> = Vec::with_capacity(MAGIC_BUFFER);
+    let mut trailing_chunks: Vec<bytes::Bytes> = Vec::new();
+    let mut total_size: u64 = 0;
 
-    while let Some(chunk) = field
-        .chunk()
-        .await
-        .map_err(|e| AppError::BadRequest(format!("Failed to read upload: {e}")))?
-    {
+    while preamble.len() < MAGIC_BUFFER {
+        let chunk = match field
+            .chunk()
+            .await
+            .map_err(|e| AppError::BadRequest(format!("Failed to read upload: {e}")))?
+        {
+            Some(c) => c,
+            None => break,
+        };
         total_size += chunk.len() as u64;
         if total_size > max_size {
-            // Clean up the partial file
-            drop(file);
-            let _ = tokio::fs::remove_file(&storage_path).await;
             return Err(AppError::BadRequest(format!(
                 "File too large: exceeds max {} bytes",
                 max_size
             )));
         }
-
-        // Collect enough bytes for magic byte validation
-        if needs_magic_check && magic_buf.len() < MAGIC_BYTES_NEEDED {
-            let needed = MAGIC_BYTES_NEEDED - magic_buf.len();
-            magic_buf.extend_from_slice(&chunk[..chunk.len().min(needed)]);
+        let room = MAGIC_BUFFER - preamble.len();
+        if chunk.len() <= room {
+            preamble.extend_from_slice(&chunk);
+        } else {
+            preamble.extend_from_slice(&chunk[..room]);
+            trailing_chunks.push(chunk.slice(room..));
         }
-
-        use tokio::io::AsyncWriteExt;
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to write file: {e}")))?;
     }
 
-    // Validate magic bytes match the claimed extension
     if needs_magic_check {
-        if let Err(e) = validate_magic_bytes(&magic_buf, ext) {
-            let _ = tokio::fs::remove_file(&storage_path).await;
+        // Validate BEFORE touching disk.
+        validate_magic_bytes(&preamble, ext)?;
+    }
+
+    // Now stream to a `.tmp-*` file, rename only after a successful close + second check.
+    let cleanup_on_err = |path: std::path::PathBuf| async move {
+        let _ = tokio::fs::remove_file(&path).await;
+    };
+
+    let mut file = match tokio::fs::File::create(&temp_path).await {
+        Ok(f) => f,
+        Err(e) => {
+            return Err(AppError::Internal(format!("Failed to create file: {e}")));
+        }
+    };
+
+    use tokio::io::AsyncWriteExt;
+
+    if let Err(e) = file.write_all(&preamble).await {
+        drop(file);
+        cleanup_on_err(temp_path.clone()).await;
+        return Err(AppError::Internal(format!("Failed to write file: {e}")));
+    }
+    for chunk in trailing_chunks.drain(..) {
+        if let Err(e) = file.write_all(&chunk).await {
+            drop(file);
+            cleanup_on_err(temp_path.clone()).await;
+            return Err(AppError::Internal(format!("Failed to write file: {e}")));
+        }
+    }
+
+    // Drain the remainder of the stream.
+    while let Some(chunk) = match field.chunk().await {
+        Ok(c) => c,
+        Err(e) => {
+            drop(file);
+            cleanup_on_err(temp_path.clone()).await;
+            return Err(AppError::BadRequest(format!("Failed to read upload: {e}")));
+        }
+    } {
+        total_size += chunk.len() as u64;
+        if total_size > max_size {
+            drop(file);
+            cleanup_on_err(temp_path.clone()).await;
+            return Err(AppError::BadRequest(format!(
+                "File too large: exceeds max {} bytes",
+                max_size
+            )));
+        }
+        if let Err(e) = file.write_all(&chunk).await {
+            drop(file);
+            cleanup_on_err(temp_path.clone()).await;
+            return Err(AppError::Internal(format!("Failed to write file: {e}")));
+        }
+    }
+
+    if let Err(e) = file.flush().await {
+        drop(file);
+        cleanup_on_err(temp_path.clone()).await;
+        return Err(AppError::Internal(format!("Failed to flush file: {e}")));
+    }
+    drop(file);
+
+    // Second validation pass on the persisted temp file, against tampering
+    // in flight (shouldn't happen over HTTPS but defense in depth is cheap).
+    if needs_magic_check {
+        use tokio::io::AsyncReadExt;
+        let mut reopened = match tokio::fs::File::open(&temp_path).await {
+            Ok(f) => f,
+            Err(e) => {
+                cleanup_on_err(temp_path.clone()).await;
+                return Err(AppError::Internal(format!("Failed to reopen file: {e}")));
+            }
+        };
+        let mut verify_buf = vec![0u8; MAGIC_BUFFER];
+        let n = reopened.read(&mut verify_buf).await.map_err(|e| {
+            AppError::Internal(format!("Failed to re-read file for validation: {e}"))
+        })?;
+        verify_buf.truncate(n);
+        if let Err(e) = validate_magic_bytes(&verify_buf, ext) {
+            drop(reopened);
+            cleanup_on_err(temp_path.clone()).await;
             return Err(e);
         }
+    }
+
+    // Atomic rename into the final destination.
+    if let Err(e) = tokio::fs::rename(&temp_path, &storage_path).await {
+        cleanup_on_err(temp_path.clone()).await;
+        return Err(AppError::Internal(format!("Failed to commit upload: {e}")));
     }
 
     Ok(UploadedFile {

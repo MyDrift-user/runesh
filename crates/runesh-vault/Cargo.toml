@@ -8,13 +8,18 @@ authors.workspace = true
 description = "Encrypted key-value secret store with rotation schedules and JIT decryption"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
-chrono = { version = "0.4", features = ["serde"] }
-base64 = "0.22"
-rand = "0.8"
-chacha20poly1305 = "0.10"
-argon2 = "0.5"
+chrono = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+rand_core = { workspace = true }
+chacha20poly1305 = { workspace = true }
+argon2 = { workspace = true }
 totp-rs = { version = "5", features = ["gen_secret"] }
-zeroize = { version = "1", features = ["derive"] }
+zeroize = { workspace = true }
+secrecy = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }

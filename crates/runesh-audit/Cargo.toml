@@ -8,9 +8,16 @@ authors.workspace = true
 description = "Append-only hash-chained audit log with tamper detection"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
-chrono = { version = "0.4", features = ["serde"] }
-sha2 = "0.10"
-uuid = { version = "1", features = ["v4"] }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
+subtle = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "sync"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "io-util", "sync"] }

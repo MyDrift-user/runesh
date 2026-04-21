@@ -231,7 +231,7 @@ async fn callback<S: AuthStore>(
 #[cfg(feature = "axum")]
 async fn password_login<S: AuthStore>(
     State(state): State<Arc<AuthState<S>>>,
-    jar: CookieJar,
+    _jar: CookieJar,
     Json(body): Json<LoginBody>,
 ) -> impl IntoResponse {
     let user = match state
@@ -322,10 +322,10 @@ async fn logout<S: AuthStore>(
     jar: CookieJar,
 ) -> impl IntoResponse {
     // Revoke refresh tokens if we can identify the user
-    if let Some(access) = session::extract_access_token(&jar, &state.session_config) {
-        if let Ok(claims) = token::validate_access_token(&access, &state.token_config.secret) {
-            let _ = state.store.revoke_all_refresh_tokens(&claims.sub).await;
-        }
+    if let Some(access) = session::extract_access_token(&jar, &state.session_config)
+        && let Ok(claims) = token::validate_access_token(&access, &state.token_config.secret)
+    {
+        let _ = state.store.revoke_all_refresh_tokens(&claims.sub).await;
     }
 
     let mut response = Response::builder().status(StatusCode::NO_CONTENT);

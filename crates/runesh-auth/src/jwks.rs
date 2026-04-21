@@ -150,7 +150,10 @@ impl OidcVerifier {
         validation.set_required_spec_claims(&["exp", "iss"]);
 
         let data = decode::<OidcClaims>(token, &key, &validation).map_err(AuthError::Jwt)?;
-        Ok(data.claims.into_runesh_claims())
+        Ok(data.claims.into_runesh_claims(
+            Some(self.inner.issuer.clone()),
+            self.inner.audience.clone().map(|a| vec![a]),
+        ))
     }
 
     /// Look up a key by `kid`. Refreshes the JWKS if the key isn't in the
@@ -160,12 +163,11 @@ impl OidcVerifier {
         // Fast path: read lock, key is cached and fresh.
         {
             let guard = self.inner.keys.read().await;
-            if let Some(cached) = guard.as_ref() {
-                if cached.fetched_at.elapsed() < self.inner.cache_ttl {
-                    if let Some(key) = cached.keys.get(kid) {
-                        return Ok(key.clone());
-                    }
-                }
+            if let Some(cached) = guard.as_ref()
+                && cached.fetched_at.elapsed() < self.inner.cache_ttl
+                && let Some(key) = cached.keys.get(kid)
+            {
+                return Ok(key.clone());
             }
         }
         // Slow path: refresh and retry.
@@ -327,7 +329,7 @@ struct RealmAccess {
 }
 
 impl OidcClaims {
-    fn into_runesh_claims(self) -> Claims {
+    fn into_runesh_claims(self, iss: Option<String>, aud: Option<Vec<String>>) -> Claims {
         // Keycloak-style: pick the first non-default realm role as the role,
         // fall back to "user". Other IdPs without realm_access just get "user".
         let role = self
@@ -358,6 +360,8 @@ impl OidcClaims {
             permissions,
             exp: self.exp,
             iat: self.iat.unwrap_or(0),
+            iss,
+            aud,
         }
     }
 }

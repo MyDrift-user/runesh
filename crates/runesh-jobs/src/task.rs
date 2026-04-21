@@ -3,6 +3,9 @@
 //! The controller pushes tasks to agents. Each task has a type,
 //! parameters, and lifecycle tracking.
 
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
 use serde::{Deserialize, Serialize};
 
 /// A task pushed from the controller to the agent.
@@ -92,6 +95,99 @@ pub enum TaskStatus {
     Skipped,
 }
 
+/// Backoff strategy for retry delays.
+///
+/// Exponential strategies compute the delay as `base * factor^attempt`,
+/// clamped to `max`. The jitter variant additionally multiplies the result
+/// by a uniform random factor in `[0.5, 1.5)` to spread retry storms.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum BackoffStrategy {
+    /// Fixed delay between attempts.
+    Fixed,
+    /// Exponential backoff, no randomness.
+    Exponential {
+        #[serde(with = "duration_secs")]
+        base: Duration,
+        factor: f32,
+        #[serde(with = "duration_secs")]
+        max: Duration,
+    },
+    /// Exponential backoff with decorrelated jitter.
+    ExponentialJitter {
+        #[serde(with = "duration_secs")]
+        base: Duration,
+        factor: f32,
+        #[serde(with = "duration_secs")]
+        max: Duration,
+    },
+}
+
+impl BackoffStrategy {
+    /// Default: exponential with jitter, base=1s, factor=2.0, cap=300s.
+    pub fn default_jittered() -> Self {
+        Self::ExponentialJitter {
+            base: Duration::from_secs(1),
+            factor: 2.0,
+            max: Duration::from_secs(300),
+        }
+    }
+
+    fn exp_raw(base: Duration, factor: f32, max: Duration, attempt: u32) -> Duration {
+        let attempt = attempt.min(32);
+        let base_ms = base.as_millis() as f64;
+        let factor = factor.max(1.0) as f64;
+        let raw_ms = base_ms * factor.powi(attempt as i32);
+        let cap_ms = max.as_millis() as f64;
+        let clamped = raw_ms.min(cap_ms);
+        // Guard against NaN/inf.
+        if !clamped.is_finite() || clamped < 0.0 {
+            return max;
+        }
+        Duration::from_millis(clamped as u64)
+    }
+
+    /// Compute the delay before the given retry attempt, using the provided
+    /// fixed fallback delay when the strategy is [`BackoffStrategy::Fixed`].
+    pub fn next_retry_delay(&self, attempt: u32, fixed_fallback: Duration) -> Duration {
+        match *self {
+            BackoffStrategy::Fixed => fixed_fallback,
+            BackoffStrategy::Exponential { base, factor, max } => {
+                Self::exp_raw(base, factor, max, attempt)
+            }
+            BackoffStrategy::ExponentialJitter { base, factor, max } => {
+                let deterministic = Self::exp_raw(base, factor, max, attempt);
+                let jitter: f64 = {
+                    use rand::Rng;
+                    rand::thread_rng().gen_range(0.5f64..1.5f64)
+                };
+                let ms = (deterministic.as_millis() as f64 * jitter) as u64;
+                Duration::from_millis(ms).min(max)
+            }
+        }
+    }
+}
+
+impl Default for BackoffStrategy {
+    fn default() -> Self {
+        Self::default_jittered()
+    }
+}
+
+mod duration_secs {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::time::Duration;
+
+    pub fn serialize<S: Serializer>(d: &Duration, s: S) -> Result<S::Ok, S::Error> {
+        d.as_secs().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+        let secs = u64::deserialize(d)?;
+        Ok(Duration::from_secs(secs))
+    }
+}
+
 /// Retry policy for failed tasks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryPolicy {
@@ -99,8 +195,12 @@ pub struct RetryPolicy {
     pub max_retries: u32,
     /// Current retry count.
     pub retry_count: u32,
-    /// Delay between retries in seconds.
+    /// Fallback delay in seconds, used when [`backoff`](Self::backoff) is
+    /// [`BackoffStrategy::Fixed`].
     pub delay_secs: u64,
+    /// Backoff strategy. Default: exponential with jitter, base=1s, cap=300s.
+    #[serde(default)]
+    pub backoff: BackoffStrategy,
 }
 
 impl Default for RetryPolicy {
@@ -109,7 +209,16 @@ impl Default for RetryPolicy {
             max_retries: 3,
             retry_count: 0,
             delay_secs: 30,
+            backoff: BackoffStrategy::default_jittered(),
         }
+    }
+}
+
+impl RetryPolicy {
+    /// Compute the delay before the next retry attempt.
+    pub fn next_delay(&self) -> Duration {
+        self.backoff
+            .next_retry_delay(self.retry_count, Duration::from_secs(self.delay_secs))
     }
 }
 
@@ -159,11 +268,28 @@ impl AgentTask {
 }
 
 /// A task queue that tracks pending and completed tasks.
-#[derive(Debug, Default)]
+///
+/// Idempotency keys are remembered for the configured [`TaskQueue::idempotency_window`]
+/// and then evicted lazily on the next mutating call. This keeps memory bounded
+/// for agents that run continuously without restarts.
+#[derive(Debug)]
 pub struct TaskQueue {
     tasks: Vec<AgentTask>,
-    /// Set of idempotency keys already seen.
-    seen_keys: std::collections::HashSet<String>,
+    /// Map of idempotency key to the time it was first seen. Entries older
+    /// than `idempotency_window` are dropped on the next enqueue.
+    seen_keys: HashMap<String, Instant>,
+    /// How long to remember idempotency keys.
+    pub idempotency_window: Duration,
+}
+
+impl Default for TaskQueue {
+    fn default() -> Self {
+        Self {
+            tasks: Vec::new(),
+            seen_keys: HashMap::new(),
+            idempotency_window: Duration::from_secs(86_400),
+        }
+    }
 }
 
 impl TaskQueue {
@@ -171,18 +297,43 @@ impl TaskQueue {
         Self::default()
     }
 
-    /// Enqueue a task. Returns false if the idempotency key was already seen.
+    /// Build a queue with a custom idempotency window.
+    pub fn with_idempotency_window(window: Duration) -> Self {
+        Self {
+            idempotency_window: window,
+            ..Self::default()
+        }
+    }
+
+    fn evict_expired_keys(&mut self) {
+        let cutoff = Instant::now();
+        let window = self.idempotency_window;
+        self.seen_keys
+            .retain(|_, seen_at| cutoff.duration_since(*seen_at) < window);
+    }
+
+    /// Enqueue a task. Returns false if the idempotency key was already seen
+    /// within the current window.
     pub fn enqueue(&mut self, mut task: AgentTask) -> bool {
+        self.evict_expired_keys();
         if let Some(key) = &task.idempotency_key {
-            if !self.seen_keys.insert(key.clone()) {
+            if let Some(seen_at) = self.seen_keys.get(key)
+                && Instant::now().duration_since(*seen_at) < self.idempotency_window
+            {
                 task.status = TaskStatus::Skipped;
                 self.tasks.push(task);
                 return false;
             }
+            self.seen_keys.insert(key.clone(), Instant::now());
         }
         task.status = TaskStatus::Queued;
         self.tasks.push(task);
         true
+    }
+
+    /// Number of remembered idempotency keys (for diagnostics).
+    pub fn idempotency_key_count(&self) -> usize {
+        self.seen_keys.len()
     }
 
     /// Get the next queued task.
@@ -306,9 +457,28 @@ mod tests {
 
         let mut t2 = sample_task("t2");
         t2.idempotency_key = Some("key-abc".into());
-        assert!(!queue.enqueue(t2)); // duplicate key
+        assert!(!queue.enqueue(t2));
 
         assert_eq!(queue.pending_count(), 1);
+    }
+
+    #[test]
+    fn idempotency_keys_evict_after_window() {
+        // With a near-zero window, the second enqueue of the same key
+        // should succeed because the first has already expired.
+        let mut queue = TaskQueue::with_idempotency_window(Duration::from_millis(1));
+
+        let mut t1 = sample_task("t1");
+        t1.idempotency_key = Some("key-x".into());
+        assert!(queue.enqueue(t1));
+
+        std::thread::sleep(Duration::from_millis(5));
+
+        let mut t2 = sample_task("t2");
+        t2.idempotency_key = Some("key-x".into());
+        assert!(queue.enqueue(t2));
+        // First insert should have been evicted before the second was recorded.
+        assert_eq!(queue.idempotency_key_count(), 1);
     }
 
     #[test]
@@ -336,7 +506,6 @@ mod tests {
             let t = sample_task(&format!("t{i}"));
             queue.enqueue(t);
         }
-        // Complete all
         while let Some(task) = queue.next_pending() {
             task.start();
             task.complete(TaskResult {
@@ -351,5 +520,67 @@ mod tests {
 
         queue.prune(5);
         assert_eq!(queue.completed_count(), 5);
+    }
+
+    #[test]
+    fn exponential_backoff_caps() {
+        let bo = BackoffStrategy::Exponential {
+            base: Duration::from_secs(1),
+            factor: 2.0,
+            max: Duration::from_secs(30),
+        };
+        assert_eq!(
+            bo.next_retry_delay(0, Duration::ZERO),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            bo.next_retry_delay(1, Duration::ZERO),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            bo.next_retry_delay(2, Duration::ZERO),
+            Duration::from_secs(4)
+        );
+        // Eventually clamped to max.
+        assert_eq!(
+            bo.next_retry_delay(20, Duration::ZERO),
+            Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn jittered_backoff_bounds() {
+        let bo = BackoffStrategy::ExponentialJitter {
+            base: Duration::from_secs(1),
+            factor: 2.0,
+            max: Duration::from_secs(300),
+        };
+        // For attempt=3 deterministic delay is 8s. Jitter multiplier is
+        // [0.5,1.5), so each sample must land in [4s, 12s].
+        for _ in 0..64 {
+            let d = bo.next_retry_delay(3, Duration::ZERO);
+            assert!(
+                d >= Duration::from_millis(4_000) && d < Duration::from_millis(12_000),
+                "jittered delay out of expected bounds: {d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fixed_backoff_returns_fallback() {
+        let bo = BackoffStrategy::Fixed;
+        assert_eq!(
+            bo.next_retry_delay(5, Duration::from_secs(7)),
+            Duration::from_secs(7)
+        );
+    }
+
+    #[test]
+    fn retry_policy_default_is_jittered() {
+        let rp = RetryPolicy::default();
+        match rp.backoff {
+            BackoffStrategy::ExponentialJitter { .. } => {}
+            other => panic!("expected jittered backoff by default, got {other:?}"),
+        }
     }
 }

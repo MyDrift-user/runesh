@@ -145,12 +145,42 @@ impl OidcProvider {
 
         let token_resp: TokenResponse = resp.json().await?;
 
-        // Decode ID token claims (unverified — trusted because server-side exchange
-        // with client_secret means the token came directly from the IdP)
-        let id_claims = token_resp
-            .id_token
-            .as_deref()
-            .and_then(|t| decode_id_token_unverified(t, &self.client_id).ok());
+        // Decode ID token claims.
+        //
+        // Preferred path: the provider exposed a `jwks_uri` during discovery.
+        // In that case we build an `OidcVerifier` and validate the id_token's
+        // signature, issuer, and audience properly.
+        //
+        // Fallback path: no JWKS available. We decode without signature
+        // verification because the token was just returned over TLS from the
+        // IdP's token endpoint as part of a server-side code exchange, so the
+        // transport already authenticates the sender. These claims are used
+        // only for display fields (name, email, picture) and are overridden by
+        // the userinfo endpoint when it returns. They must NOT be treated as
+        // a security assertion.
+        let id_claims: Option<IdTokenClaims> = match token_resp.id_token.as_deref() {
+            Some(t) => match &self.jwks_uri {
+                Some(jwks_uri) => {
+                    match decode_id_token_via_jwks(
+                        t,
+                        &self.client_id,
+                        &self.issuer,
+                        jwks_uri,
+                        &self.http,
+                    )
+                    .await
+                    {
+                        Ok(c) => Some(c),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "JWKS-verified id_token decode failed; token will be ignored");
+                            None
+                        }
+                    }
+                }
+                None => decode_id_token_unverified_display_only(t, &self.client_id).ok(),
+            },
+            None => None,
+        };
 
         // Fetch userinfo as authoritative source (works with all providers)
         let userinfo = if !self.userinfo_endpoint.is_empty() {
@@ -226,22 +256,27 @@ struct IdTokenClaims {
     groups: Option<Vec<String>>,
 }
 
-/// Decode an ID token without full signature verification.
+/// Decode an ID token without signature verification.
 ///
-/// SECURITY NOTE: This is acceptable ONLY when the token was obtained via a
-/// server-side code exchange with `client_secret` (confidential client), meaning
-/// the token came directly from the IdP's token endpoint over TLS. For public
-/// clients (no client_secret), the caller MUST verify the signature via JWKS.
+/// BOUNDARY: This function's output MUST be treated as display-only metadata
+/// (name, email, picture) to populate the userinfo fallback. It is NOT a
+/// security assertion about who the token is for. Callers that need a security
+/// decision from the id_token must use [`decode_id_token_via_jwks`] with a
+/// JWKS-validated path. This function is used only when the provider's
+/// discovery document omitted `jwks_uri`, which is uncommon.
 ///
-/// We still validate: audience, issuer presence, and enforce a maximum age of
-/// 5 minutes to limit replay window.
-fn decode_id_token_unverified(id_token: &str, audience: &str) -> Result<IdTokenClaims, AuthError> {
+/// We still enforce `aud`, `sub`, and `exp` to reduce the value of any
+/// tampered token that somehow survives the TLS boundary between the IdP and
+/// this process.
+fn decode_id_token_unverified_display_only(
+    id_token: &str,
+    audience: &str,
+) -> Result<IdTokenClaims, AuthError> {
     let mut validation = jsonwebtoken::Validation::default();
+    #[allow(deprecated)]
     validation.insecure_disable_signature_validation();
     validation.set_audience(&[audience]);
-    // Enforce expiration - tokens must not be expired
     validation.validate_exp = true;
-    // Allow 60s clock skew
     validation.set_required_spec_claims(&["sub", "exp"]);
 
     let data = jsonwebtoken::decode::<IdTokenClaims>(
@@ -250,6 +285,125 @@ fn decode_id_token_unverified(id_token: &str, audience: &str) -> Result<IdTokenC
         &validation,
     )?;
 
+    Ok(data.claims)
+}
+
+/// Decode an ID token with full signature verification against the IdP's JWKS.
+///
+/// This is the secure path: signature algorithm must be asymmetric (RS*/ES*/
+/// PS*/EdDSA), `alg: none` and all HMAC variants are rejected since we
+/// never sign with the client_secret and an attacker that could guess or
+/// brute-force it would otherwise be able to mint arbitrary tokens.
+async fn decode_id_token_via_jwks(
+    id_token: &str,
+    audience: &str,
+    issuer: &str,
+    jwks_uri: &str,
+    http: &reqwest::Client,
+) -> Result<IdTokenClaims, AuthError> {
+    use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+
+    let header = decode_header(id_token).map_err(AuthError::Jwt)?;
+    let alg = header.alg;
+    if !matches!(
+        alg,
+        Algorithm::RS256
+            | Algorithm::RS384
+            | Algorithm::RS512
+            | Algorithm::ES256
+            | Algorithm::ES384
+            | Algorithm::PS256
+            | Algorithm::PS384
+            | Algorithm::PS512
+            | Algorithm::EdDSA
+    ) {
+        return Err(AuthError::TokenInvalid(format!(
+            "id_token rejected: algorithm {alg:?} is not allowed for JWKS validation (expected RS*/ES*/PS*/EdDSA)"
+        )));
+    }
+    let kid = header
+        .kid
+        .ok_or_else(|| AuthError::TokenInvalid("id_token header missing kid".into()))?;
+
+    // Fetch JWKS once per exchange. This is acceptable because exchanges are
+    // rare (one per login) and JWKS responses are tiny. Services that want
+    // caching should use `OidcVerifier` from `jwks.rs` instead.
+    #[derive(serde::Deserialize)]
+    struct RawJwkSet {
+        keys: Vec<RawJwk>,
+    }
+    #[derive(serde::Deserialize)]
+    struct RawJwk {
+        #[serde(default)]
+        kid: String,
+        kty: String,
+        n: Option<String>,
+        e: Option<String>,
+        x: Option<String>,
+        y: Option<String>,
+    }
+
+    let jwks: RawJwkSet = http
+        .get(jwks_uri)
+        .send()
+        .await
+        .map_err(|e| AuthError::Discovery(format!("fetch jwks: {e}")))?
+        .error_for_status()
+        .map_err(|e| AuthError::Discovery(format!("jwks status: {e}")))?
+        .json()
+        .await
+        .map_err(|e| AuthError::Discovery(format!("parse jwks: {e}")))?;
+
+    let jwk = jwks
+        .keys
+        .into_iter()
+        .find(|k| k.kid == kid)
+        .ok_or_else(|| AuthError::TokenInvalid(format!("kid {kid} not found in JWKS")))?;
+
+    let decoding_key = match jwk.kty.as_str() {
+        "RSA" => {
+            let n = jwk
+                .n
+                .as_deref()
+                .ok_or_else(|| AuthError::TokenInvalid("RSA jwk missing n".into()))?;
+            let e = jwk
+                .e
+                .as_deref()
+                .ok_or_else(|| AuthError::TokenInvalid("RSA jwk missing e".into()))?;
+            DecodingKey::from_rsa_components(n, e).map_err(AuthError::Jwt)?
+        }
+        "EC" => {
+            let x = jwk
+                .x
+                .as_deref()
+                .ok_or_else(|| AuthError::TokenInvalid("EC jwk missing x".into()))?;
+            let y = jwk
+                .y
+                .as_deref()
+                .ok_or_else(|| AuthError::TokenInvalid("EC jwk missing y".into()))?;
+            DecodingKey::from_ec_components(x, y).map_err(AuthError::Jwt)?
+        }
+        "OKP" => {
+            let x = jwk
+                .x
+                .as_deref()
+                .ok_or_else(|| AuthError::TokenInvalid("OKP jwk missing x".into()))?;
+            DecodingKey::from_ed_components(x).map_err(AuthError::Jwt)?
+        }
+        other => {
+            return Err(AuthError::TokenInvalid(format!(
+                "unsupported JWK kty: {other}"
+            )));
+        }
+    };
+
+    let mut validation = Validation::new(alg);
+    validation.set_audience(&[audience]);
+    validation.set_issuer(&[issuer]);
+    validation.validate_exp = true;
+    validation.set_required_spec_claims(&["sub", "exp", "iss"]);
+
+    let data = decode::<IdTokenClaims>(id_token, &decoding_key, &validation)?;
     Ok(data.claims)
 }
 

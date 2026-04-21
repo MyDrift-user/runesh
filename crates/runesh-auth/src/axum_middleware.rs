@@ -163,21 +163,20 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
         .and_then(|v| v.to_str().ok())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+        && let Some(verifier_ext) = req.extensions().get::<crate::ApiKeyVerifierExt>().cloned()
     {
-        if let Some(verifier_ext) = req.extensions().get::<crate::ApiKeyVerifierExt>().cloned() {
-            return match verifier_ext.0.verify(&api_key).await {
-                Some(claims) => {
-                    let mut req = req;
-                    req.extensions_mut().insert(claims);
-                    next.run(req).await
-                }
-                None => (
-                    StatusCode::UNAUTHORIZED,
-                    Json(serde_json::json!({"error": "invalid API key"})),
-                )
-                    .into_response(),
-            };
-        }
+        return match verifier_ext.0.verify(&api_key).await {
+            Some(claims) => {
+                let mut req = req;
+                req.extensions_mut().insert(claims);
+                next.run(req).await
+            }
+            None => (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "invalid API key"})),
+            )
+                .into_response(),
+        };
     }
 
     // Extract JWT secret
@@ -341,20 +340,17 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
 async fn soft_auth(req: Request<Body>, next: Next) -> Response {
     let secret = req.extensions().get::<JwtSecret>().map(|s| s.0.clone());
 
-    if let Some(secret) = secret {
-        if let Some(auth_header) = req
+    if let Some(secret) = secret
+        && let Some(auth_header) = req
             .headers()
             .get(header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
-        {
-            if auth_header.starts_with("Bearer ") {
-                if let Ok(claims) = validate_access_token(&auth_header[7..], &secret) {
-                    let mut req = req;
-                    req.extensions_mut().insert(claims);
-                    return next.run(req).await;
-                }
-            }
-        }
+        && auth_header.starts_with("Bearer ")
+        && let Ok(claims) = validate_access_token(&auth_header[7..], &secret)
+    {
+        let mut req = req;
+        req.extensions_mut().insert(claims);
+        return next.run(req).await;
     }
 
     next.run(req).await
