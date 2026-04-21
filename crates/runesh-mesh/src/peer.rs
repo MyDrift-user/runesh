@@ -85,10 +85,10 @@ impl PeerMap {
         let ip = peer.mesh_ip;
 
         // Remove old IP mapping if the key already exists with a different IP
-        if let Some(existing) = self.peers.get(&key) {
-            if existing.mesh_ip != ip {
-                self.ip_to_key.remove(&existing.mesh_ip);
-            }
+        if let Some(existing) = self.peers.get(&key)
+            && existing.mesh_ip != ip
+        {
+            self.ip_to_key.remove(&existing.mesh_ip);
         }
 
         self.ip_to_key.insert(ip, key.clone());

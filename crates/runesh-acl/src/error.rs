@@ -25,4 +25,7 @@ pub enum AclError {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("unsupported target in position: {0}")]
+    UnsupportedTargetInPosition(String),
 }

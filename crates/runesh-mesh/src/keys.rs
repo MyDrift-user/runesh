@@ -7,6 +7,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use rand::rngs::OsRng;
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -40,12 +41,14 @@ impl WgKeypair {
         Ok(Self { private, public })
     }
 
-    /// Encode the private key as base64.
-    pub fn private_base64(&self) -> String {
-        BASE64.encode(self.private.to_bytes())
+    /// Encode the private key as base64, wrapped in a `SecretString` so it
+    /// cannot be accidentally logged or printed. Callers must explicitly
+    /// `.expose_secret()` to get the underlying string.
+    pub fn private_base64(&self) -> SecretString {
+        SecretString::from(BASE64.encode(self.private.to_bytes()))
     }
 
-    /// Encode the public key as base64.
+    /// Encode the public key as base64. Safe to log.
     pub fn public_base64(&self) -> String {
         BASE64.encode(self.public.as_bytes())
     }
@@ -101,11 +104,12 @@ impl std::fmt::Display for WgPublicKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secrecy::ExposeSecret;
 
     #[test]
     fn generate_keypair() {
         let kp = WgKeypair::generate();
-        assert_eq!(kp.private_base64().len(), 44); // 32 bytes -> 44 base64 chars
+        assert_eq!(kp.private_base64().expose_secret().len(), 44); // 32 bytes -> 44 base64 chars
         assert_eq!(kp.public_base64().len(), 44);
     }
 
@@ -113,7 +117,7 @@ mod tests {
     fn roundtrip_private_key() {
         let kp1 = WgKeypair::generate();
         let b64 = kp1.private_base64();
-        let kp2 = WgKeypair::from_private_base64(&b64).unwrap();
+        let kp2 = WgKeypair::from_private_base64(b64.expose_secret()).unwrap();
         assert_eq!(kp1.public_base64(), kp2.public_base64());
     }
 

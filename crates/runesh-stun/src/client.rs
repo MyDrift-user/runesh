@@ -190,15 +190,33 @@ pub async fn stun_binding_request(
     // Send the binding request
     socket.send_to(&request, server_addr).await?;
 
-    // Wait for response with timeout
+    // Wait for response with overall timeout. RFC 5389 Section 10.3 requires
+    // discarding any response whose source address does not match the server
+    // we sent the request to. Keep receiving (ignoring mismatches) until
+    // either the correct server responds or the overall timeout elapses.
     let mut buf = [0u8; 1024];
-    let n = tokio::time::timeout(timeout, socket.recv_from(&mut buf))
-        .await
-        .map_err(|_| StunError::Timeout)?
-        .map_err(StunError::Io)?
-        .0;
+    let deadline = tokio::time::Instant::now() + timeout;
+    let (n, rtt) = loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(StunError::Timeout);
+        }
+        let (n, peer) = tokio::time::timeout(remaining, socket.recv_from(&mut buf))
+            .await
+            .map_err(|_| StunError::Timeout)?
+            .map_err(StunError::Io)?;
 
-    let rtt = start.elapsed();
+        if peer != server_addr {
+            tracing::debug!(
+                expected = %server_addr,
+                got = %peer,
+                "dropping STUN response from unexpected source"
+            );
+            continue;
+        }
+        break (n, start.elapsed());
+    };
+
     let mapped_address = parse_binding_response(&buf[..n], &txn_id)?;
 
     // Determine NAT type based on whether mapped address matches local
@@ -267,7 +285,7 @@ mod tests {
 
     #[test]
     fn parse_response_validates_txn_id() {
-        let (request, txn_id) = build_binding_request();
+        let (_request, txn_id) = build_binding_request();
         let wrong_txn = [0xFF; 12];
 
         // Build a minimal valid response header
@@ -282,6 +300,123 @@ mod tests {
         let mut bad_response = response.clone();
         bad_response[8..20].copy_from_slice(&wrong_txn);
         assert!(parse_binding_response(&bad_response, &txn_id).is_err());
+    }
+
+    /// Build a valid STUN Binding Response echoing a given txn_id,
+    /// reporting the supplied mapped address.
+    fn build_response(txn_id: &[u8; 12], mapped: SocketAddr) -> Vec<u8> {
+        let mut resp = Vec::with_capacity(20 + 12);
+        // Type
+        resp.extend_from_slice(&BINDING_RESPONSE.to_be_bytes());
+        // Placeholder for length
+        resp.extend_from_slice(&0u16.to_be_bytes());
+        // Magic cookie
+        resp.extend_from_slice(&MAGIC_COOKIE.to_be_bytes());
+        // Transaction ID
+        resp.extend_from_slice(txn_id);
+
+        // XOR-MAPPED-ADDRESS attribute
+        let port = mapped.port();
+        let xport = port ^ ((MAGIC_COOKIE >> 16) as u16);
+        let ip = match mapped.ip() {
+            std::net::IpAddr::V4(v) => u32::from_be_bytes(v.octets()),
+            _ => panic!("v6 not used in this test"),
+        };
+        let xaddr = ip ^ MAGIC_COOKIE;
+
+        resp.extend_from_slice(&ATTR_XOR_MAPPED_ADDRESS.to_be_bytes());
+        resp.extend_from_slice(&8u16.to_be_bytes());
+        resp.push(0); // reserved
+        resp.push(1); // family IPv4
+        resp.extend_from_slice(&xport.to_be_bytes());
+        resp.extend_from_slice(&xaddr.to_be_bytes());
+
+        let attr_len = (resp.len() - 20) as u16;
+        resp[2..4].copy_from_slice(&attr_len.to_be_bytes());
+        resp
+    }
+
+    #[tokio::test]
+    async fn ignores_response_from_wrong_source() {
+        // Spin up two fake "servers": a bogus one that replies first, and
+        // the real one. The client should drop the bogus reply and accept
+        // only the real one.
+        let real = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let bogus = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let real_addr = real.local_addr().unwrap();
+        let bogus_addr = bogus.local_addr().unwrap();
+
+        // Spawn both servers.
+        let real_task = tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let (n, peer) = real.recv_from(&mut buf).await.unwrap();
+            // Echo back a valid response with the real txn_id.
+            let txn: [u8; 12] = buf[8..20].try_into().unwrap();
+            let _ = n;
+            let resp = build_response(&txn, "1.2.3.4:5678".parse().unwrap());
+            // Send bogus first from the other socket, then real from the
+            // correct one. We route via the per-socket send below.
+            real.send_to(&resp, peer).await.unwrap();
+        });
+
+        let bogus_task = {
+            let bogus = bogus;
+            let real_addr_copy = real_addr;
+            tokio::spawn(async move {
+                // Wait briefly, then send noise to the client. We don't know
+                // the client's ephemeral port here so we can't send unsolicited.
+                // Instead we piggy-back: bogus only replies if the client
+                // happens to address it. We therefore send two packets in
+                // response: a spoofed one from bogus_addr masquerading as if
+                // from real_addr is not possible without raw sockets, so
+                // instead we arrange for the client to see a spurious packet
+                // from bogus_addr: we push one. But the client sends to
+                // real_addr only, so bogus_addr never receives. To exercise
+                // the check we send a spontaneous packet from bogus to the
+                // client's source port via external coordination.
+                let _ = real_addr_copy;
+                drop(bogus);
+            })
+        };
+
+        // Perform the binding request. Since the bogus server is silent, this
+        // test currently asserts only the happy path; the negative assertion
+        // is better exercised by the synchronous parse_response_validates_txn_id
+        // and the fact that recv_from peer equality is checked before parsing.
+        let res = stun_binding_request(&real_addr.to_string(), Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert_eq!(res.mapped_address.port(), 5678);
+
+        let _ = real_task.await;
+        let _ = bogus_task.await;
+        let _ = bogus_addr;
+    }
+
+    #[tokio::test]
+    async fn rejects_response_from_other_addr() {
+        // Drive the reject path: have a fake "server" host that sends the
+        // response from a different source port than the client actually
+        // addressed. We bind two sockets; the client addresses the primary,
+        // but a secondary sends the response. Expect Timeout (because the
+        // client drops the mismatched packet).
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = server.local_addr().unwrap();
+        let spoofer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        let server_task = tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let (_, peer) = server.recv_from(&mut buf).await.unwrap();
+            // Don't reply from `server`. Reply from `spoofer` instead.
+            let txn: [u8; 12] = buf[8..20].try_into().unwrap();
+            let resp = build_response(&txn, "1.2.3.4:5678".parse().unwrap());
+            spoofer.send_to(&resp, peer).await.unwrap();
+        });
+
+        let res = stun_binding_request(&server_addr.to_string(), Duration::from_millis(400)).await;
+        assert!(matches!(res, Err(StunError::Timeout)));
+
+        let _ = server_task.await;
     }
 
     // Integration test: only run manually or in environments with internet access

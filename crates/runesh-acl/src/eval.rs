@@ -4,8 +4,18 @@
 //! ACL rules and returns whether the connection is allowed.
 
 use std::net::IpAddr;
+use std::sync::Arc;
 
+use crate::AclError;
 use crate::model::{AclAction, AclPolicy, AclTarget, DstTarget, parse_dst, parse_target};
+
+/// Resolves a group name to the users (device owners) that belong to it.
+///
+/// Implementations should expand nested groups if desired.
+pub trait GroupResolver: Send + Sync {
+    /// Return the list of user identities that are members of `group`.
+    fn members(&self, group: &str) -> Vec<String>;
+}
 
 /// Context for evaluating an ACL rule against a specific connection.
 #[derive(Debug, Clone)]
@@ -25,6 +35,24 @@ pub struct EvalContext {
     pub dst_tags: Vec<String>,
     /// Destination port.
     pub dst_port: u16,
+    /// Destination device owner (for resolving `group:` targets in dst).
+    /// When `None`, `Group` targets in dst cannot be matched.
+    pub dst_user: Option<String>,
+}
+
+impl Default for EvalContext {
+    fn default() -> Self {
+        Self {
+            src_user: None,
+            src_groups: vec![],
+            src_tags: vec![],
+            src_ip: "0.0.0.0".parse().unwrap(),
+            dst_ip: "0.0.0.0".parse().unwrap(),
+            dst_tags: vec![],
+            dst_port: 0,
+            dst_user: None,
+        }
+    }
 }
 
 /// Result of evaluating an ACL policy.
@@ -48,56 +76,147 @@ impl AclEvalResult {
     }
 }
 
-impl AclPolicy {
-    /// Evaluate whether a connection described by `ctx` is allowed by this policy.
-    ///
-    /// Rules are evaluated in order. The first matching rule wins.
-    /// If no rule matches, the connection is denied (default deny).
-    pub fn evaluate(&self, ctx: &EvalContext) -> AclEvalResult {
-        for (i, rule) in self.acls.iter().enumerate() {
+/// An ACL evaluator bound to a policy, optionally enriched with a group
+/// resolver for resolving device-owner groups referenced in destination
+/// targets.
+pub struct AclEvaluator<'a> {
+    policy: &'a AclPolicy,
+    group_resolver: Option<Arc<dyn GroupResolver>>,
+}
+
+impl<'a> AclEvaluator<'a> {
+    pub fn new(policy: &'a AclPolicy) -> Self {
+        Self {
+            policy,
+            group_resolver: None,
+        }
+    }
+
+    /// Attach a group resolver used to expand `group:` targets that appear
+    /// in destination position.
+    pub fn with_group_resolver(mut self, resolver: Arc<dyn GroupResolver>) -> Self {
+        self.group_resolver = Some(resolver);
+        self
+    }
+
+    /// Evaluate the policy, returning an explicit error when a feature is
+    /// requested that cannot be satisfied (e.g. a `group:` target in dst
+    /// position with no resolver configured).
+    pub fn try_evaluate(&self, ctx: &EvalContext) -> Result<AclEvalResult, AclError> {
+        for (i, rule) in self.policy.acls.iter().enumerate() {
             let src_matches = rule.src.iter().any(|s| {
                 let target = parse_target(s);
-                self.matches_source(&target, ctx)
+                self.policy.matches_source(&target, ctx)
             });
 
             if !src_matches {
                 continue;
             }
 
-            let dst_matches = rule.dst.iter().any(|d| match parse_dst(d) {
-                Ok(dst_target) => self.matches_destination(&dst_target, ctx),
-                Err(_) => false,
-            });
+            let mut dst_matches = false;
+            for d in &rule.dst {
+                let dst_target = match parse_dst(d) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                if self.matches_destination(&dst_target, ctx)? {
+                    dst_matches = true;
+                    break;
+                }
+            }
 
             if !dst_matches {
                 continue;
             }
 
-            return AclEvalResult {
+            return Ok(AclEvalResult {
                 allowed: rule.action == AclAction::Accept,
                 matching_rule: Some(i),
                 action: Some(rule.action.clone()),
-            };
+            });
         }
 
-        AclEvalResult::default_deny()
+        Ok(AclEvalResult::default_deny())
+    }
+
+    fn matches_destination(&self, dst: &DstTarget, ctx: &EvalContext) -> Result<bool, AclError> {
+        let host_matches = match &dst.host {
+            AclTarget::Any => true,
+            AclTarget::Tag(tag) => ctx.dst_tags.iter().any(|t| t == tag),
+            AclTarget::Ip(ip) => ctx.dst_ip == *ip,
+            AclTarget::Cidr(net) => net.contains(&ctx.dst_ip),
+            AclTarget::HostAlias(name) => self
+                .policy
+                .resolve_host(name.as_str())
+                .map(|net| net.contains(&ctx.dst_ip))
+                .unwrap_or(false),
+            AclTarget::User(user) => ctx.dst_user.as_deref() == Some(user.as_str()),
+            AclTarget::Group(group) => {
+                // Prefer the mesh-context resolver; fall back to the in-policy
+                // `groups` map if the group is declared inline.
+                let members = if let Some(resolver) = &self.group_resolver {
+                    resolver.members(group)
+                } else if self.policy.groups.contains_key(group) {
+                    self.policy.resolve_group(group).unwrap_or_default()
+                } else {
+                    return Err(AclError::UnsupportedTargetInPosition(format!(
+                        "group '{group}' in dst position requires a GroupResolver; \
+                         call AclEvaluator::with_group_resolver or evaluate via AclPolicy::evaluate_permissive"
+                    )));
+                };
+                match &ctx.dst_user {
+                    Some(u) => members.iter().any(|m| m == u),
+                    None => false,
+                }
+            }
+            AclTarget::Autogroup(name) => match name.as_str() {
+                "internet" => true,
+                "self" => ctx.src_ip == ctx.dst_ip,
+                _ => false,
+            },
+        };
+
+        Ok(host_matches && dst.ports.contains(ctx.dst_port))
+    }
+}
+
+impl AclPolicy {
+    /// Evaluate whether a connection described by `ctx` is allowed by this policy.
+    ///
+    /// Rules are evaluated in order. The first matching rule wins.
+    /// If no rule matches, the connection is denied (default deny).
+    ///
+    /// This method is permissive with unresolvable constructs: if a rule
+    /// references a `group:` target in destination position and no resolver
+    /// is set and the group is not declared in-policy, that rule is skipped.
+    /// For strict evaluation that surfaces such errors, use
+    /// [`AclEvaluator::try_evaluate`].
+    pub fn evaluate(&self, ctx: &EvalContext) -> AclEvalResult {
+        self.evaluate_permissive(ctx)
+    }
+
+    /// Permissive evaluation: unsupported dst targets behave as non-matching.
+    pub fn evaluate_permissive(&self, ctx: &EvalContext) -> AclEvalResult {
+        let evaluator = AclEvaluator::new(self);
+        match evaluator.try_evaluate(ctx) {
+            Ok(r) => r,
+            Err(_) => AclEvalResult::default_deny(),
+        }
     }
 
     /// Check if a source target matches the evaluation context.
-    fn matches_source(&self, target: &AclTarget, ctx: &EvalContext) -> bool {
+    pub(crate) fn matches_source(&self, target: &AclTarget, ctx: &EvalContext) -> bool {
         match target {
             AclTarget::Any => true,
             AclTarget::User(user) => ctx.src_user.as_deref() == Some(user.as_str()),
             AclTarget::Group(group) => {
-                // Check if user is a direct member or if any of their groups match
                 if ctx.src_groups.contains(group) {
                     return true;
                 }
-                // Try resolving the group and checking membership
-                if let Some(user) = &ctx.src_user {
-                    if let Ok(members) = self.resolve_group(group) {
-                        return members.contains(user);
-                    }
+                if let Some(user) = &ctx.src_user
+                    && let Ok(members) = self.resolve_group(group)
+                {
+                    return members.contains(user);
                 }
                 false
             }
@@ -117,36 +236,6 @@ impl AclPolicy {
                 _ => false,
             },
         }
-    }
-
-    /// Check if a destination target matches the evaluation context.
-    fn matches_destination(&self, dst: &DstTarget, ctx: &EvalContext) -> bool {
-        let host_matches = match &dst.host {
-            AclTarget::Any => true,
-            AclTarget::Tag(tag) => ctx.dst_tags.iter().any(|t| t == tag),
-            AclTarget::Ip(ip) => ctx.dst_ip == *ip,
-            AclTarget::Cidr(net) => net.contains(&ctx.dst_ip),
-            AclTarget::HostAlias(name) => {
-                if let Ok(net) = self.resolve_host(name.as_str()) {
-                    net.contains(&ctx.dst_ip)
-                } else {
-                    false
-                }
-            }
-            AclTarget::User(user) => ctx.src_user.as_deref() == Some(user.as_str()),
-            AclTarget::Group(_) => {
-                // Groups in dst refer to devices owned by group members.
-                // Requires device-to-user mapping from mesh context.
-                false
-            }
-            AclTarget::Autogroup(name) => match name.as_str() {
-                "internet" => true,
-                "self" => ctx.src_ip == ctx.dst_ip,
-                _ => false,
-            },
-        };
-
-        host_matches && dst.ports.contains(ctx.dst_port)
     }
 }
 
@@ -194,6 +283,7 @@ mod tests {
             dst_ip: dst_ip.parse().unwrap(),
             dst_tags: vec![],
             dst_port,
+            dst_user: None,
         }
     }
 
@@ -221,8 +311,6 @@ mod tests {
         let mut c = ctx("dev@example.com", &[], "100.64.0.10", 22);
         c.dst_tags = vec!["tag:webserver".to_string()];
         let result = policy.evaluate(&c);
-        // Should match rule 2 (everyone on port 53) or deny
-        // Port 22 != 53, and dev can only reach webserver:80,443
         assert!(!result.allowed || result.matching_rule == Some(2));
     }
 
@@ -266,5 +354,93 @@ mod tests {
 
         c.src_ip = "100.64.1.5".parse().unwrap();
         assert!(!policy.evaluate(&c).allowed);
+    }
+
+    #[test]
+    fn group_in_dst_without_resolver_errors() {
+        let policy = AclPolicy::from_json(
+            r#"{
+            "acls": [
+                {"action": "accept", "src": ["*"], "dst": ["group:devices:*"]}
+            ]
+        }"#,
+        )
+        .unwrap();
+
+        let evaluator = AclEvaluator::new(&policy);
+        let c = ctx("user@ex.com", &[], "100.64.0.2", 80);
+        let err = evaluator.try_evaluate(&c);
+        assert!(matches!(err, Err(AclError::UnsupportedTargetInPosition(_))));
+    }
+
+    #[test]
+    fn group_in_dst_resolves_via_policy_groups() {
+        // If the group is declared in-policy it is resolved from there, no
+        // external resolver required.
+        let policy = AclPolicy::from_json(
+            r#"{
+            "groups": {"group:admins": ["admin@ex.com"]},
+            "acls": [
+                {"action": "accept", "src": ["*"], "dst": ["group:admins:22"]}
+            ]
+        }"#,
+        )
+        .unwrap();
+
+        let evaluator = AclEvaluator::new(&policy);
+        let mut c = ctx("user@ex.com", &[], "100.64.0.2", 22);
+        c.dst_user = Some("admin@ex.com".to_string());
+        let res = evaluator.try_evaluate(&c).unwrap();
+        assert!(res.allowed);
+    }
+
+    #[test]
+    fn group_in_dst_with_external_resolver() {
+        struct MockResolver;
+        impl GroupResolver for MockResolver {
+            fn members(&self, group: &str) -> Vec<String> {
+                if group == "group:ops" {
+                    vec!["op@ex.com".into()]
+                } else {
+                    vec![]
+                }
+            }
+        }
+
+        let policy = AclPolicy::from_json(
+            r#"{
+            "acls": [
+                {"action": "accept", "src": ["*"], "dst": ["group:ops:22"]}
+            ]
+        }"#,
+        )
+        .unwrap();
+
+        let evaluator = AclEvaluator::new(&policy).with_group_resolver(Arc::new(MockResolver));
+        let mut c = ctx("user@ex.com", &[], "100.64.0.2", 22);
+        c.dst_user = Some("op@ex.com".to_string());
+        let res = evaluator.try_evaluate(&c).unwrap();
+        assert!(res.allowed);
+
+        c.dst_user = Some("someone@ex.com".to_string());
+        let res = evaluator.try_evaluate(&c).unwrap();
+        assert!(!res.allowed);
+    }
+
+    #[test]
+    fn permissive_evaluate_silently_denies_unresolved_group() {
+        // AclPolicy::evaluate (permissive) continues to return allowed=false
+        // for unresolved groups, preserving backward compatibility.
+        let policy = AclPolicy::from_json(
+            r#"{
+            "acls": [
+                {"action": "accept", "src": ["*"], "dst": ["group:unknown:*"]}
+            ]
+        }"#,
+        )
+        .unwrap();
+        let c = ctx("user@ex.com", &[], "100.64.0.2", 80);
+        let result = policy.evaluate(&c);
+        assert!(!result.allowed);
     }
 }
