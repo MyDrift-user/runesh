@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use crate::runner::run_pkg_command;
+use crate::runner::{require_package_name, run_pkg_command};
 use crate::{PackageInfo, PackageManager, PackageResult, PkgError};
 
 pub struct ZypperManager;
@@ -74,6 +74,7 @@ impl PackageManager for ZypperManager {
     }
 
     async fn install(&self, package: &str) -> Result<PackageResult, PkgError> {
+        require_package_name(package)?;
         run_pkg_command(
             "zypper",
             &["--non-interactive", "install", package],
@@ -84,6 +85,7 @@ impl PackageManager for ZypperManager {
     }
 
     async fn remove(&self, package: &str) -> Result<PackageResult, PkgError> {
+        require_package_name(package)?;
         run_pkg_command(
             "zypper",
             &["--non-interactive", "remove", package],
@@ -94,17 +96,18 @@ impl PackageManager for ZypperManager {
     }
 
     async fn upgrade(&self, package: &str) -> Result<PackageResult, PkgError> {
-        if package.is_empty() {
-            run_pkg_command("zypper", &["--non-interactive", "update"], "upgrade", "all").await
-        } else {
-            run_pkg_command(
-                "zypper",
-                &["--non-interactive", "update", package],
-                "upgrade",
-                package,
-            )
-            .await
-        }
+        require_package_name(package)?;
+        run_pkg_command(
+            "zypper",
+            &["--non-interactive", "update", package],
+            "upgrade",
+            package,
+        )
+        .await
+    }
+
+    async fn upgrade_all(&self) -> Result<PackageResult, PkgError> {
+        run_pkg_command("zypper", &["--non-interactive", "update"], "upgrade", "all").await
     }
 
     async fn available_updates(&self) -> Result<Vec<PackageInfo>, PkgError> {

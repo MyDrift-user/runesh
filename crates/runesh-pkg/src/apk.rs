@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use crate::runner::run_pkg_command;
+use crate::runner::{require_package_name, run_pkg_command};
 use crate::{PackageInfo, PackageManager, PackageResult, PkgError};
 
 pub struct ApkManager;
@@ -28,11 +28,9 @@ impl PackageManager for ApkManager {
                 // Split name from version at last hyphen before a digit
                 let mut split_pos = None;
                 for (i, c) in name_ver.char_indices().rev() {
-                    if c == '-' {
-                        if name_ver[i + 1..].starts_with(|c: char| c.is_ascii_digit()) {
-                            split_pos = Some(i);
-                            break;
-                        }
+                    if c == '-' && name_ver[i + 1..].starts_with(|c: char| c.is_ascii_digit()) {
+                        split_pos = Some(i);
+                        break;
                     }
                 }
                 let (name, version) = match split_pos {
@@ -61,11 +59,9 @@ impl PackageManager for ApkManager {
                 // Format: name-version
                 let mut split_pos = None;
                 for (i, c) in line.char_indices().rev() {
-                    if c == '-' {
-                        if line[i + 1..].starts_with(|c: char| c.is_ascii_digit()) {
-                            split_pos = Some(i);
-                            break;
-                        }
+                    if c == '-' && line[i + 1..].starts_with(|c: char| c.is_ascii_digit()) {
+                        split_pos = Some(i);
+                        break;
                     }
                 }
                 let (name, version) = match split_pos {
@@ -84,6 +80,7 @@ impl PackageManager for ApkManager {
     }
 
     async fn install(&self, package: &str) -> Result<PackageResult, PkgError> {
+        require_package_name(package)?;
         run_pkg_command(
             "apk",
             &["add", "--no-interactive", package],
@@ -94,6 +91,7 @@ impl PackageManager for ApkManager {
     }
 
     async fn remove(&self, package: &str) -> Result<PackageResult, PkgError> {
+        require_package_name(package)?;
         run_pkg_command(
             "apk",
             &["del", "--no-interactive", package],
@@ -104,17 +102,18 @@ impl PackageManager for ApkManager {
     }
 
     async fn upgrade(&self, package: &str) -> Result<PackageResult, PkgError> {
-        if package.is_empty() {
-            run_pkg_command("apk", &["upgrade", "--no-interactive"], "upgrade", "all").await
-        } else {
-            run_pkg_command(
-                "apk",
-                &["add", "--no-interactive", "--upgrade", package],
-                "upgrade",
-                package,
-            )
-            .await
-        }
+        require_package_name(package)?;
+        run_pkg_command(
+            "apk",
+            &["add", "--no-interactive", "--upgrade", package],
+            "upgrade",
+            package,
+        )
+        .await
+    }
+
+    async fn upgrade_all(&self) -> Result<PackageResult, PkgError> {
+        run_pkg_command("apk", &["upgrade", "--no-interactive"], "upgrade", "all").await
     }
 
     async fn available_updates(&self) -> Result<Vec<PackageInfo>, PkgError> {

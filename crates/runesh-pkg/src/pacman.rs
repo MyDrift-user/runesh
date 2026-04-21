@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use crate::runner::run_pkg_command;
+use crate::runner::{require_package_name, run_pkg_command};
 use crate::{PackageInfo, PackageManager, PackageResult, PkgError};
 
 pub struct PacmanManager;
@@ -47,7 +47,11 @@ impl PackageManager for PacmanManager {
                 continue;
             }
             if let Some((repo_name, version)) = line.split_once(' ') {
-                let name = repo_name.split('/').last().unwrap_or(repo_name).to_string();
+                let name = repo_name
+                    .split('/')
+                    .next_back()
+                    .unwrap_or(repo_name)
+                    .to_string();
                 let desc = lines
                     .peek()
                     .filter(|l| l.starts_with(' '))
@@ -65,6 +69,7 @@ impl PackageManager for PacmanManager {
     }
 
     async fn install(&self, package: &str) -> Result<PackageResult, PkgError> {
+        require_package_name(package)?;
         run_pkg_command(
             "pacman",
             &["-S", "--noconfirm", package],
@@ -75,21 +80,23 @@ impl PackageManager for PacmanManager {
     }
 
     async fn remove(&self, package: &str) -> Result<PackageResult, PkgError> {
+        require_package_name(package)?;
         run_pkg_command("pacman", &["-R", "--noconfirm", package], "remove", package).await
     }
 
     async fn upgrade(&self, package: &str) -> Result<PackageResult, PkgError> {
-        if package.is_empty() {
-            run_pkg_command("pacman", &["-Syu", "--noconfirm"], "upgrade", "all").await
-        } else {
-            run_pkg_command(
-                "pacman",
-                &["-S", "--noconfirm", package],
-                "upgrade",
-                package,
-            )
-            .await
-        }
+        require_package_name(package)?;
+        run_pkg_command(
+            "pacman",
+            &["-S", "--noconfirm", package],
+            "upgrade",
+            package,
+        )
+        .await
+    }
+
+    async fn upgrade_all(&self) -> Result<PackageResult, PkgError> {
+        run_pkg_command("pacman", &["-Syu", "--noconfirm"], "upgrade", "all").await
     }
 
     async fn available_updates(&self) -> Result<Vec<PackageInfo>, PkgError> {

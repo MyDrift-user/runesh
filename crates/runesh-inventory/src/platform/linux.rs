@@ -13,38 +13,43 @@ fn read_sysfs(path: &str) -> String {
 }
 
 /// Collect GPU info from /sys and lspci.
+///
+/// NVIDIA GPU entries under `/proc/driver/nvidia/gpus/<pci-bus>/information`
+/// are matched against lspci output by PCI bus address so indices don't need
+/// to coincide. Falls back to lspci-only data if no NVIDIA entry matches.
 pub fn collect_gpus_linux() -> Vec<GpuInfo> {
-    let mut gpus = Vec::new();
+    let mut gpus: Vec<(String, GpuInfo)> = Vec::new();
 
-    // Try lspci for GPU detection
     if let Ok(output) = Command::new("lspci").args(["-vnnn"]).output() {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut current_gpu: Option<GpuInfo> = None;
+        let mut current: Option<(String, GpuInfo)> = None;
 
         for line in stdout.lines() {
             if line.contains("VGA compatible controller")
                 || line.contains("3D controller")
                 || line.contains("Display controller")
             {
-                if let Some(gpu) = current_gpu.take() {
-                    gpus.push(gpu);
+                if let Some(g) = current.take() {
+                    gpus.push(g);
                 }
-                // Extract name after the class description
+                let bus = line.split_whitespace().next().unwrap_or("").to_string();
                 let name = line
                     .split(']')
                     .last()
                     .map(|s| s.trim().to_string())
                     .unwrap_or_else(|| line.to_string());
-
-                current_gpu = Some(GpuInfo {
-                    name,
-                    vendor: String::new(),
-                    driver_version: String::new(),
-                    memory_total_bytes: None,
-                    memory_used_bytes: None,
-                    temperature_celsius: None,
-                });
-            } else if let Some(ref mut gpu) = current_gpu {
+                current = Some((
+                    bus,
+                    GpuInfo {
+                        name,
+                        vendor: String::new(),
+                        driver_version: String::new(),
+                        memory_total_bytes: None,
+                        memory_used_bytes: None,
+                        temperature_celsius: None,
+                    },
+                ));
+            } else if let Some((_, gpu)) = current.as_mut() {
                 let trimmed = line.trim();
                 if trimmed.starts_with("Kernel driver in use:") {
                     gpu.driver_version = trimmed
@@ -56,28 +61,73 @@ pub fn collect_gpus_linux() -> Vec<GpuInfo> {
             }
         }
 
-        if let Some(gpu) = current_gpu {
-            gpus.push(gpu);
+        if let Some(g) = current {
+            gpus.push(g);
         }
     }
 
-    // Try reading NVIDIA GPU memory from /proc/driver/nvidia/gpus/
+    // NVIDIA: match /proc/driver/nvidia/gpus/<bus> against lspci bus addresses.
     if let Ok(entries) = fs::read_dir("/proc/driver/nvidia/gpus") {
-        for (i, entry) in entries.flatten().enumerate() {
+        for entry in entries.flatten() {
+            let Some(bus_name) = entry.file_name().to_str().map(|s| s.to_string()) else {
+                continue;
+            };
             let info_path = entry.path().join("information");
-            if let Ok(content) = fs::read_to_string(&info_path) {
-                if let Some(gpu) = gpus.get_mut(i) {
-                    for line in content.lines() {
-                        if line.starts_with("Model:") {
-                            gpu.name = line.strip_prefix("Model:").unwrap_or("").trim().to_string();
-                        }
-                    }
+            let Ok(content) = fs::read_to_string(&info_path) else {
+                continue;
+            };
+
+            let mut nvidia_model = None;
+            for line in content.lines() {
+                if let Some(m) = line.strip_prefix("Model:") {
+                    nvidia_model = Some(m.trim().to_string());
+                }
+            }
+            if let Some(model) = nvidia_model {
+                if let Some((_, gpu)) = gpus
+                    .iter_mut()
+                    .find(|(bus, _)| pci_bus_matches(bus, &bus_name))
+                {
+                    gpu.name = model;
+                    gpu.vendor = "NVIDIA".into();
                 }
             }
         }
     }
 
-    gpus
+    gpus.into_iter().map(|(_, g)| g).collect()
+}
+
+/// Compare a lspci bus ID (`01:00.0`) against an NVIDIA proc bus ID
+/// (`0000:01:00.0` or `01:00.0`). Accepts with or without the domain prefix.
+fn pci_bus_matches(lspci_bus: &str, nvidia_bus: &str) -> bool {
+    let strip_domain = |s: &str| -> String {
+        s.split_once(':')
+            .and_then(|(a, rest)| {
+                if a.chars().all(|c| c.is_ascii_hexdigit()) && a.len() == 4 {
+                    Some(rest.to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| s.to_string())
+    };
+    let a = strip_domain(lspci_bus).to_lowercase();
+    let b = strip_domain(nvidia_bus).to_lowercase();
+    a == b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pci_bus_matches_with_and_without_domain() {
+        assert!(pci_bus_matches("01:00.0", "0000:01:00.0"));
+        assert!(pci_bus_matches("0000:01:00.0", "01:00.0"));
+        assert!(pci_bus_matches("0000:01:00.0", "0000:01:00.0"));
+        assert!(!pci_bus_matches("01:00.0", "02:00.0"));
+    }
 }
 
 /// Collect BIOS/motherboard info from DMI sysfs.

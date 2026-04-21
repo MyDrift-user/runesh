@@ -165,10 +165,12 @@ impl AssetStore {
     }
 
     pub fn expiring_warranty(&self, within_days: i64) -> Vec<&HardwareAsset> {
-        let cutoff = Utc::now().date_naive() + chrono::Duration::days(within_days);
-        self.assets.values().filter(|a| {
-            matches!(a.warranty_expires, Some(exp) if exp <= cutoff && exp >= Utc::now().date_naive())
-        }).collect()
+        let today = Utc::now().date_naive();
+        let cutoff = today + chrono::Duration::days(within_days);
+        self.assets
+            .values()
+            .filter(|a| matches!(a.warranty_expires, Some(exp) if exp <= cutoff && exp >= today))
+            .collect()
     }
 
     pub fn len(&self) -> usize {

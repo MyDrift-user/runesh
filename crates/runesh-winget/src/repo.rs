@@ -92,10 +92,10 @@ impl WingetRepo {
             .values()
             .filter(|pkg| {
                 // Apply query (global keyword search)
-                if let Some(query) = &request.query {
-                    if !matches_keyword(pkg, &query.key_word, &query.match_type) {
-                        return false;
-                    }
+                if let Some(query) = &request.query
+                    && !matches_keyword(pkg, &query.key_word, &query.match_type)
+                {
+                    return false;
                 }
 
                 // Apply filters (all must match)
@@ -222,7 +222,7 @@ fn matches_filter(pkg: &Package, filter: &SearchFilter) -> bool {
 /// Test helpers (available within the crate for integration tests).
 #[doc(hidden)]
 pub mod tests_helper {
-    use super::*;
+
     use crate::manifest::*;
 
     pub fn sample_package(id: &str, name: &str, version: &str) -> Package {

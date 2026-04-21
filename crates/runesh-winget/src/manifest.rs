@@ -2,6 +2,48 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Errors produced while validating manifest content.
+#[derive(Debug, thiserror::Error)]
+pub enum ManifestError {
+    #[error("installer_sha256 must be 64 hex characters")]
+    InvalidHash,
+    #[error("installer_url invalid: {0}")]
+    InvalidUrl(String),
+    #[error("http scheme is not allowed unless the caller opts in")]
+    HttpNotAllowed,
+}
+
+/// Policy for validating installer manifests.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ManifestPolicy {
+    /// When `true`, `http://` URLs are accepted. `https` is always accepted.
+    pub allow_http: bool,
+}
+
+/// Validate that a string matches `^[a-fA-F0-9]{64}$`.
+pub fn validate_sha256(hash: &str) -> Result<(), ManifestError> {
+    if hash.len() != 64 {
+        return Err(ManifestError::InvalidHash);
+    }
+    if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(ManifestError::InvalidHash);
+    }
+    Ok(())
+}
+
+/// Validate that a URL parses and uses an allowed scheme.
+pub fn validate_installer_url(url: &str, policy: ManifestPolicy) -> Result<(), ManifestError> {
+    let parsed = url::Url::parse(url).map_err(|e| ManifestError::InvalidUrl(e.to_string()))?;
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" if policy.allow_http => Ok(()),
+        "http" => Err(ManifestError::HttpNotAllowed),
+        other => Err(ManifestError::InvalidUrl(format!(
+            "scheme {other} not allowed"
+        ))),
+    }
+}
+
 /// A package in the repository.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -55,6 +97,27 @@ pub struct Installer {
     pub installer_switches: Option<InstallerSwitches>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub product_code: Option<String>,
+}
+
+impl Installer {
+    /// Validate the installer fields against `policy`.
+    pub fn validate(&self, policy: ManifestPolicy) -> Result<(), ManifestError> {
+        validate_sha256(&self.installer_sha256)?;
+        validate_installer_url(&self.installer_url, policy)?;
+        Ok(())
+    }
+}
+
+impl Package {
+    /// Validate every installer under every version of the package.
+    pub fn validate(&self, policy: ManifestPolicy) -> Result<(), ManifestError> {
+        for v in &self.versions {
+            for i in &v.installers {
+                i.validate(policy)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,6 +265,37 @@ mod tests {
             parsed.versions[0].installers[0].architecture,
             Architecture::X64
         );
+    }
+
+    #[test]
+    fn sha256_validator_accepts_64_hex() {
+        let ok = "a".repeat(64);
+        assert!(validate_sha256(&ok).is_ok());
+        let mixed = format!("{}{}", "A".repeat(32), "f".repeat(32));
+        assert!(validate_sha256(&mixed).is_ok());
+    }
+
+    #[test]
+    fn sha256_validator_rejects_other_inputs() {
+        assert!(validate_sha256("").is_err());
+        assert!(validate_sha256(&"a".repeat(63)).is_err());
+        assert!(validate_sha256(&"a".repeat(65)).is_err());
+        assert!(validate_sha256(&format!("{}g", "a".repeat(63))).is_err());
+        assert!(validate_sha256("not a hash").is_err());
+    }
+
+    #[test]
+    fn installer_url_scheme_policy() {
+        let policy = ManifestPolicy { allow_http: false };
+        assert!(validate_installer_url("https://example.com/x.msi", policy).is_ok());
+        assert!(matches!(
+            validate_installer_url("http://example.com/x.msi", policy),
+            Err(ManifestError::HttpNotAllowed)
+        ));
+        let allow = ManifestPolicy { allow_http: true };
+        assert!(validate_installer_url("http://example.com/x.msi", allow).is_ok());
+        assert!(validate_installer_url("ftp://example.com/x.msi", allow).is_err());
+        assert!(validate_installer_url("not a url", allow).is_err());
     }
 
     #[test]

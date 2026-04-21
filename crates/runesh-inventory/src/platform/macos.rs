@@ -34,10 +34,8 @@ pub fn collect_gpus_macos() -> Vec<GpuInfo> {
                         .get("sppci_vram")
                         .or_else(|| gpu.get("spdisplays_vram"))
                         .and_then(|v| v.as_str())
-                        .and_then(|s| {
-                            let s = s.replace(" MB", "").replace(" GB", "000");
-                            s.trim().parse::<u64>().ok().map(|mb| mb * 1024 * 1024)
-                        });
+                        .and_then(parse_size_mb)
+                        .map(|mb| mb * 1024 * 1024);
 
                     GpuInfo {
                         name: gpu
@@ -210,4 +208,54 @@ pub fn collect_software_macos() -> Vec<InstalledSoftware> {
             .collect()
     })
     .unwrap_or_default()
+}
+
+/// Parse a human-readable size such as `"8 GB"`, `"512 MB"`, or `"1.5 GB"` into
+/// megabytes. Recognizes `KB`, `MB`, `GB`, `TB` (case-insensitive); a missing
+/// unit is treated as megabytes to match legacy behavior.
+pub fn parse_size_mb(s: &str) -> Option<u64> {
+    let mut parts = s.split_whitespace();
+    let num = parts.next()?;
+    let unit = parts.next().unwrap_or("MB");
+    let value: f64 = num.parse().ok()?;
+    let multiplier = match unit.to_ascii_uppercase().as_str() {
+        "TB" => 1024.0 * 1024.0,
+        "GB" => 1024.0,
+        "MB" | "" => 1.0,
+        "KB" => 1.0 / 1024.0,
+        _ => return None,
+    };
+    let mb = (value * multiplier).round();
+    if mb < 0.0 { None } else { Some(mb as u64) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_size_mb;
+
+    #[test]
+    fn parse_size_mb_gb() {
+        assert_eq!(parse_size_mb("8 GB"), Some(8192));
+    }
+
+    #[test]
+    fn parse_size_mb_plain_mb() {
+        assert_eq!(parse_size_mb("512 MB"), Some(512));
+    }
+
+    #[test]
+    fn parse_size_mb_fractional_gb() {
+        assert_eq!(parse_size_mb("1.5 GB"), Some(1536));
+    }
+
+    #[test]
+    fn parse_size_mb_kb_rounds() {
+        assert_eq!(parse_size_mb("2048 KB"), Some(2));
+    }
+
+    #[test]
+    fn parse_size_mb_rejects_garbage() {
+        assert_eq!(parse_size_mb("nope"), None);
+        assert_eq!(parse_size_mb("8 parsecs"), None);
+    }
 }

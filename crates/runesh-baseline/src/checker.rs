@@ -3,6 +3,7 @@
 use crate::{Baseline, ComplianceReport, Drift, DriftSeverity, ServiceState, StateDeclaration};
 
 /// Collected system state for compliance checking.
+#[derive(Default)]
 pub struct SystemState {
     /// Installed packages: name -> version.
     pub packages: std::collections::HashMap<String, String>,
@@ -18,19 +19,6 @@ pub struct SystemState {
     pub settings: std::collections::HashMap<String, String>,
 }
 
-impl Default for SystemState {
-    fn default() -> Self {
-        Self {
-            packages: std::collections::HashMap::new(),
-            services: std::collections::HashMap::new(),
-            services_enabled: std::collections::HashMap::new(),
-            files: std::collections::HashMap::new(),
-            users: std::collections::HashMap::new(),
-            settings: std::collections::HashMap::new(),
-        }
-    }
-}
-
 /// Check a baseline against the actual system state.
 pub fn check_compliance(baseline: &Baseline, state: &SystemState) -> ComplianceReport {
     let mut report = ComplianceReport {
@@ -39,6 +27,7 @@ pub fn check_compliance(baseline: &Baseline, state: &SystemState) -> ComplianceR
         compliant: 0,
         drifted: 0,
         missing: 0,
+        unknown: 0,
         entries: Vec::new(),
     };
 
@@ -55,6 +44,10 @@ pub fn check_compliance(baseline: &Baseline, state: &SystemState) -> ComplianceR
                 report.entries.push(drift);
             }
             DriftSeverity::Extra => {
+                report.entries.push(drift);
+            }
+            DriftSeverity::Unknown => {
+                report.unknown += 1;
                 report.entries.push(drift);
             }
         }
@@ -85,15 +78,15 @@ fn check_declaration(decl: &StateDeclaration, state: &SystemState) -> Drift {
                     severity: DriftSeverity::Missing,
                 },
                 (true, Some(ver)) => {
-                    if let Some(req) = version {
-                        if ver != req {
-                            return Drift {
-                                declaration: format!("package:{name}"),
-                                expected: format!("version {req}"),
-                                actual: format!("version {ver}"),
-                                severity: DriftSeverity::Drifted,
-                            };
-                        }
+                    if let Some(req) = version
+                        && !version_satisfies(ver, req)
+                    {
+                        return Drift {
+                            declaration: format!("package:{name}"),
+                            expected: format!("version {req}"),
+                            actual: format!("version {ver}"),
+                            severity: DriftSeverity::Drifted,
+                        };
                     }
                     Drift {
                         declaration: format!("package:{name}"),
@@ -308,8 +301,8 @@ fn check_declaration(decl: &StateDeclaration, state: &SystemState) -> Drift {
         StateDeclaration::Firewall { rule, present } => Drift {
             declaration: format!("firewall:{rule}"),
             expected: if *present { "present" } else { "absent" }.into(),
-            actual: "check not implemented".into(),
-            severity: DriftSeverity::Compliant, // skip for now
+            actual: "check type not implemented".into(),
+            severity: DriftSeverity::Unknown,
         },
 
         StateDeclaration::Custom {
@@ -319,10 +312,39 @@ fn check_declaration(decl: &StateDeclaration, state: &SystemState) -> Drift {
         } => Drift {
             declaration: format!("custom:{name}"),
             expected: format!("command '{check_command}' exits 0"),
-            actual: "async check required".into(),
-            severity: DriftSeverity::Compliant, // skip for now
+            actual: "check type not implemented".into(),
+            severity: DriftSeverity::Unknown,
         },
     }
+}
+
+/// Compare an installed version against a declared requirement.
+///
+/// Parses `expected` as a [`semver::VersionReq`] (supports operators such as
+/// `>=1.24`) and `actual` as a [`semver::Version`]. If either fails to parse,
+/// falls back to exact string equality and logs a warning.
+fn version_satisfies(actual: &str, expected: &str) -> bool {
+    let req = match semver::VersionReq::parse(expected) {
+        Ok(r) => r,
+        Err(_) => {
+            tracing::warn!(
+                expected = %expected,
+                "baseline version requirement not valid semver, falling back to string equality"
+            );
+            return actual == expected;
+        }
+    };
+    let ver = match semver::Version::parse(actual) {
+        Ok(v) => v,
+        Err(_) => {
+            tracing::warn!(
+                actual = %actual,
+                "installed version not valid semver, falling back to string equality"
+            );
+            return actual == expected;
+        }
+    };
+    req.matches(&ver)
 }
 
 #[cfg(test)]
@@ -447,5 +469,47 @@ mod tests {
         };
         let report = check_compliance(&baseline, &SystemState::default());
         assert!(report.is_compliant());
+    }
+
+    #[test]
+    fn semver_req_ge_matches_newer_installed_version() {
+        let baseline: Baseline = serde_json::from_str(
+            r#"{
+            "name": "semver",
+            "mode": "audit",
+            "vars": {},
+            "state": [
+                {"type": "package", "name": "nginx", "version": ">=1.24", "present": true}
+            ]
+        }"#,
+        )
+        .unwrap();
+        let mut state = SystemState::default();
+        state.packages.insert("nginx".into(), "1.24.0".into());
+        let report = check_compliance(&baseline, &state);
+        assert!(report.is_compliant(), "1.24.0 should satisfy >=1.24");
+
+        state.packages.insert("nginx".into(), "1.23.0".into());
+        let report = check_compliance(&baseline, &state);
+        assert!(!report.is_compliant(), "1.23.0 should not satisfy >=1.24");
+    }
+
+    #[test]
+    fn firewall_and_custom_report_unknown() {
+        let baseline: Baseline = serde_json::from_str(
+            r#"{
+            "name": "unknown",
+            "mode": "audit",
+            "vars": {},
+            "state": [
+                {"type": "firewall", "rule": "allow-ssh", "present": true},
+                {"type": "custom", "name": "bios-locked", "check_command": "true"}
+            ]
+        }"#,
+        )
+        .unwrap();
+        let report = check_compliance(&baseline, &SystemState::default());
+        assert_eq!(report.compliant, 0);
+        assert_eq!(report.unknown, 2);
     }
 }

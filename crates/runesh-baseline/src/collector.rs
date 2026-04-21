@@ -16,10 +16,11 @@ use crate::checker::SystemState;
 /// Reads packages, services, files (from a provided list of paths),
 /// users, and settings from the OS.
 pub fn collect_system_state(file_paths: &[&str], setting_keys: &[&str]) -> SystemState {
-    let mut state = SystemState::default();
-
-    state.files = collect_files(file_paths);
-    state.settings = collect_settings(setting_keys);
+    let mut state = SystemState {
+        files: collect_files(file_paths),
+        settings: collect_settings(setting_keys),
+        ..SystemState::default()
+    };
 
     // Platform-specific collection
     #[cfg(target_os = "linux")]
@@ -426,7 +427,7 @@ mod tests {
         } else {
             vec!["PATH"]
         };
-        let state = collect_system_state(&[], &keys.iter().map(|s| *s).collect::<Vec<_>>());
+        let state = collect_system_state(&[], &keys.to_vec());
         // PATH should exist on all platforms, sysctl only on Linux
         if !cfg!(target_os = "linux") {
             assert!(state.settings.contains_key("PATH"));
