@@ -55,6 +55,7 @@ RUNESH/
 │   ├── runesh-backup/                   # Backup engine: content-addressed chunking, dedup, snapshots, retention
 │   ├── runesh-baseline/                 # Declarative baselines with inheritance, drift detection, enforcement
 │   ├── runesh-cli/                      # Project scaffolding CLI (init templates, compose, env)
+│   ├── runesh-config/                   # Desired-state config applier: hostname/timezone/users/network/display/desktop on Win/Linux/macOS
 │   ├── runesh-coord/                    # Tailscale-compatible coordination: Noise IK handshake, node registry, map builder
 │   ├── runesh-dns/                      # MagicDNS, split DNS, zone management, service discovery
 │   ├── runesh-flow/                     # Network flow collector: NetFlow/sFlow/IPFIX, top-N aggregations

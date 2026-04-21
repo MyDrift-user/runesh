@@ -1,0 +1,29 @@
+[package]
+name = "runesh-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Desired system state: hostname, timezone, users, network, display, per-user desktop across Windows, Linux, and macOS"
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "process", "fs"] }
+tracing = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+wmi = { version = "0.17", features = ["chrono"] }
+chrono = { workspace = true }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_SystemInformation",
+    "Win32_Graphics_Gdi",
+    "Win32_Devices_Display",
+] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

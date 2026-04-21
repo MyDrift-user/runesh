@@ -5540,6 +5540,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "runesh-config"
+version = "0.16.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "windows 0.62.2",
+ "wmi",
+]
+
+[[package]]
 name = "runesh-coord"
 version = "0.16.0"
 dependencies = [
