@@ -10,6 +10,10 @@ description = "Notification dispatch: webhook, email (SMTP), Slack, Teams, Disco
 [features]
 default = []
 email = ["dep:lettre"]
+# Exposes `WebhookUrlPolicy::insecure_any_host_for_testing`, which disables
+# the private-IP guard so tests can post to a localhost bind. Never enable
+# this on a shipped binary.
+insecure-test-policy = []
 
 [dependencies]
 tokio = { workspace = true, features = ["time", "net", "sync", "rt"] }
