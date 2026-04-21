@@ -8,12 +8,26 @@ authors.workspace = true
 description = "Monitoring check engine with alert state machine, metric collection, and health probes"
 
 [dependencies]
-tokio = { workspace = true, features = ["net", "time"] }
+tokio = { workspace = true, features = ["net", "time", "fs", "process", "macros", "sync", "io-util"] }
+tokio-stream = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
 
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+reqwest = { workspace = true }
 sysinfo = "0.35"
+bytes = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["full"] }

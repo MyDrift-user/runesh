@@ -12,14 +12,22 @@ default = []
 email = ["dep:lettre"]
 
 [dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["time", "net", "sync", "rt"] }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-async-trait = "0.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+async-trait = { workspace = true }
+url = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = "0.4"
+rand = { workspace = true }
 
 # Optional: SMTP email
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "smtp-transport"], optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }

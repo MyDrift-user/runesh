@@ -9,6 +9,11 @@ pub mod alert;
 pub mod check;
 pub mod scheduler;
 
-pub use alert::{Alert, AlertManager, AlertState};
-pub use check::{Check, CheckResult, CheckStatus, CheckType};
+pub use alert::{
+    Alert, AlertManager, AlertSnapshot, AlertState, AlertStore, AlertStoreError, FileAlertStore,
+    InMemoryAlertStore,
+};
+pub use check::{
+    Check, CheckResult, CheckRuntime, CheckStatus, CheckType, CommandCheckPolicy, HttpCheckPolicy,
+};
 pub use scheduler::CheckScheduler;

@@ -61,6 +61,7 @@ pub fn run(
 
     // ── Validate name ──────────────────────────────────────────────────
 
+    crate::validate::check_project_name(&name)?;
     let snake_name = name.replace('-', "_");
     let root = PathBuf::from(&name);
 
@@ -221,8 +222,10 @@ pub fn run(
 
     // ── Write README.md ────────────────────────────────────────────────
 
+    let md_name = crate::validate::markdown_escape(&name);
+    let md_description = crate::validate::markdown_escape(&description);
     let readme = format!(
-        "# {name}\n\n{description}\n\nBuilt with [RUNESH](https://github.com/MyDrift-user/runesh).\n"
+        "# {md_name}\n\n{md_description}\n\nBuilt with [RUNESH](https://github.com/MyDrift-user/runesh).\n"
     );
     fs::write(root.join("README.md"), readme).map_err(|e| format!("write README.md: {e}"))?;
 
@@ -342,6 +345,7 @@ fn generate_cargo_toml(
     _use_local: bool,
     _runesh_path: &str,
 ) -> String {
+    let desc_toml = crate::validate::toml_string(description);
     format!(
         r#"[workspace]
 resolver = "2"
@@ -352,7 +356,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "{description}"
+description = {desc_toml}
 
 [workspace.dependencies]
 tokio = {{ version = "1", features = ["full"] }}
@@ -458,11 +462,13 @@ fn generate_claude_md(name: &str, description: &str, crates: &BTreeSet<String>) 
         .map(|c| format!("- `runesh-{c}`"))
         .collect::<Vec<_>>()
         .join("\n");
+    let md_name = crate::validate::markdown_escape(name);
+    let md_description = crate::validate::markdown_escape(description);
 
     format!(
-        r#"# {name}
+        r#"# {md_name}
 
-{description}
+{md_description}
 
 {base}
 <!-- PROJECT -->

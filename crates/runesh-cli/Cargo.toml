@@ -17,6 +17,7 @@ dialoguer = { version = "0.12", features = ["fuzzy-select"] }
 console = "0.16"
 indicatif = "0.18"
 dirs-next = "2"
+toml = "0.8"
 # self_update 0.43 + 0.44 fail to compile due to upstream E0282 type
 # inference bug (filed upstream). Pinned to 0.42 until fixed.
 self_update = { version = "=0.42.0", default-features = false, features = ["archive-tar", "archive-zip", "compression-flate2", "rustls"] }
