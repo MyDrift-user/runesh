@@ -2,6 +2,11 @@
 //!
 //! Provides a builder for common tray icon patterns:
 //! show/hide window, connect/disconnect, quit.
+//!
+//! Tray menu IDs are forwarded to the frontend as events. Even though this
+//! module validates IDs against a strict regex at registration, frontend
+//! handlers MUST continue to treat incoming IDs as untrusted: Tauri's IPC
+//! boundary still exists and the tray plumbing is shared.
 
 use tauri::{
     AppHandle, Emitter, Manager,
@@ -13,9 +18,33 @@ use tauri::{
 pub const TRAY_SHOW: &str = "show";
 pub const TRAY_QUIT: &str = "quit";
 
+/// Validate a tray menu ID against `^[a-z][a-z0-9_-]{0,63}$`.
+pub fn valid_tray_id(id: &str) -> bool {
+    let bytes = id.as_bytes();
+    if bytes.is_empty() || bytes.len() > 64 {
+        return false;
+    }
+    if !bytes[0].is_ascii_lowercase() {
+        return false;
+    }
+    bytes
+        .iter()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_' || *b == b'-')
+}
+
+/// Errors returned by tray construction.
+#[derive(Debug, thiserror::Error)]
+pub enum TrayError {
+    #[error("invalid tray menu id '{0}': must match ^[a-z][a-z0-9_-]{{0,63}}$")]
+    InvalidId(String),
+    #[error("tauri error: {0}")]
+    Tauri(String),
+}
+
 /// Create a basic tray icon with Show and Quit actions.
 ///
-/// The icon bytes should be a PNG image (e.g. `include_bytes!("../icons/icon.png")`).
+/// Menu IDs are validated at registration. Invalid IDs are rejected before
+/// any Tauri resources are created.
 ///
 /// Usage:
 /// ```ignore
@@ -39,6 +68,13 @@ pub fn setup_tray(
     icon_bytes: &[u8],
     items: &[(&str, &str)],
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Validate every id before doing any work.
+    for (_label, id) in items {
+        if !valid_tray_id(id) {
+            return Err(Box::new(TrayError::InvalidId((*id).to_string())));
+        }
+    }
+
     let mut menu_items = Vec::new();
     for (label, id) in items {
         menu_items.push(MenuItem::with_id(app, *id, *label, true, None::<&str>)?);
@@ -65,7 +101,10 @@ pub fn setup_tray(
                     app.exit(0);
                 }
                 id => {
-                    // Custom menu items - emit event for the frontend to handle
+                    // Custom menu items -- emit event for the frontend to
+                    // handle. IDs passed through here were validated at
+                    // registration time, but frontend handlers must still
+                    // treat them as untrusted strings.
                     let _ = app.emit("tray-action", id);
                 }
             }
@@ -73,4 +112,29 @@ pub fn setup_tray(
         .build(app)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_ids() {
+        assert!(valid_tray_id("show"));
+        assert!(valid_tray_id("quit"));
+        assert!(valid_tray_id("a1_b-c"));
+        assert!(valid_tray_id(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn invalid_ids() {
+        assert!(!valid_tray_id(""));
+        assert!(!valid_tray_id("Show"));
+        assert!(!valid_tray_id("1show"));
+        assert!(!valid_tray_id("show panel"));
+        assert!(!valid_tray_id(&"a".repeat(65)));
+        assert!(!valid_tray_id("../evil"));
+        // Trailing hyphen is allowed by the regex but uncommon in practice.
+        assert!(valid_tray_id("show-"));
+    }
 }

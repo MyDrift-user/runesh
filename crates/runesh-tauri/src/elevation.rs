@@ -1,27 +1,92 @@
 //! UAC elevation helpers for Windows.
 //!
-//! Runs commands with Administrator privileges using the "runas" verb
-//! (triggers the Windows UAC prompt).
+//! Runs commands with Administrator privileges using the "runas" verb, which
+//! triggers the Windows UAC prompt.
+//!
+//! Security:
+//! - The binary path must be **absolute** and **exist as a regular file**.
+//! - By default, the binary must live inside the same directory as the
+//!   currently running executable (`std::env::current_exe()?.parent()?`).
+//! - Callers may widen this with `run_elevated_in` and a caller-supplied
+//!   allowlisted directory.
+//!
+//! Note: `ShellExecuteW` with `runas` launches the process asynchronously and
+//! does not return a real child handle. The returned `ElevatedLaunch` carries
+//! the launch return value so callers can observe success or failure of the
+//! launch itself; it does not wait for the elevated process to exit.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// Run a command with elevated (Administrator) privileges on Windows.
-///
-/// This triggers the Windows UAC prompt. The function returns immediately
-/// after launching -- it does NOT wait for the elevated process to finish.
-///
-/// Usage:
-/// ```ignore
-/// use runesh_tauri::elevation::run_elevated;
-///
-/// run_elevated("C:\\Program Files\\MyApp\\agent.exe", &["--install-service"])?;
-/// ```
-pub fn run_elevated(binary: &Path, args: &[&str]) -> Result<(), String> {
+/// Outcome of an elevation launch.
+#[derive(Debug)]
+pub struct ElevatedLaunch {
+    /// The resolved, canonical binary path that was launched.
+    pub binary: PathBuf,
+}
+
+/// Error returned by the elevation helpers.
+#[derive(Debug, thiserror::Error)]
+pub enum ElevationError {
+    #[error("binary path must be absolute: {0}")]
+    NotAbsolute(PathBuf),
+    #[error("binary not found or not a regular file: {0}")]
+    NotAFile(PathBuf),
+    #[error("binary {binary} not in allowed directory {allowed}")]
+    NotAllowed { binary: PathBuf, allowed: PathBuf },
+    #[error("cannot resolve current exe directory: {0}")]
+    CurrentExe(String),
+    #[error("canonicalize failed for {0}: {1}")]
+    Canonicalize(PathBuf, String),
+    #[error("ShellExecuteW failed (code {0})")]
+    ShellExec(usize),
+}
+
+/// Run a binary elevated, restricted to the same directory as the running
+/// executable.
+pub fn run_elevated(binary: &Path, args: &[&str]) -> Result<ElevatedLaunch, ElevationError> {
+    let exe = std::env::current_exe().map_err(|e| ElevationError::CurrentExe(e.to_string()))?;
+    let allowed = exe
+        .parent()
+        .ok_or_else(|| ElevationError::CurrentExe("current exe has no parent".into()))?
+        .to_path_buf();
+    run_elevated_in(binary, args, &allowed)
+}
+
+/// Run a binary elevated, restricted to `allowed_dir`. `binary` must be
+/// absolute, exist as a regular file, and canonicalize into `allowed_dir`.
+pub fn run_elevated_in(
+    binary: &Path,
+    args: &[&str],
+    allowed_dir: &Path,
+) -> Result<ElevatedLaunch, ElevationError> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
 
+    if !binary.is_absolute() {
+        return Err(ElevationError::NotAbsolute(binary.to_path_buf()));
+    }
+
+    let canonical = std::fs::canonicalize(binary)
+        .map_err(|e| ElevationError::Canonicalize(binary.to_path_buf(), e.to_string()))?;
+
+    let metadata =
+        std::fs::metadata(&canonical).map_err(|_| ElevationError::NotAFile(canonical.clone()))?;
+    if !metadata.is_file() {
+        return Err(ElevationError::NotAFile(canonical));
+    }
+
+    let allowed_canonical = std::fs::canonicalize(allowed_dir)
+        .map_err(|e| ElevationError::Canonicalize(allowed_dir.to_path_buf(), e.to_string()))?;
+
+    if !canonical.starts_with(&allowed_canonical) {
+        return Err(ElevationError::NotAllowed {
+            binary: canonical,
+            allowed: allowed_canonical,
+        });
+    }
+
     let verb: Vec<u16> = OsStr::new("runas\0").encode_wide().collect();
-    let binary_str = binary.to_string_lossy().into_owned();
+    let binary_str = canonical.to_string_lossy().into_owned();
     let file: Vec<u16> = OsStr::new(&binary_str)
         .encode_wide()
         .chain(Some(0))
@@ -36,6 +101,7 @@ pub fn run_elevated(binary: &Path, args: &[&str]) -> Result<(), String> {
         .chain(Some(0))
         .collect();
 
+    #[allow(unsafe_code)]
     let result = unsafe {
         windows_sys::Win32::UI::Shell::ShellExecuteW(
             std::ptr::null_mut(),
@@ -47,25 +113,17 @@ pub fn run_elevated(binary: &Path, args: &[&str]) -> Result<(), String> {
         )
     };
 
-    // ShellExecuteW returns a value > 32 on success
     if (result as usize) <= 32 {
-        Err(format!(
-            "Failed to elevate process (code {})",
-            result as usize
-        ))
+        Err(ElevationError::ShellExec(result as usize))
     } else {
-        Ok(())
+        Ok(ElevatedLaunch { binary: canonical })
     }
 }
 
-/// Quote a single argument for the Windows command line.
-///
-/// Follows the Microsoft C/C++ argument parsing rules:
-/// - If the arg contains spaces, tabs, or quotes, wrap in double quotes
-/// - Backslashes before a quote are doubled; trailing backslashes before
-///   the closing quote are doubled
+/// Quote a single argument for the Windows command line, per the Microsoft
+/// C/C++ argument parsing rules.
 fn quote_windows_arg(arg: &str) -> String {
-    if !arg.is_empty() && !arg.contains(|c: char| c == ' ' || c == '\t' || c == '"') {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '"']) {
         return arg.to_string();
     }
 
@@ -77,7 +135,6 @@ fn quote_windows_arg(arg: &str) -> String {
         if c == '\\' {
             backslashes += 1;
         } else if c == '"' {
-            // Double the backslashes before a quote, then escape the quote
             for _ in 0..(backslashes * 2 + 1) {
                 quoted.push('\\');
             }
@@ -92,7 +149,6 @@ fn quote_windows_arg(arg: &str) -> String {
         }
     }
 
-    // Double trailing backslashes before the closing quote
     for _ in 0..(backslashes * 2) {
         quoted.push('\\');
     }
@@ -100,10 +156,8 @@ fn quote_windows_arg(arg: &str) -> String {
     quoted
 }
 
-/// Check if the current process is running with elevated (Administrator) privileges.
-///
-/// Uses the proper Win32 API (OpenProcessToken + GetTokenInformation) instead
-/// of heuristics like file write tests.
+/// Check if the current process is running with elevated (Administrator)
+/// privileges.
 pub fn is_elevated() -> bool {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::Security::{
@@ -111,6 +165,7 @@ pub fn is_elevated() -> bool {
     };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
+    #[allow(unsafe_code)]
     unsafe {
         let mut token = std::ptr::null_mut();
         if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
@@ -127,5 +182,44 @@ pub fn is_elevated() -> bool {
         );
         CloseHandle(token);
         result != 0 && elevation.TokenIsElevated != 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn rejects_relative_path() {
+        let rel = PathBuf::from("app.exe");
+        let tmp = std::env::temp_dir();
+        let err = run_elevated_in(&rel, &[], &tmp).unwrap_err();
+        matches!(err, ElevationError::NotAbsolute(_));
+    }
+
+    #[test]
+    fn rejects_path_outside_allowlist() {
+        // Pick a binary that exists but sits outside our allowed directory.
+        let outside = PathBuf::from(r"C:\Windows\System32\cmd.exe");
+        if !outside.exists() {
+            eprintln!("skip: cmd.exe missing");
+            return;
+        }
+        let tmp = std::env::temp_dir();
+        let err = run_elevated_in(&outside, &[], &tmp).unwrap_err();
+        matches!(err, ElevationError::NotAllowed { .. });
+    }
+
+    #[test]
+    fn rejects_missing_file() {
+        let allowed = std::env::temp_dir();
+        // Path inside allowed dir but does not exist.
+        let missing = allowed.join("definitely-not-here.exe");
+        let err = run_elevated_in(&missing, &[], &allowed).unwrap_err();
+        matches!(
+            err,
+            ElevationError::Canonicalize(_, _) | ElevationError::NotAFile(_)
+        );
     }
 }
