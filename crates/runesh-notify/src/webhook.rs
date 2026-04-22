@@ -587,8 +587,13 @@ mod tests {
         let result = ch.send(&notif).await;
         assert!(!result.success, "default policy must reject by default");
         assert!(
-            result.error.as_ref().unwrap().contains("allowlist is empty"),
-            "expected explicit policy-empty error: {:?}", result.error,
+            result
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("allowlist is empty"),
+            "expected explicit policy-empty error: {:?}",
+            result.error,
         );
     }
 
