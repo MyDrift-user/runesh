@@ -383,10 +383,50 @@ impl WorkloadDriver for VmwareDriver {
             "VMs don't have stdout logs".into(),
         ))
     }
-    async fn resize(&self, _: &str, _: Option<u32>, _: Option<u64>) -> Result<(), WorkloadError> {
-        Err(WorkloadError::NotSupported(
-            "resize requires VM to be powered off".into(),
-        ))
+    async fn resize(
+        &self,
+        id: &str,
+        cpu: Option<u32>,
+        memory_mb: Option<u64>,
+    ) -> Result<(), WorkloadError> {
+        if cpu.is_none() && memory_mb.is_none() {
+            return Ok(());
+        }
+
+        // vCenter requires the VM to be powered off for CPU / memory edits.
+        // We surface vCenter's own error when it isn't, rather than trying
+        // to power it off ourselves; turning a VM off is a separate
+        // decision that belongs to the caller.
+        if let Some(count) = cpu {
+            let url = format!("{}/api/vcenter/vm/{id}/hardware/cpu", self.base_url);
+            let body = serde_json::json!({ "count": count });
+            let resp = self
+                .send_with_retry(|| self.client.patch(&url).json(&body))
+                .await?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                return Err(self.classify_status(status, &body));
+            }
+        }
+
+        if let Some(mib) = memory_mb {
+            let url = format!("{}/api/vcenter/vm/{id}/hardware/memory", self.base_url);
+            // vSphere 7 used `size_MiB`, vSphere 8 accepts both spellings but
+            // the canonical JSON key is `size_mib`. Send both so neither
+            // version 404s us, vCenter ignores the unknown one.
+            let body = serde_json::json!({ "size_mib": mib, "size_MiB": mib });
+            let resp = self
+                .send_with_retry(|| self.client.patch(&url).json(&body))
+                .await?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                return Err(self.classify_status(status, &body));
+            }
+        }
+
+        Ok(())
     }
 }
 
