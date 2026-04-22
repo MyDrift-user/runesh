@@ -172,7 +172,9 @@ fn parse_mapped_address(data: &[u8]) -> Result<SocketAddr, StunError> {
         }
         0x02 => {
             if data.len() < 20 {
-                return Err(StunError::ServerError("IPv6 MAPPED-ADDRESS too short".into()));
+                return Err(StunError::ServerError(
+                    "IPv6 MAPPED-ADDRESS too short".into(),
+                ));
             }
             let mut octets = [0u8; 16];
             octets.copy_from_slice(&data[4..20]);
@@ -262,14 +264,9 @@ pub async fn stun_binding_request(
                 }
                 retransmit_count += 1;
                 next_rto_ms = (next_rto_ms.saturating_mul(2)).min(RETRANSMIT_MAX_MS);
-                tracing::debug!(
-                    attempt = retransmit_count,
-                    next_rto_ms,
-                    "STUN retransmit"
-                );
+                tracing::debug!(attempt = retransmit_count, next_rto_ms, "STUN retransmit");
                 socket.send_to(&request, server_addr).await?;
-                next_retransmit =
-                    tokio::time::Instant::now() + Duration::from_millis(next_rto_ms);
+                next_retransmit = tokio::time::Instant::now() + Duration::from_millis(next_rto_ms);
             }
         }
     };
