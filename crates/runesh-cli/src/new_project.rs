@@ -25,19 +25,19 @@ use dialoguer::{Confirm, Input, MultiSelect};
 /// more to Cargo.toml by hand, and `--crates a,b,c` accepts names
 /// that are not in this list (they still get a `git + tag` entry).
 const AVAILABLE_CRATES: &[(&str, &str)] = &[
-    ("core",      "AppError, rate limiter, WS broadcast, file upload"),
-    ("auth",      "OIDC + JWT + RBAC + Axum middleware"),
-    ("audit",     "Append-only hash-chained audit log"),
-    ("vault",     "ChaCha20-Poly1305 encrypted KV"),
-    ("notify",    "Webhook / Slack / Discord / Ntfy / email"),
-    ("monitor",   "HTTP/TCP/ping/disk/command checks + alerts"),
-    ("jobs",      "Typed job queue with retry + idempotency"),
-    ("baseline",  "Declarative baselines + drift + remediation"),
-    ("patch",     "Ring-based patch rollout with soak windows"),
+    ("core", "AppError, rate limiter, WS broadcast, file upload"),
+    ("auth", "OIDC + JWT + RBAC + Axum middleware"),
+    ("audit", "Append-only hash-chained audit log"),
+    ("vault", "ChaCha20-Poly1305 encrypted KV"),
+    ("notify", "Webhook / Slack / Discord / Ntfy / email"),
+    ("monitor", "HTTP/TCP/ping/disk/command checks + alerts"),
+    ("jobs", "Typed job queue with retry + idempotency"),
+    ("baseline", "Declarative baselines + drift + remediation"),
+    ("patch", "Ring-based patch rollout with soak windows"),
     ("inventory", "Cross-platform HW + SW inventory (agent-side)"),
-    ("remote",    "Remote file explorer + PTY over WebSocket"),
-    ("desktop",   "Remote desktop capture + input injection"),
-    ("vfs",       "Cloud-Filter / FUSE virtual filesystem"),
+    ("remote", "Remote file explorer + PTY over WebSocket"),
+    ("desktop", "Remote desktop capture + input injection"),
+    ("vfs", "Cloud-Filter / FUSE virtual filesystem"),
     ("telemetry", "Sentry / GlitchTip error reporting"),
 ];
 
@@ -172,8 +172,7 @@ pub fn run(
     )
     .map_err(|e| format!("write main.rs: {e}"))?;
 
-    fs::write(root.join(".gitignore"), GITIGNORE)
-        .map_err(|e| format!("write .gitignore: {e}"))?;
+    fs::write(root.join(".gitignore"), GITIGNORE).map_err(|e| format!("write .gitignore: {e}"))?;
     fs::write(root.join(".dockerignore"), DOCKERIGNORE)
         .map_err(|e| format!("write .dockerignore: {e}"))?;
     fs::write(root.join(".env.example"), ENV_EXAMPLE)
@@ -666,10 +665,7 @@ fn generate_local_overlay(crates: &BTreeSet<String>) -> String {
          # `cargo build` uses a sibling RUNESH checkout at ../RUNESH\n\
          # instead of the pinned git tag in Cargo.toml.\n\n",
     );
-    out.push_str(&format!(
-        "[patch.\"{repo}\"]\n",
-        repo = crate::DEFAULT_REPO
-    ));
+    out.push_str(&format!("[patch.\"{repo}\"]\n", repo = crate::DEFAULT_REPO));
     for c in crates {
         out.push_str(&format!(
             "runesh-{c} = {{ path = \"../RUNESH/crates/runesh-{c}\" }}\n"
