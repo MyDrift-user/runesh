@@ -11,6 +11,7 @@ use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::{Notification, NotificationChannel, SendResult};
 
@@ -29,6 +30,10 @@ pub enum SmtpTls {
 }
 
 /// SMTP email channel.
+///
+/// The password is held in a [`SecretString`] so it does not leak through
+/// `Debug` impls or accidental logging. Use [`EmailChannel::new`] to build
+/// one; no `Default` on purpose so the caller has to pick every field.
 pub struct EmailChannel {
     pub name: String,
     pub from: String,
@@ -36,8 +41,23 @@ pub struct EmailChannel {
     pub smtp_host: String,
     pub smtp_port: u16,
     pub username: String,
-    pub password: String,
+    password: SecretString,
     pub tls: SmtpTls,
+}
+
+impl std::fmt::Debug for EmailChannel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EmailChannel")
+            .field("name", &self.name)
+            .field("from", &self.from)
+            .field("to", &self.to)
+            .field("smtp_host", &self.smtp_host)
+            .field("smtp_port", &self.smtp_port)
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .field("tls", &self.tls)
+            .finish()
+    }
 }
 
 impl EmailChannel {
@@ -58,9 +78,15 @@ impl EmailChannel {
             smtp_host: host.into(),
             smtp_port: port,
             username: username.into(),
-            password: password.into(),
+            password: SecretString::from(password.into()),
             tls: SmtpTls::Required,
         }
+    }
+
+    /// Replace the password in place. Useful for rotation without
+    /// rebuilding the rest of the channel.
+    pub fn set_password(&mut self, password: impl Into<String>) {
+        self.password = SecretString::from(password.into());
     }
 
     pub fn with_tls(mut self, tls: SmtpTls) -> Self {
@@ -145,7 +171,10 @@ impl NotificationChannel for EmailChannel {
             SmtpTls::Opportunistic => Tls::Opportunistic(tls_params),
         };
 
-        let creds = Credentials::new(self.username.clone(), self.password.clone());
+        let creds = Credentials::new(
+            self.username.clone(),
+            self.password.expose_secret().to_string(),
+        );
         let mailer = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.smtp_host)
             .port(self.smtp_port)
             .tls(tls)
@@ -184,5 +213,78 @@ impl NotificationChannel for EmailChannel {
             channel: self.name.clone(),
             error: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn email_channel_debug_redacts_password() {
+        let ch = EmailChannel::new(
+            "ops",
+            "alerts@example.com",
+            vec!["oncall@example.com".into()],
+            "smtp.example.com",
+            465,
+            "alerts",
+            "hunter2",
+        );
+        let s = format!("{ch:?}");
+        assert!(
+            s.contains("<redacted>"),
+            "Debug must redact the password, got: {s}"
+        );
+        assert!(!s.contains("hunter2"), "password must not leak: {s}");
+    }
+
+    #[tokio::test]
+    async fn email_rejects_body_over_max() {
+        let ch = EmailChannel::new(
+            "ops",
+            "a@example.com",
+            vec!["b@example.com".into()],
+            "smtp.example.com",
+            465,
+            "u",
+            "p",
+        );
+        let big = "x".repeat(MAX_BODY_BYTES + 1);
+        let notif = crate::Notification {
+            severity: crate::NotifySeverity::Info,
+            title: "t".into(),
+            body: big,
+            source: None,
+            url: None,
+            fields: Default::default(),
+        };
+        let r = ch.send(&notif).await;
+        assert!(!r.success);
+        assert!(r.error.unwrap().contains("body too large"));
+    }
+
+    #[tokio::test]
+    async fn email_rejects_invalid_from_address() {
+        let ch = EmailChannel::new(
+            "ops",
+            "not-an-email",
+            vec!["b@example.com".into()],
+            "smtp.example.com",
+            465,
+            "u",
+            "p",
+        );
+        let notif = crate::Notification {
+            severity: crate::NotifySeverity::Info,
+            title: "t".into(),
+            body: "b".into(),
+            source: None,
+            url: None,
+            fields: Default::default(),
+        };
+        let r = ch.send(&notif).await;
+        assert!(!r.success);
+        assert!(r.error.unwrap().contains("invalid from address"));
     }
 }
