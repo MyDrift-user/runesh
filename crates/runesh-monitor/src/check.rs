@@ -354,10 +354,7 @@ async fn ping_unix(host: &str, timeout: Duration) -> (CheckStatus, String) {
                     .to_string();
                 (CheckStatus::Critical, format!("ping {host} failed: {msg}"))
             }
-            Err(e) => (
-                CheckStatus::Unknown,
-                format!("ping subprocess error: {e}"),
-            ),
+            Err(e) => (CheckStatus::Unknown, format!("ping subprocess error: {e}")),
         }
     };
 
