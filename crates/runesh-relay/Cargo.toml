@@ -7,6 +7,11 @@ repository.workspace = true
 authors.workspace = true
 description = "DERP relay server for forwarding encrypted WireGuard packets between mesh peers that cannot connect directly"
 
+[features]
+default = []
+# Expose RelayServer::run_tls(TlsAcceptor). Adds tokio-rustls as a dep.
+tls = ["dep:tokio-rustls"]
+
 [dependencies]
 tokio = { workspace = true, features = ["net", "io-util", "sync", "macros", "rt-multi-thread", "time"] }
 tracing = { workspace = true }
@@ -20,3 +25,4 @@ sha2 = { workspace = true }
 hmac = { workspace = true }
 secrecy = { workspace = true }
 subtle = { workspace = true }
+tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["ring"] }
