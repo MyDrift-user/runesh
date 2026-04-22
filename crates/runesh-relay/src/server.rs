@@ -54,20 +54,48 @@ impl std::fmt::Debug for AuthMode {
 }
 
 /// Authentication configuration for the relay.
+///
+/// There is no `Default` impl on purpose. A consumer must pick a variant
+/// explicitly so the call site is auditable. For a test-only unauthenticated
+/// relay, use [`RelayAuthConfig::insecure_unauthenticated`] and put a comment
+/// at the call site explaining why.
 #[derive(Debug)]
 pub struct RelayAuthConfig {
     pub mode: AuthMode,
 }
 
-impl Default for RelayAuthConfig {
-    fn default() -> Self {
+impl RelayAuthConfig {
+    /// Unauthenticated mode. Only safe on a closed test network: any peer
+    /// that can reach the TCP port can relay through this server.
+    pub fn insecure_unauthenticated() -> Self {
         Self {
             mode: AuthMode::None,
+        }
+    }
+
+    /// Clients must echo the pre-shared secret in their `ClientInfo` frame.
+    pub fn shared_key(secret: Vec<u8>) -> Self {
+        Self {
+            mode: AuthMode::SharedKey(SecretBox::new(Box::new(secret))),
+        }
+    }
+
+    /// HMAC challenge-response: server sends a 32-byte random challenge,
+    /// client proves possession of the shared secret by responding with
+    /// `HMAC-SHA256(secret, challenge || claimed_pubkey)`.
+    pub fn hmac_challenge(secret: Vec<u8>) -> Self {
+        Self {
+            mode: AuthMode::HmacChallenge {
+                shared_secret: SecretBox::new(Box::new(secret)),
+            },
         }
     }
 }
 
 /// DERP relay server configuration.
+///
+/// Construct with [`RelayConfig::new`] to make the auth choice explicit.
+/// There is no `Default` impl on purpose.
 #[derive(Debug)]
 pub struct RelayConfig {
     /// Address to bind (e.g., "0.0.0.0:3340").
@@ -84,14 +112,22 @@ pub struct RelayConfig {
     pub per_sender_pps: u32,
 }
 
-impl Default for RelayConfig {
-    fn default() -> Self {
+impl RelayConfig {
+    /// Build a relay config with an explicit auth choice. Other fields get
+    /// sane defaults (max 10k clients, 256 buffered frames per client,
+    /// 1000 packets-per-second per sender). Mutate fields directly if
+    /// different values are needed.
+    pub fn new(
+        bind_addr: impl Into<String>,
+        server_key: [u8; KEY_LEN],
+        auth: RelayAuthConfig,
+    ) -> Self {
         Self {
-            bind_addr: "0.0.0.0:3340".into(),
-            server_key: [0u8; KEY_LEN],
+            bind_addr: bind_addr.into(),
+            server_key,
             max_clients: 10_000,
             client_buffer: 256,
-            auth: RelayAuthConfig::default(),
+            auth,
             per_sender_pps: 1000,
         }
     }
@@ -495,7 +531,11 @@ mod tests {
 
     #[tokio::test]
     async fn server_creates() {
-        let server = RelayServer::new(RelayConfig::default());
+        let server = RelayServer::new(RelayConfig::new(
+            "127.0.0.1:0",
+            [0u8; KEY_LEN],
+            RelayAuthConfig::insecure_unauthenticated(),
+        ));
         assert_eq!(server.client_count(), 0);
         assert_eq!(server.conn_count(), 0);
     }
