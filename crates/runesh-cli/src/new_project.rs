@@ -1,16 +1,21 @@
 //! `runesh new` — Create a new project repo wired to RUNESH.
 //!
-//! Produces a modern, deployable skeleton:
+//! Produces a single-container, single-port skeleton where the Rust
+//! server serves the JSON API at `/api/*` and falls back to a static
+//! Next.js SPA. No reverse proxy, no cross-service DNS, no CORS.
 //!
 //! - Cargo workspace pulling runesh-* crates via `git + tag` pinned to
 //!   the CLI's own version, never path refs.
-//! - `crates/{snake}-server` with Axum + sqlx-postgres + config-via-env.
-//! - `Dockerfile` multi-stage (tini, non-root, buildkit cache mounts).
-//! - `compose.yaml` (modern spec, no top-level `version:`,
-//!   `name: {project}`, Postgres + server with healthchecks).
+//! - `crates/{snake}-server` with Axum + sqlx-postgres + config-via-env +
+//!   `tower-http::ServeDir` SPA fallback.
+//! - `packages/web` Next.js 15 app with `output: "export"`, Tailwind
+//!   v4, TanStack Query, `axios` on a `/api` same-origin base URL.
+//! - Multi-stage `Dockerfile`: bun web-builder → rust-builder → slim
+//!   runtime (tini, UID 1000, buildkit cache mounts).
+//! - `compose.yaml`: just Postgres + server. No `web` service.
 //! - `migrations/0001_init.sql` seeded with useful Postgres extensions.
 //! - `.env.example`, `.dockerignore`, sensible `.gitignore`.
-//! - `CLAUDE.md` + `README.md`.
+//! - Root `package.json` as a bun workspace; `CLAUDE.md` + `README.md`.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -154,6 +159,10 @@ pub fn run(
     fs::create_dir_all(server_dir.join("src")).map_err(|e| format!("mkdir: {e}"))?;
     fs::create_dir_all(root.join("migrations")).map_err(|e| format!("mkdir: {e}"))?;
     fs::create_dir_all(root.join("docs")).map_err(|e| format!("mkdir: {e}"))?;
+    let web_src = root.join("packages").join("web").join("src");
+    fs::create_dir_all(web_src.join("app")).map_err(|e| format!("mkdir: {e}"))?;
+    fs::create_dir_all(web_src.join("components")).map_err(|e| format!("mkdir: {e}"))?;
+    fs::create_dir_all(web_src.join("lib")).map_err(|e| format!("mkdir: {e}"))?;
 
     fs::write(
         root.join("Cargo.toml"),
@@ -189,6 +198,41 @@ pub fn run(
         INITIAL_MIGRATION,
     )
     .map_err(|e| format!("write migration: {e}"))?;
+
+    // ── Web (Next.js static SPA) ───────────────────────────────────────
+    let web_dir = root.join("packages").join("web");
+    fs::write(root.join("package.json"), generate_root_package_json(&name))
+        .map_err(|e| format!("write root package.json: {e}"))?;
+    fs::write(
+        web_dir.join("package.json"),
+        generate_web_package_json(&name),
+    )
+    .map_err(|e| format!("write web package.json: {e}"))?;
+    fs::write(web_dir.join("next.config.mjs"), WEB_NEXT_CONFIG)
+        .map_err(|e| format!("write next.config.mjs: {e}"))?;
+    fs::write(web_dir.join("postcss.config.mjs"), WEB_POSTCSS_CONFIG)
+        .map_err(|e| format!("write postcss.config.mjs: {e}"))?;
+    fs::write(web_dir.join("tsconfig.json"), WEB_TSCONFIG)
+        .map_err(|e| format!("write tsconfig.json: {e}"))?;
+    fs::write(web_src.join("app").join("globals.css"), WEB_GLOBALS_CSS)
+        .map_err(|e| format!("write globals.css: {e}"))?;
+    fs::write(
+        web_src.join("app").join("layout.tsx"),
+        generate_web_layout(&name),
+    )
+    .map_err(|e| format!("write layout.tsx: {e}"))?;
+    fs::write(
+        web_src.join("app").join("page.tsx"),
+        generate_web_page(&name),
+    )
+    .map_err(|e| format!("write page.tsx: {e}"))?;
+    fs::write(
+        web_src.join("components").join("providers.tsx"),
+        WEB_PROVIDERS,
+    )
+    .map_err(|e| format!("write providers.tsx: {e}"))?;
+    fs::write(web_src.join("lib").join("api.ts"), WEB_API_CLIENT)
+        .map_err(|e| format!("write api.ts: {e}"))?;
 
     let claude_md = generate_claude_md(&name, &snake_name, &description, &selected_crates);
     fs::write(root.join("CLAUDE.md"), claude_md).map_err(|e| format!("write CLAUDE.md: {e}"))?;
@@ -289,12 +333,13 @@ pub fn run(
     );
     println!("  Structure:");
     println!("    {name}/");
-    println!("    ├── Cargo.toml");
+    println!("    ├── Cargo.toml  package.json");
     println!("    ├── compose.yaml");
-    println!("    ├── Dockerfile");
+    println!("    ├── Dockerfile                (web-builder + rust-builder + runtime)");
     println!("    ├── .dockerignore  .env.example  .gitignore");
     println!("    ├── CLAUDE.md  README.md");
     println!("    ├── crates/{snake_name}-server/");
+    println!("    ├── packages/web/             (Next.js 15 static SPA, Tailwind v4)");
     println!("    ├── migrations/0001_init.sql");
     println!("    └── docs/");
     println!("\n  RUNESH crates pinned to {}:", runesh_tag());
@@ -365,7 +410,7 @@ uuid               = {{ version = "1", features = ["v4", "serde"] }}
 axum               = {{ version = "0.8", features = ["ws", "macros"] }}
 axum-extra         = {{ version = "0.10", features = ["typed-header"] }}
 tower              = "0.5"
-tower-http         = {{ version = "0.6", features = ["cors", "trace", "compression-br", "compression-gzip"] }}
+tower-http         = {{ version = "0.6", features = ["cors", "trace", "compression-br", "compression-gzip", "fs"] }}
 reqwest            = {{ version = "0.12", default-features = false, features = ["json", "rustls-tls"] }}
 
 # Database
@@ -451,14 +496,20 @@ fn generate_server_main(snake_name: &str, _crates: &BTreeSet<String>) -> String 
     format!(
         r#"#![deny(unsafe_code)]
 //! {snake_name} server entry point.
+//!
+//! Serves the JSON API under `/api/*` plus health probes, and falls
+//! back to the static Next.js SPA bundled at `APP_WEB_DIR` (default
+//! `/app/public`). One binary, one port.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use anyhow::Context;
 use axum::{{Router, routing::get}};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 use sqlx::postgres::{{PgPool, PgPoolOptions}};
+use tower_http::services::{{ServeDir, ServeFile}};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{{EnvFilter, prelude::*}};
 
@@ -514,11 +565,28 @@ async fn main() -> anyhow::Result<()> {{
         .await
         .context("run migrations")?;
 
-    let app = Router::new()
+    let api = Router::new()
         .route("/healthz", get(|| async {{ "ok" }}))
         .route("/readyz", get(readyz))
-        .with_state(pool)
-        .layer(TraceLayer::new_for_http());
+        .route("/api/healthz", get(|| async {{ "ok" }}))
+        .route("/api/readyz", get(readyz))
+        .with_state(pool);
+
+    let web_dir: PathBuf = std::env::var("APP_WEB_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/app/public"));
+    let app = if web_dir.join("index.html").exists() {{
+        let index = web_dir.join("index.html");
+        let spa = ServeDir::new(&web_dir).not_found_service(ServeFile::new(index));
+        api.fallback_service(spa)
+    }} else {{
+        tracing::warn!(
+            path = %web_dir.display(),
+            "web bundle not found; only /api and /healthz will respond"
+        );
+        api
+    }};
+    let app = app.layer(TraceLayer::new_for_http());
 
     let addr: SocketAddr = cfg.bind.parse().context("parse APP__BIND")?;
     let listener = tokio::net::TcpListener::bind(addr)
@@ -548,10 +616,27 @@ fn generate_dockerfile(snake_name: &str) -> String {
 #
 # {snake_name} server image.
 #
-# Single-context build. RUNESH is pulled via git+tag from Cargo.toml,
-# so no sibling checkout is needed. Build with:
+# Single image: the Rust server serves the JSON API under /api/* and
+# falls back to the static Next.js SPA built from packages/web. One
+# container, one port, no reverse proxy needed.
+#
 #     docker compose up -d --build
 
+# ── Stage 1: Build the static web bundle ────────────────────────────────────
+FROM oven/bun:1 AS web-builder
+
+WORKDIR /build
+COPY package.json ./
+COPY packages/web/package.json packages/web/package.json
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile || bun install
+
+COPY packages/web ./packages/web
+WORKDIR /build/packages/web
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN bun run build
+
+# ── Stage 2: Build the Rust server ──────────────────────────────────────────
 FROM rust:1-bookworm AS rust-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -567,6 +652,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --release --locked -p {snake_name}-server && \
     cp target/release/{snake_name}-server /{snake_name}-server
 
+# ── Stage 3: Runtime ────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -578,10 +664,12 @@ RUN useradd --system --uid 1000 --shell /usr/sbin/nologin app
 WORKDIR /app
 COPY --from=rust-builder /{snake_name}-server /usr/local/bin/{snake_name}-server
 COPY migrations ./migrations
+COPY --from=web-builder /build/packages/web/out ./public
 
 USER app
 ENV APP__BIND=0.0.0.0:8080 \
-    RUST_LOG=info,{snake_name}_server=debug
+    RUST_LOG=info,{snake_name}_server=debug \
+    APP_WEB_DIR=/app/public
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
@@ -659,6 +747,256 @@ networks:
     )
 }
 
+/// Root-level `package.json` that declares a bun workspace. Minimal;
+/// just a shim so `bun install` at the repo root resolves
+/// `packages/web`.
+fn generate_root_package_json(name: &str) -> String {
+    format!(
+        r#"{{
+  "name": "{name}",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {{
+    "dev:web": "bun --cwd packages/web dev",
+    "build:web": "bun --cwd packages/web build"
+  }},
+  "packageManager": "bun@1.1"
+}}
+"#
+    )
+}
+
+fn generate_web_package_json(name: &str) -> String {
+    format!(
+        r#"{{
+  "name": "@{name}/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {{
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  }},
+  "dependencies": {{
+    "@tanstack/react-query": "^5.62.0",
+    "axios": "^1.7.7",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.460.0",
+    "next": "^15.0.3",
+    "next-themes": "^0.4.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^2.5.4",
+    "tw-animate-css": "^1.2.5"
+  }},
+  "devDependencies": {{
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.9.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.15.0",
+    "eslint-config-next": "^15.0.3",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.6.3"
+  }}
+}}
+"#
+    )
+}
+
+const WEB_NEXT_CONFIG: &str = r#"/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  // Produce a static SPA in `out/`. The Rust server serves it and
+  // handles `/api/*` on the same origin, so no rewrites or CORS needed.
+  output: "export",
+  // Directory URLs: `/foo` is served by `out/foo/index.html`. Matches
+  // how tower-http ServeDir resolves directories, so hard-reloads work
+  // for every route.
+  trailingSlash: true,
+  images: { unoptimized: true },
+};
+
+export default nextConfig;
+"#;
+
+const WEB_POSTCSS_CONFIG: &str = r#"export default {
+  plugins: {
+    "@tailwindcss/postcss": {},
+  },
+};
+"#;
+
+const WEB_TSCONFIG: &str = r#"{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+"#;
+
+/// Minimal Tailwind v4 boot. Consumers can extend with shadcn tokens
+/// later; we don't pull the full RUNESH UI theme here because that
+/// package currently has some broken imports that would break
+/// out-of-the-box scaffolds.
+const WEB_GLOBALS_CSS: &str = r#"@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --border: oklch(0.922 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+"#;
+
+fn generate_web_layout(name: &str) -> String {
+    let md = crate::validate::markdown_escape(name);
+    format!(
+        r#"import type {{ Metadata }} from "next";
+import {{ Providers }} from "@/components/providers";
+import "./globals.css";
+
+export const metadata: Metadata = {{
+  title: "{md}",
+  description: "Built on RUNESH",
+}};
+
+export default function RootLayout({{ children }}: {{ children: React.ReactNode }}) {{
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body className="min-h-screen bg-background text-foreground antialiased">
+        <Providers>{{children}}</Providers>
+      </body>
+    </html>
+  );
+}}
+"#
+    )
+}
+
+fn generate_web_page(name: &str) -> String {
+    let md = crate::validate::markdown_escape(name);
+    format!(
+        r#""use client";
+
+import {{ useQuery }} from "@tanstack/react-query";
+import {{ api }} from "@/lib/api";
+
+export default function HomePage() {{
+  const health = useQuery({{
+    queryKey: ["readyz"],
+    queryFn: () => api.get("/readyz").then((r) => r.data),
+    refetchInterval: 10_000,
+  }});
+
+  return (
+    <main className="mx-auto max-w-xl p-8 space-y-4">
+      <h1 className="text-3xl font-semibold">{md}</h1>
+      <p className="text-muted-foreground">
+        Static SPA served by the Rust backend on the same port.
+        <code className="mx-1 rounded bg-muted px-1">/api/*</code>
+        goes to the server, everything else to this page.
+      </p>
+      <div className="rounded-lg border p-4">
+        <div className="text-sm text-muted-foreground">Server health</div>
+        <pre className="mt-2 overflow-x-auto text-sm">
+{{health.isLoading ? "loading..." : JSON.stringify(health.data, null, 2)}}
+        </pre>
+      </div>
+    </main>
+  );
+}}
+"#
+    )
+}
+
+const WEB_PROVIDERS: &str = r#""use client";
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ThemeProvider } from "next-themes";
+import { useState } from "react";
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  const [client] = useState(() => new QueryClient());
+  return (
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    </ThemeProvider>
+  );
+}
+"#;
+
+const WEB_API_CLIENT: &str = r#"import axios from "axios";
+
+// Same-origin API. The server serves this SPA and the backend on the
+// same port, so `/api` always resolves to the backend.
+export const api = axios.create({
+  baseURL: "/api",
+  withCredentials: true,
+  timeout: 30_000,
+});
+
+api.interceptors.response.use(undefined, (err) => {
+  if (err?.response?.status === 401 && typeof window !== "undefined") {
+    // TODO: redirect to login once the auth page lands.
+  }
+  return Promise.reject(err);
+});
+"#;
+
 fn generate_local_overlay(crates: &BTreeSet<String>) -> String {
     let mut out = String::from(
         "# Gitignored overlay. `runesh new --local` drops this so\n\
@@ -700,6 +1038,9 @@ fn generate_claude_md(
 ## Stack
 
 - Rust (Axum) + PostgreSQL (sqlx-postgres). Postgres only; no other datastore.
+- Next.js 15 static SPA (Tailwind v4) served by the Rust backend on
+  the same port. One container, one port, no CORS, no cross-service
+  proxy. Client pages live under `packages/web/src/app/*`.
 - Shared code: RUNESH crates pinned to {tag} via git.
 
 ## Structure
@@ -707,11 +1048,16 @@ fn generate_claude_md(
 ```
 {name}/
 ├── crates/
-│   └── {snake_name}-server/        # Axum backend
+│   └── {snake_name}-server/        # Axum backend + static fallback
+├── packages/web/                   # Next.js static SPA (output: "export")
+│   ├── src/app/                    # pages
+│   ├── src/components/providers.tsx
+│   └── src/lib/api.ts              # same-origin axios client
 ├── migrations/                     # Postgres migrations
-├── compose.yaml                    # docker compose stack
-├── Dockerfile                      # Multi-stage server build
+├── compose.yaml                    # db + server only
+├── Dockerfile                      # web-builder -> rust-builder -> runtime
 ├── Cargo.toml                      # Rust workspace
+├── package.json                    # bun workspace root
 └── CLAUDE.md
 ```
 
@@ -723,10 +1069,12 @@ fn generate_claude_md(
 
 ```bash
 cp .env.example .env
-docker compose up -d --build        # stack on :8080
-cargo run -p {snake_name}-server   # dev run (needs local Postgres)
-cargo check                         # compile everything
-cargo fmt --all                     # format
+docker compose up -d --build            # full stack on :8080
+bun install                             # one-time web deps
+bun --cwd packages/web dev              # dev web on :3000 (hot reload)
+cargo run -p {snake_name}-server       # dev server (needs local Postgres)
+cargo check                             # compile everything
+cargo fmt --all                         # format
 cargo clippy --workspace --all-targets
 ```
 
