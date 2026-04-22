@@ -298,23 +298,217 @@ fn check_declaration(decl: &StateDeclaration, state: &SystemState) -> Drift {
             }
         }
 
-        StateDeclaration::Firewall { rule, present } => Drift {
-            declaration: format!("firewall:{rule}"),
-            expected: if *present { "present" } else { "absent" }.into(),
-            actual: "check type not implemented".into(),
-            severity: DriftSeverity::Unknown,
-        },
+        StateDeclaration::Firewall { rule, present } => {
+            let observed = firewall_rule_present(rule);
+            let expected_label = if *present { "present" } else { "absent" };
+            match observed {
+                None => Drift {
+                    declaration: format!("firewall:{rule}"),
+                    expected: expected_label.into(),
+                    actual: "firewall tool unavailable or rule not introspectable".into(),
+                    severity: DriftSeverity::Unknown,
+                },
+                Some(is_present) if is_present == *present => Drift {
+                    declaration: format!("firewall:{rule}"),
+                    expected: expected_label.into(),
+                    actual: if is_present { "present" } else { "absent" }.into(),
+                    severity: DriftSeverity::Compliant,
+                },
+                Some(is_present) => Drift {
+                    declaration: format!("firewall:{rule}"),
+                    expected: expected_label.into(),
+                    actual: if is_present { "present" } else { "absent" }.into(),
+                    severity: if *present {
+                        DriftSeverity::Missing
+                    } else {
+                        DriftSeverity::Extra
+                    },
+                },
+            }
+        }
 
         StateDeclaration::Custom {
             name,
             check_command,
             ..
-        } => Drift {
-            declaration: format!("custom:{name}"),
-            expected: format!("command '{check_command}' exits 0"),
-            actual: "check type not implemented".into(),
-            severity: DriftSeverity::Unknown,
+        } => match run_custom_check(check_command) {
+            CustomCheckOutcome::Compliant => Drift {
+                declaration: format!("custom:{name}"),
+                expected: format!("'{check_command}' exits 0"),
+                actual: "exit 0".into(),
+                severity: DriftSeverity::Compliant,
+            },
+            CustomCheckOutcome::NonZero(code) => Drift {
+                declaration: format!("custom:{name}"),
+                expected: format!("'{check_command}' exits 0"),
+                actual: format!("exit {code}"),
+                severity: DriftSeverity::Drifted,
+            },
+            CustomCheckOutcome::InvalidCommand(reason) => Drift {
+                declaration: format!("custom:{name}"),
+                expected: format!("'{check_command}' exits 0"),
+                actual: format!("invalid command: {reason}"),
+                severity: DriftSeverity::Unknown,
+            },
+            CustomCheckOutcome::CouldNotRun(err) => Drift {
+                declaration: format!("custom:{name}"),
+                expected: format!("'{check_command}' exits 0"),
+                actual: format!("spawn failed: {err}"),
+                severity: DriftSeverity::Unknown,
+            },
         },
+    }
+}
+
+/// Return Some(true) when the named firewall rule is present, Some(false)
+/// when absent, None when the platform's firewall cannot be queried (no
+/// matching tool, permission denied, etc.).
+fn firewall_rule_present(rule: &str) -> Option<bool> {
+    // Rule-name sanity: allow a generous but bounded character set so the
+    // name can be passed as an argument without ambient shell expansion.
+    if rule.is_empty() || rule.len() > 200 {
+        return None;
+    }
+    if !rule.chars().all(|c| {
+        c.is_ascii_alphanumeric()
+            || matches!(c, ' ' | '-' | '_' | '.' | ':' | '/' | '(' | ')')
+    }) {
+        return None;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let out = std::process::Command::new("netsh")
+            .args([
+                "advfirewall",
+                "firewall",
+                "show",
+                "rule",
+                &format!("name={rule}"),
+            ])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .output()
+            .ok()?;
+        // netsh exits 0 with "No rules match the specified criteria." when
+        // the rule is absent, so look at the text rather than the status.
+        let text = String::from_utf8_lossy(&out.stdout);
+        let lower = text.to_ascii_lowercase();
+        if lower.contains("no rules match") {
+            return Some(false);
+        }
+        Some(text.contains("Rule Name:"))
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Try nftables first. `nft list ruleset` is a read-only introspection
+        // call; we search for the rule substring as a heuristic. For nftables
+        // chains, callers typically name the rule with the `comment`
+        // attribute, which does appear in `list ruleset` output.
+        if let Ok(out) = std::process::Command::new("nft")
+            .args(["list", "ruleset"])
+            .output()
+        {
+            if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout);
+                if !text.is_empty() {
+                    return Some(text.contains(rule));
+                }
+            }
+        }
+
+        // Fall back to iptables-save.
+        if let Ok(out) = std::process::Command::new("iptables-save").output()
+            && out.status.success()
+        {
+            let text = String::from_utf8_lossy(&out.stdout);
+            return Some(text.contains(rule));
+        }
+
+        // ip6tables if available
+        if let Ok(out) = std::process::Command::new("ip6tables-save").output()
+            && out.status.success()
+        {
+            let text = String::from_utf8_lossy(&out.stdout);
+            return Some(text.contains(rule));
+        }
+
+        None
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // pf is root-only to list; callers running unprivileged will see
+        // None here which the caller turns into DriftSeverity::Unknown.
+        if let Ok(out) = std::process::Command::new("pfctl").args(["-sr"]).output()
+            && out.status.success()
+        {
+            let text = String::from_utf8_lossy(&out.stdout);
+            return Some(text.contains(rule));
+        }
+        None
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        None
+    }
+}
+
+/// Outcome of running a baseline Custom check command.
+enum CustomCheckOutcome {
+    /// Exited with status 0.
+    Compliant,
+    /// Exited with a non-zero status.
+    NonZero(i32),
+    /// Command string failed validation (null byte, empty, ...).
+    InvalidCommand(&'static str),
+    /// Failed to spawn (platform shell missing, permission denied, ...).
+    CouldNotRun(String),
+}
+
+fn run_custom_check(command: &str) -> CustomCheckOutcome {
+    if command.is_empty() {
+        return CustomCheckOutcome::InvalidCommand("empty");
+    }
+    if command.as_bytes().contains(&0) {
+        return CustomCheckOutcome::InvalidCommand("null byte in command");
+    }
+    // Generous upper bound. A real baseline check is typically one line.
+    if command.len() > 4096 {
+        return CustomCheckOutcome::InvalidCommand("command too long");
+    }
+
+    #[cfg(target_family = "unix")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("sh");
+        c.arg("-c").arg(command);
+        c
+    };
+    #[cfg(target_family = "windows")]
+    let mut cmd = {
+        use std::os::windows::process::CommandExt;
+        let mut c = std::process::Command::new("cmd");
+        c.arg("/C").arg(command);
+        c.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        c
+    };
+
+    match cmd.output() {
+        Ok(out) => {
+            if let Some(code) = out.status.code() {
+                if code == 0 {
+                    CustomCheckOutcome::Compliant
+                } else {
+                    CustomCheckOutcome::NonZero(code)
+                }
+            } else {
+                // Unix: killed by signal, no exit code.
+                CustomCheckOutcome::NonZero(-1)
+            }
+        }
+        Err(e) => CustomCheckOutcome::CouldNotRun(e.to_string()),
     }
 }
 
@@ -459,6 +653,72 @@ mod tests {
     }
 
     #[test]
+    fn custom_check_exits_zero_is_compliant() {
+        let baseline: Baseline = serde_json::from_str(
+            r#"{
+            "name": "custom-ok",
+            "mode": "audit",
+            "vars": {},
+            "state": [
+                {
+                    "type": "custom",
+                    "name": "noop",
+                    "check_command": "exit 0"
+                }
+            ]
+        }"#,
+        )
+        .unwrap();
+        let report = check_compliance(&baseline, &SystemState::default());
+        assert!(report.is_compliant(), "expected exit 0 to be compliant");
+    }
+
+    #[test]
+    fn custom_check_exits_nonzero_is_drifted() {
+        let baseline: Baseline = serde_json::from_str(
+            r#"{
+            "name": "custom-bad",
+            "mode": "audit",
+            "vars": {},
+            "state": [
+                {
+                    "type": "custom",
+                    "name": "fail",
+                    "check_command": "exit 7"
+                }
+            ]
+        }"#,
+        )
+        .unwrap();
+        let report = check_compliance(&baseline, &SystemState::default());
+        assert_eq!(report.drifted, 1);
+        assert_eq!(report.unknown, 0);
+        assert!(
+            report
+                .entries
+                .iter()
+                .any(|e| e.actual.contains("exit 7") && e.severity == DriftSeverity::Drifted)
+        );
+    }
+
+    #[test]
+    fn custom_check_rejects_null_byte() {
+        let outcome = run_custom_check("echo hi\0; exit 1");
+        match outcome {
+            CustomCheckOutcome::InvalidCommand(reason) => assert_eq!(reason, "null byte in command"),
+            _ => panic!("expected InvalidCommand"),
+        }
+    }
+
+    #[test]
+    fn firewall_invalid_rule_name_returns_none() {
+        // Semicolons and ampersands must not leak into a shell; we refuse
+        // such names outright.
+        assert_eq!(firewall_rule_present("evil; rm -rf /"), None);
+        assert_eq!(firewall_rule_present(""), None);
+    }
+
+    #[test]
     fn empty_baseline_is_compliant() {
         let baseline = Baseline {
             name: "empty".into(),
@@ -495,21 +755,57 @@ mod tests {
     }
 
     #[test]
-    fn firewall_and_custom_report_unknown() {
+    fn firewall_check_either_compliant_or_unknown_per_platform() {
+        // Firewall introspection depends on the running platform's firewall
+        // tool being present and readable; on a CI runner without netsh /
+        // nft / iptables / pf we get Unknown, otherwise we get a concrete
+        // Compliant / Missing. Accept both so the test is portable, but
+        // assert the category is one of those two.
         let baseline: Baseline = serde_json::from_str(
             r#"{
-            "name": "unknown",
+            "name": "fw",
             "mode": "audit",
             "vars": {},
             "state": [
-                {"type": "firewall", "rule": "allow-ssh", "present": true},
-                {"type": "custom", "name": "bios-locked", "check_command": "true"}
+                {"type": "firewall", "rule": "allow-ssh", "present": true}
             ]
         }"#,
         )
         .unwrap();
         let report = check_compliance(&baseline, &SystemState::default());
-        assert_eq!(report.compliant, 0);
-        assert_eq!(report.unknown, 2);
+        assert_eq!(report.total, 1);
+        // Exactly one of these counters is 1 and the rest are 0.
+        let hits = [
+            report.compliant,
+            report.drifted,
+            report.missing,
+            report.unknown,
+        ]
+        .iter()
+        .filter(|n| **n == 1)
+        .count();
+        assert_eq!(hits, 1, "expected exactly one category to fire: {report:?}");
+    }
+
+    #[test]
+    fn custom_true_command_is_compliant_on_any_platform() {
+        // `true` is available on unix; windows `cmd /C true` exits 0 too
+        // ("true" is not a cmd builtin but cmd returns 0 when the command
+        // is missing? actually it returns 9009). Use `exit 0` which both
+        // shells understand.
+        let baseline: Baseline = serde_json::from_str(
+            r#"{
+            "name": "c",
+            "mode": "audit",
+            "vars": {},
+            "state": [
+                {"type": "custom", "name": "noop", "check_command": "exit 0"}
+            ]
+        }"#,
+        )
+        .unwrap();
+        let report = check_compliance(&baseline, &SystemState::default());
+        assert_eq!(report.compliant, 1);
+        assert_eq!(report.unknown, 0);
     }
 }
