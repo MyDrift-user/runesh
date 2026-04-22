@@ -160,6 +160,7 @@ impl MapBuilder {
             dst_tags: to.tags.clone(),
             dst_port: 0,
             dst_user,
+            proto: None,
         };
 
         // Fast path: if rule evaluation at port 0 is allowed via a wildcard

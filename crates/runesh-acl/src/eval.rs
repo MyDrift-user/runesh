@@ -7,7 +7,9 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use crate::AclError;
-use crate::model::{AclAction, AclPolicy, AclTarget, DstTarget, SshAction, parse_dst, parse_target};
+use crate::model::{
+    AclAction, AclPolicy, AclTarget, DstTarget, SshAction, parse_dst, parse_target,
+};
 
 /// Resolves a group name to the users (device owners) that belong to it.
 ///
@@ -151,10 +153,7 @@ impl<'a> AclEvaluator<'a> {
             // Proto filter: if the rule declares a proto and the context
             // declares one, they must agree. Both sides default to "any"
             // when unset so existing callers keep working.
-            let rule_proto = rule
-                .proto
-                .as_deref()
-                .and_then(Proto::parse_rule_field);
+            let rule_proto = rule.proto.as_deref().and_then(Proto::parse_rule_field);
             if !Proto::rule_matches(rule_proto, ctx.proto) {
                 continue;
             }
