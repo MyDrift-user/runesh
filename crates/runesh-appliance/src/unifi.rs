@@ -68,12 +68,20 @@ struct SessionState {
 
 impl UniFiDriver {
     /// Build a driver for a classic standalone controller (API at `/api`).
-    pub fn classic(host: &str, site: &str, credentials: Credentials) -> Result<Self, ApplianceError> {
+    pub fn classic(
+        host: &str,
+        site: &str,
+        credentials: Credentials,
+    ) -> Result<Self, ApplianceError> {
         Self::build(host, "/api", site, credentials, false)
     }
 
     /// Build a driver for a UniFi OS appliance (API at `/proxy/network/api`).
-    pub fn unifi_os(host: &str, site: &str, credentials: Credentials) -> Result<Self, ApplianceError> {
+    pub fn unifi_os(
+        host: &str,
+        site: &str,
+        credentials: Credentials,
+    ) -> Result<Self, ApplianceError> {
         Self::build(host, "/proxy/network/api", site, credentials, false)
     }
 
@@ -133,10 +141,7 @@ impl UniFiDriver {
     }
 
     fn site_url(&self, tail: &str) -> String {
-        format!(
-            "{}{}/s/{}{tail}",
-            self.base_url, self.base_path, self.site
-        )
+        format!("{}{}/s/{}{tail}", self.base_url, self.base_path, self.site)
     }
 
     /// Log in and cache the CSRF token. Always re-authenticates.
@@ -469,9 +474,7 @@ impl ApplianceDriver for UniFiDriver {
     }
 
     async fn delete_firewall_rule(&self, rule_id: &str) -> Result<(), ApplianceError> {
-        if rule_id.is_empty()
-            || !rule_id.chars().all(|c| c.is_ascii_alphanumeric())
-        {
+        if rule_id.is_empty() || !rule_id.chars().all(|c| c.is_ascii_alphanumeric()) {
             return Err(ApplianceError::ApiError(format!(
                 "invalid firewall rule id: {rule_id}"
             )));
@@ -495,7 +498,9 @@ impl ApplianceDriver for UniFiDriver {
         let rows: Vec<UnifiHealth> = Self::parse_data(resp).await?;
         let alerts: Vec<String> = rows
             .into_iter()
-            .filter(|h| h.status.eq_ignore_ascii_case("warning") || h.status.eq_ignore_ascii_case("error"))
+            .filter(|h| {
+                h.status.eq_ignore_ascii_case("warning") || h.status.eq_ignore_ascii_case("error")
+            })
             .map(|h| format!("{}: {}", h.subsystem, h.status))
             .collect();
         Ok(HealthStatus {
