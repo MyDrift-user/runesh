@@ -33,6 +33,7 @@ impl ActiveSession {
             dst_tags: self.dst_tags.clone(),
             dst_port: self.dst_port,
             dst_user: None,
+            proto: None,
         }
     }
 }
