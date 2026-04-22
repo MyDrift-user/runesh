@@ -16,13 +16,35 @@ use rand::RngCore;
 use secrecy::{ExposeSecret, SecretBox};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::{Instant, timeout};
 
 use crate::RelayError;
 use crate::frame::{self, Frame, KEY_LEN};
+
+/// Forwarding ACL: asked before the relay routes a `SendPacket` from one
+/// client to another. Return `false` to drop the packet silently (the
+/// per-sender rate-limit counter is not touched by a policy drop).
+///
+/// The default [`AllowAllForward`] returns `true` for every pair, which
+/// matches the pre-ACL behaviour for existing callers.
+pub trait AllowForward: Send + Sync + 'static {
+    /// Called per packet. Keep it cheap; it sits in the hot path.
+    fn allow(&self, sender: &[u8; KEY_LEN], recipient: &[u8; KEY_LEN]) -> bool;
+}
+
+/// Permissive ACL that lets every peer relay to every other peer. Fine
+/// on a closed network where all clients are trusted; on a shared relay
+/// wire a real policy.
+pub struct AllowAllForward;
+
+impl AllowForward for AllowAllForward {
+    fn allow(&self, _sender: &[u8; KEY_LEN], _recipient: &[u8; KEY_LEN]) -> bool {
+        true
+    }
+}
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -152,6 +174,11 @@ pub struct RelayServer {
     conn_count: Arc<AtomicUsize>,
     /// Count of frames dropped due to per-sender rate limiting (for metrics).
     rate_limited: Arc<AtomicU64>,
+    /// Policy consulted before forwarding each packet. Defaults to
+    /// [`AllowAllForward`].
+    acl: Arc<dyn AllowForward>,
+    /// Count of frames dropped by the ACL.
+    acl_dropped: Arc<AtomicU64>,
 }
 
 impl RelayServer {
@@ -168,42 +195,123 @@ impl RelayServer {
             watchers: Arc::new(DashMap::new()),
             conn_count: Arc::new(AtomicUsize::new(0)),
             rate_limited: Arc::new(AtomicU64::new(0)),
+            acl: Arc::new(AllowAllForward),
+            acl_dropped: Arc::new(AtomicU64::new(0)),
         }
     }
 
-    /// Run the relay server, listening for connections.
+    /// Install a forwarding ACL. Call this before [`Self::run`] /
+    /// [`Self::run_tls`]; mid-flight changes are not supported.
+    pub fn with_acl<A: AllowForward>(mut self, acl: A) -> Self {
+        self.acl = Arc::new(acl);
+        self
+    }
+
+    /// Number of packets the ACL has dropped since startup.
+    pub fn acl_dropped_count(&self) -> u64 {
+        self.acl_dropped.load(Ordering::Relaxed)
+    }
+
+    /// Run the relay server over plaintext TCP.
     pub async fn run(&self) -> Result<(), RelayError> {
         let listener = TcpListener::bind(&self.config.bind_addr).await?;
-        tracing::info!(addr = %self.config.bind_addr, "DERP relay listening");
+        tracing::info!(addr = %self.config.bind_addr, "DERP relay listening (plaintext)");
 
         loop {
             let (stream, addr) = listener.accept().await?;
-
-            // Count the connection before spawning so we can cleanly reject
-            // over-cap peers without racing the read loop.
-            let prev = self.conn_count.fetch_add(1, Ordering::SeqCst);
-            if prev >= self.config.max_clients {
-                self.conn_count.fetch_sub(1, Ordering::SeqCst);
-                tracing::warn!(%addr, "rejecting connection: max_clients reached");
+            if !self.reserve_slot(&addr) {
                 continue;
             }
-
-            tracing::debug!(%addr, "new connection");
 
             let config = Arc::clone(&self.config);
             let clients = Arc::clone(&self.clients);
             let watchers = Arc::clone(&self.watchers);
             let conn_count = Arc::clone(&self.conn_count);
             let rate_limited = Arc::clone(&self.rate_limited);
+            let acl = Arc::clone(&self.acl);
+            let acl_dropped = Arc::clone(&self.acl_dropped);
 
             tokio::spawn(async move {
                 let _guard = ConnGuard::new(conn_count);
-                if let Err(e) = handle_client(stream, config, clients, watchers, rate_limited).await
+                if let Err(e) = handle_client(
+                    stream,
+                    config,
+                    clients,
+                    watchers,
+                    rate_limited,
+                    acl,
+                    acl_dropped,
+                )
+                .await
                 {
                     tracing::debug!(%addr, error = %e, "client disconnected");
                 }
             });
         }
+    }
+
+    /// Run the relay server over TLS. Requires the `tls` cargo feature.
+    /// The caller builds a [`tokio_rustls::TlsAcceptor`] with whatever
+    /// certificate, client-auth, and protocol-version policy they need.
+    #[cfg(feature = "tls")]
+    pub async fn run_tls(&self, acceptor: tokio_rustls::TlsAcceptor) -> Result<(), RelayError> {
+        let listener = TcpListener::bind(&self.config.bind_addr).await?;
+        tracing::info!(addr = %self.config.bind_addr, "DERP relay listening (TLS)");
+
+        loop {
+            let (stream, addr) = listener.accept().await?;
+            if !self.reserve_slot(&addr) {
+                continue;
+            }
+
+            let acceptor = acceptor.clone();
+            let config = Arc::clone(&self.config);
+            let clients = Arc::clone(&self.clients);
+            let watchers = Arc::clone(&self.watchers);
+            let conn_count = Arc::clone(&self.conn_count);
+            let rate_limited = Arc::clone(&self.rate_limited);
+            let acl = Arc::clone(&self.acl);
+            let acl_dropped = Arc::clone(&self.acl_dropped);
+
+            tokio::spawn(async move {
+                let _guard = ConnGuard::new(conn_count);
+                let tls = match acceptor.accept(stream).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::debug!(%addr, error = %e, "TLS handshake failed");
+                        return;
+                    }
+                };
+                if let Err(e) = handle_client(
+                    tls,
+                    config,
+                    clients,
+                    watchers,
+                    rate_limited,
+                    acl,
+                    acl_dropped,
+                )
+                .await
+                {
+                    tracing::debug!(%addr, error = %e, "client disconnected");
+                }
+            });
+        }
+    }
+
+    /// Account a new incoming connection against `max_clients`. Returns
+    /// `true` if the slot was reserved and the caller should spawn a
+    /// handler, `false` if the server is over its cap (in which case the
+    /// caller should drop the stream silently).
+    fn reserve_slot(&self, addr: &std::net::SocketAddr) -> bool {
+        let prev = self.conn_count.fetch_add(1, Ordering::SeqCst);
+        if prev >= self.config.max_clients {
+            self.conn_count.fetch_sub(1, Ordering::SeqCst);
+            tracing::warn!(%addr, "rejecting connection: max_clients reached");
+            return false;
+        }
+        tracing::debug!(%addr, "new connection");
+        true
     }
 
     /// Number of connected clients.
@@ -253,13 +361,18 @@ pub fn compute_challenge_response(
     buf
 }
 
-async fn handle_client(
-    mut stream: TcpStream,
+async fn handle_client<S>(
+    mut stream: S,
     config: Arc<RelayConfig>,
     clients: Arc<DashMap<[u8; KEY_LEN], Client>>,
     watchers: Arc<DashMap<[u8; KEY_LEN], mpsc::Sender<Frame>>>,
     rate_limited: Arc<AtomicU64>,
-) -> Result<(), RelayError> {
+    acl: Arc<dyn AllowForward>,
+    acl_dropped: Arc<AtomicU64>,
+) -> Result<(), RelayError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     // Step 1: Send our server key (and, in HmacChallenge mode, a challenge).
     let mut write_buf = BytesMut::new();
     frame::encode_frame(
@@ -361,9 +474,11 @@ async fn handle_client(
         "client authenticated"
     );
 
-    // Step 4: Split into read/write tasks.
+    // Step 4: Split into read/write tasks. tokio::io::split works on any
+    // AsyncRead + AsyncWrite so this path supports both plaintext TcpStream
+    // and tokio_rustls::server::TlsStream<TcpStream>.
     let client_key = key;
-    let (mut reader, mut writer) = stream.into_split();
+    let (mut reader, mut writer) = tokio::io::split(stream);
 
     // Per-sender token bucket for packet forwarding.
     let bucket = Arc::new(Mutex::new(TokenBucket::new(
@@ -401,6 +516,8 @@ async fn handle_client(
         &watchers,
         &bucket,
         &rate_limited,
+        &acl,
+        &acl_dropped,
     )
     .await;
 
@@ -419,15 +536,20 @@ async fn handle_client(
     result
 }
 
-async fn read_loop(
-    reader: &mut tokio::net::tcp::OwnedReadHalf,
+async fn read_loop<R>(
+    reader: &mut R,
     buf: &mut BytesMut,
     client_key: [u8; KEY_LEN],
     clients: &DashMap<[u8; KEY_LEN], Client>,
     watchers: &DashMap<[u8; KEY_LEN], mpsc::Sender<Frame>>,
     bucket: &Arc<Mutex<TokenBucket>>,
     rate_limited: &AtomicU64,
-) -> Result<(), RelayError> {
+    acl: &Arc<dyn AllowForward>,
+    acl_dropped: &AtomicU64,
+) -> Result<(), RelayError>
+where
+    R: AsyncRead + Unpin,
+{
     loop {
         let n = reader.read_buf(buf).await?;
         if n == 0 {
@@ -437,6 +559,19 @@ async fn read_loop(
         while let Some(f) = frame::decode_frame(buf)? {
             match f {
                 Frame::SendPacket { dst_key, data } => {
+                    // Consult the forwarding ACL first. A policy drop is
+                    // silent to the sender and does not count against the
+                    // per-sender rate limit: we don't want a misconfigured
+                    // ACL to starve a well-behaved client's packets.
+                    if !acl.allow(&client_key, &dst_key) {
+                        acl_dropped.fetch_add(1, Ordering::Relaxed);
+                        tracing::trace!(
+                            src = base64::engine::general_purpose::STANDARD.encode(client_key),
+                            dst = base64::engine::general_purpose::STANDARD.encode(dst_key),
+                            "ACL dropped SendPacket"
+                        );
+                        continue;
+                    }
                     // Apply per-sender rate limit.
                     let allowed = { bucket.lock().await.try_take() };
                     if !allowed {
@@ -538,6 +673,35 @@ mod tests {
         ));
         assert_eq!(server.client_count(), 0);
         assert_eq!(server.conn_count(), 0);
+    }
+
+    #[test]
+    fn allow_all_acl_permits_every_pair() {
+        let acl = AllowAllForward;
+        assert!(acl.allow(&[1u8; KEY_LEN], &[2u8; KEY_LEN]));
+        assert!(acl.allow(&[99u8; KEY_LEN], &[99u8; KEY_LEN]));
+    }
+
+    #[test]
+    fn with_acl_installs_custom_policy() {
+        /// Toy ACL: deny any forward where the recipient's first byte
+        /// matches a configured value.
+        struct DenyFirstByte(u8);
+        impl AllowForward for DenyFirstByte {
+            fn allow(&self, _: &[u8; KEY_LEN], recipient: &[u8; KEY_LEN]) -> bool {
+                recipient[0] != self.0
+            }
+        }
+
+        let server = RelayServer::new(RelayConfig::new(
+            "127.0.0.1:0",
+            [0u8; KEY_LEN],
+            RelayAuthConfig::insecure_unauthenticated(),
+        ))
+        .with_acl(DenyFirstByte(0xAA));
+        assert!(server.acl.allow(&[1u8; KEY_LEN], &[1u8; KEY_LEN]));
+        assert!(!server.acl.allow(&[1u8; KEY_LEN], &[0xAA; KEY_LEN]));
+        assert_eq!(server.acl_dropped_count(), 0);
     }
 
     #[test]
