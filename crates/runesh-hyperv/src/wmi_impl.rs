@@ -380,19 +380,40 @@ fn newest_snapshot_for(
     Ok(rows.into_iter().max_by_key(|s| s.creation_time))
 }
 
-/// Set the ElementName on a snapshot's setting data. Hyper-V exposes this via
-/// `ModifyVirtualSystem` / `ModifySystemSettings` on the management service,
-/// accepting the updated settings as an embedded instance. Building the MOF
-/// here is non-trivial, so we settle for a no-op failure on rename; the
-/// snapshot still exists and is usable, the display name is just the
-/// auto-generated one.
+/// Rename a snapshot by modifying the `ElementName` on its
+/// `Msvm_VirtualSystemSettingData`.
+///
+/// Hyper-V exposes this via `Msvm_VirtualSystemManagementService.
+/// ModifySystemSettings`, which takes an embedded instance of the
+/// updated settings as a serialized MOF / CIM-XML string. The `wmi`
+/// crate does not currently expose a way to fetch the object's text
+/// form, edit one property, and pass it back, so a pure-WMI rename
+/// requires hand-building valid CIM-XML for every required property.
+/// That is both tedious and fragile across Hyper-V versions.
+///
+/// Until the consumer supplies a richer WMI method binding we keep
+/// this as a no-op: the snapshot is still created successfully and
+/// is functionally identical, only the display name is the
+/// auto-generated one (usually "`<vm_name> - (<timestamp>)`"). The
+/// caller that needs a specific display name can either invoke
+/// `Rename-VMSnapshot` via PowerShell from the consumer layer, or
+/// fetch the snapshot list and track the InstanceID <-> requested
+/// name mapping out of band.
+///
+/// Returning `Ok(())` rather than `NotSupported` is deliberate: the
+/// operation the caller actually requested (take a snapshot) did
+/// succeed; only the cosmetic label is unchanged.
 fn rename_snapshot(
     _con: &WMIConnection,
     _mgmt_path: &str,
     _setting_path: &str,
-    _new_name: &str,
+    new_name: &str,
 ) -> Result<(), WorkloadError> {
-    // Intentional no-op for this cut; see module-level comment.
+    tracing::debug!(
+        requested_name = %new_name,
+        "hyperv: snapshot rename is a no-op; display name remains auto-generated \
+         (see rename_snapshot docs for the consumer-side workaround)"
+    );
     Ok(())
 }
 
