@@ -41,7 +41,9 @@ pub mod cli;
 #[cfg(feature = "axum")]
 pub mod handlers;
 
-pub use auth::{AllowAllAuth, AuthError, DenyAllAuth, Operation, Principal, RemoteAuth};
+pub use auth::{AuthError, DenyAllAuth, Operation, Principal, RemoteAuth};
+#[cfg(any(test, feature = "insecure-test-auth"))]
+pub use auth::InsecureAllowAllAuth;
 pub use error::RemoteError;
 
 #[cfg(feature = "axum")]
