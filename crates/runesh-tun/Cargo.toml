@@ -15,9 +15,13 @@ thiserror = { workspace = true }
 
 [features]
 default = []
-# When enabled, skip the pinned SHA-256 check on wintun.dll. Unsafe for
-# production. Logs a loud warning at startup. Use only when bundling a
-# differently-signed build of Wintun.
+# Dev-only escape hatch. When enabled, skip the pinned SHA-256 check on
+# wintun.dll, or allow loading with no pin configured at build time.
+# Logs a loud warning at startup. Never enable on a shipped binary.
+#
+# The production path requires the RUNESH_WINTUN_SHA256_HEX env var to be
+# set at `cargo build` time to the hex-encoded SHA-256 of the exact
+# wintun.dll bundled alongside the consumer executable.
 unpinned-wintun = []
 
 [target.'cfg(windows)'.dependencies]
