@@ -34,21 +34,78 @@ pub enum WebhookFormat {
     Ntfy,
 }
 
+/// Egress mode for [`WebhookUrlPolicy`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EgressMode {
+    /// Reject every URL whose host does not match [`WebhookUrlPolicy::allowlist`].
+    /// This is the default because an empty allowlist in any other mode would
+    /// silently permit arbitrary egress.
+    Allowlist,
+    /// Allow any host that passes the private-IP check. Must be opted into
+    /// explicitly via [`WebhookUrlPolicy::allow_any_public`].
+    AllowAnyPublic,
+}
+
 /// URL policy controlling which destinations a webhook can reach.
+///
+/// Construct with [`WebhookUrlPolicy::allowlist`] for the normal production
+/// case (a closed set of known-good hosts) or
+/// [`WebhookUrlPolicy::allow_any_public`] for deployments that must reach
+/// arbitrary public URLs. `Default` is equivalent to `allowlist(vec![])` and
+/// will reject every URL, so a caller that forgets to configure a policy
+/// fails closed instead of spraying notifications anywhere.
 #[derive(Debug, Clone)]
 pub struct WebhookUrlPolicy {
-    /// If non-empty, host must match one of these suffixes (case-insensitive).
-    /// Example: `"hooks.slack.com"` matches `https://hooks.slack.com/services/...`.
+    /// How to treat URLs: strict allowlist, or any public host.
+    pub mode: EgressMode,
+    /// Host must match one of these suffixes (case-insensitive) when `mode`
+    /// is [`EgressMode::Allowlist`]. Example: `"hooks.slack.com"` matches
+    /// `https://hooks.slack.com/services/...`. Ignored otherwise.
     pub allowlist: Vec<String>,
-    /// Block loopback / link-local / private / IMDS addresses.
+    /// Block loopback / link-local / private / IMDS addresses (SSRF guard).
     pub block_private_ips: bool,
 }
 
 impl Default for WebhookUrlPolicy {
     fn default() -> Self {
         Self {
+            mode: EgressMode::Allowlist,
             allowlist: Vec::new(),
             block_private_ips: true,
+        }
+    }
+}
+
+impl WebhookUrlPolicy {
+    /// Strict allowlist policy: only hosts whose name matches (or is a
+    /// subdomain of) one of `hosts` are allowed. Private IPs blocked.
+    pub fn allowlist(hosts: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            mode: EgressMode::Allowlist,
+            allowlist: hosts.into_iter().map(Into::into).collect(),
+            block_private_ips: true,
+        }
+    }
+
+    /// Allow any public host. Private / loopback / IMDS addresses are still
+    /// blocked. Call this explicitly when the webhook must reach URLs that
+    /// are not known in advance.
+    pub fn allow_any_public() -> Self {
+        Self {
+            mode: EgressMode::AllowAnyPublic,
+            allowlist: Vec::new(),
+            block_private_ips: true,
+        }
+    }
+
+    /// Only for test harnesses that bind a local HTTP server on a loopback
+    /// port. Never ship with this.
+    #[cfg(any(test, feature = "insecure-test-policy"))]
+    pub fn insecure_any_host_for_testing() -> Self {
+        Self {
+            mode: EgressMode::AllowAnyPublic,
+            allowlist: Vec::new(),
+            block_private_ips: false,
         }
     }
 }
@@ -290,14 +347,28 @@ async fn validate_url(url: &str, policy: &WebhookUrlPolicy) -> Result<(), String
         .host_str()
         .ok_or_else(|| "missing host".to_string())?;
 
-    if !policy.allowlist.is_empty() {
-        let lowered = host.to_ascii_lowercase();
-        let allowed = policy.allowlist.iter().any(|suffix| {
-            lowered == suffix.to_ascii_lowercase()
-                || lowered.ends_with(&format!(".{}", suffix.to_ascii_lowercase()))
-        });
-        if !allowed {
-            return Err(format!("host {host} not in allowlist"));
+    match policy.mode {
+        EgressMode::Allowlist => {
+            if policy.allowlist.is_empty() {
+                return Err(
+                    "url policy rejects all hosts: allowlist is empty and mode is Allowlist. \
+                     Configure WebhookUrlPolicy::allowlist([...]) or \
+                     WebhookUrlPolicy::allow_any_public()."
+                        .to_string(),
+                );
+            }
+            let lowered = host.to_ascii_lowercase();
+            let allowed = policy.allowlist.iter().any(|suffix| {
+                lowered == suffix.to_ascii_lowercase()
+                    || lowered.ends_with(&format!(".{}", suffix.to_ascii_lowercase()))
+            });
+            if !allowed {
+                return Err(format!("host {host} not in allowlist"));
+            }
+        }
+        EgressMode::AllowAnyPublic => {
+            // Any host is acceptable; the private-IP check below is still
+            // applied when `block_private_ips` is set.
         }
     }
 
@@ -444,8 +515,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn validate_url_rejects_loopback_by_default() {
+    async fn default_policy_rejects_all_hosts() {
         let policy = WebhookUrlPolicy::default();
+        let err = validate_url("https://example.com/hook", &policy)
+            .await
+            .unwrap_err();
+        assert!(err.contains("allowlist is empty"), "err={err}");
+    }
+
+    #[tokio::test]
+    async fn validate_url_rejects_loopback_with_allow_any_public() {
+        let policy = WebhookUrlPolicy::allow_any_public();
         let err = validate_url("http://127.0.0.1:12345/hook", &policy)
             .await
             .unwrap_err();
@@ -458,6 +538,7 @@ mod tests {
     #[tokio::test]
     async fn validate_url_allowlist_enforced() {
         let policy = WebhookUrlPolicy {
+            mode: EgressMode::Allowlist,
             allowlist: vec!["example.com".into()],
             block_private_ips: false,
         };
@@ -471,7 +552,10 @@ mod tests {
 
     #[tokio::test]
     async fn webhook_rejects_imds() {
-        let ch = WebhookChannel::new("imds", "http://169.254.169.254/latest/meta-data/");
+        // Use allow_any_public so the IMDS address itself is what trips the
+        // private-IP guard, not the allowlist check.
+        let ch = WebhookChannel::new("imds", "http://169.254.169.254/latest/meta-data/")
+            .with_url_policy(WebhookUrlPolicy::allow_any_public());
         let notif = crate::Notification {
             severity: crate::NotifySeverity::Critical,
             title: "t".into(),
@@ -486,6 +570,30 @@ mod tests {
         assert!(
             msg.to_lowercase().contains("imds") || msg.to_lowercase().contains("private"),
             "msg={msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn default_webhook_rejects_any_host_fail_closed() {
+        let ch = WebhookChannel::new("generic", "https://example.com/hook");
+        let notif = crate::Notification {
+            severity: crate::NotifySeverity::Info,
+            title: "t".into(),
+            body: "b".into(),
+            source: None,
+            url: None,
+            fields: Default::default(),
+        };
+        let result = ch.send(&notif).await;
+        assert!(!result.success, "default policy must reject by default");
+        assert!(
+            result
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("allowlist is empty"),
+            "expected explicit policy-empty error: {:?}",
+            result.error,
         );
     }
 
@@ -542,10 +650,7 @@ mod tests {
 
         let url = format!("http://127.0.0.1:{}/", addr.port());
         let ch = WebhookChannel::new("test", &url)
-            .with_url_policy(WebhookUrlPolicy {
-                allowlist: vec![],
-                block_private_ips: false,
-            })
+            .with_url_policy(WebhookUrlPolicy::insecure_any_host_for_testing())
             .with_retry(RetryPolicy {
                 retry_count: 2,
                 base_delay: Duration::from_millis(50),
@@ -601,10 +706,7 @@ mod tests {
 
         let url = format!("http://127.0.0.1:{}/", addr.port());
         let ch = WebhookChannel::new("test", &url)
-            .with_url_policy(WebhookUrlPolicy {
-                allowlist: vec![],
-                block_private_ips: false,
-            })
+            .with_url_policy(WebhookUrlPolicy::insecure_any_host_for_testing())
             .with_shared_secret("hunter2")
             .with_retry(RetryPolicy {
                 retry_count: 0,
