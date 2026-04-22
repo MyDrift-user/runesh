@@ -50,15 +50,17 @@ impl LinuxFuseMount {
             MountOption::AutoUnmount,
         ];
 
-        if mount_cfg.allow_other {
+        if mount_cfg.allow_other_users_unsafe {
             tracing::warn!(
                 mount_point = %mount_point.display(),
-                "FUSE: allow_other is enabled — any local user can access this mount"
+                "FUSE: allow_other_users_unsafe is enabled. Any local user on \
+                 this host can access the mount. Never enable on a multi-tenant \
+                 server where other local uids belong to different tenants."
             );
             mount_options.push(MountOption::CUSTOM("allow_other".into()));
         }
-        if mount_cfg.allow_root {
-            tracing::warn!("FUSE: allow_root is enabled");
+        if mount_cfg.allow_root_unsafe {
+            tracing::warn!("FUSE: allow_root_unsafe is enabled");
             mount_options.push(MountOption::CUSTOM("allow_root".into()));
         }
 
