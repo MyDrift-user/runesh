@@ -110,11 +110,7 @@ impl Remediator for StdRemediator {
 
 // ---- Service ---------------------------------------------------------------
 
-fn remediate_service(
-    name: &str,
-    desired: ServiceState,
-    enabled: bool,
-) -> RemediationOutcome {
+fn remediate_service(name: &str, desired: ServiceState, enabled: bool) -> RemediationOutcome {
     if !valid_service_name(name) {
         return RemediationOutcome::Failed(format!("invalid service name: {name}"));
     }
@@ -305,7 +301,11 @@ fn parse_octal_mode(s: &str) -> Option<u32> {
 // ---- Setting --------------------------------------------------------------
 
 fn remediate_setting(key: &str, value: &str) -> RemediationOutcome {
-    if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_') {
+    if key.is_empty()
+        || !key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+    {
         return RemediationOutcome::Failed(format!("invalid setting key: {key}"));
     }
 
@@ -382,8 +382,14 @@ mod tests {
             fix_command: Some("echo fix".into()),
         });
         match o {
-            RemediationOutcome::OutOfScope { kind: "custom", reason } => {
-                assert!(reason.contains("runesh_jobs"), "pointer to jobs crate: {reason}");
+            RemediationOutcome::OutOfScope {
+                kind: "custom",
+                reason,
+            } => {
+                assert!(
+                    reason.contains("runesh_jobs"),
+                    "pointer to jobs crate: {reason}"
+                );
             }
             other => panic!("expected OutOfScope custom, got {other:?}"),
         }
@@ -391,10 +397,7 @@ mod tests {
 
     #[test]
     fn file_remediation_creates_and_removes() {
-        let tmp = std::env::temp_dir().join(format!(
-            "runesh-baseline-rem-{}",
-            std::process::id()
-        ));
+        let tmp = std::env::temp_dir().join(format!("runesh-baseline-rem-{}", std::process::id()));
         let _ = std::fs::remove_file(&tmp);
 
         let r = StdRemediator::new();
