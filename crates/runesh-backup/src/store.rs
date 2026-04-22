@@ -81,6 +81,38 @@ pub async fn gc_offline<S: BackupStore + ?Sized>(store: &S) -> Result<usize, Bac
     Ok(removed)
 }
 
+/// Apply a retention policy against a [`BackupStore`]: delete manifests
+/// that fall outside the GFS buckets, then run [`gc_offline`] so now-
+/// unreferenced chunks are pruned. Returns `(manifests_removed,
+/// chunks_removed)`. Offline operation; caller must hold exclusive access.
+pub async fn apply_retention_offline<S: BackupStore + ?Sized>(
+    store: &S,
+    policy: &crate::RetentionPolicy,
+) -> Result<(usize, usize), BackupError> {
+    let names = store.list_manifests().await?;
+    let mut manifests: Vec<crate::Manifest> = Vec::with_capacity(names.len());
+    // Map manifest IDs back to store names so we can delete by name.
+    let mut id_to_name: std::collections::HashMap<String, String> =
+        std::collections::HashMap::with_capacity(names.len());
+    for name in &names {
+        let m = store.read_manifest(name).await?;
+        id_to_name.insert(m.id.clone(), name.clone());
+        manifests.push(m);
+    }
+
+    let to_delete_ids = policy.select_delete(&manifests);
+    let mut manifests_removed = 0;
+    for id in to_delete_ids {
+        if let Some(name) = id_to_name.get(&id) {
+            store.delete_manifest(name).await?;
+            manifests_removed += 1;
+        }
+    }
+
+    let chunks_removed = gc_offline(store).await?;
+    Ok((manifests_removed, chunks_removed))
+}
+
 /// In-memory implementation (for tests).
 #[derive(Debug, Default)]
 pub struct InMemoryBackupStore {

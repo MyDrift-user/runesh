@@ -84,7 +84,13 @@ pub fn chunk_data_cdc(data: &[u8], min_size: u32, avg_size: u32, max_size: u32) 
     .collect()
 }
 
-/// Retention policy.
+/// Retention policy expressed in classic GFS (grandfather-father-son)
+/// buckets. Snapshots not covered by any bucket are deleted.
+///
+/// Each `keep_*` is the number of distinct periods to retain, not the
+/// number of snapshots: `keep_daily = 7` keeps the newest snapshot from
+/// each of the last seven distinct UTC calendar days, independent of
+/// how many snapshots were taken per day.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetentionPolicy {
     pub keep_daily: u32,
@@ -92,6 +98,15 @@ pub struct RetentionPolicy {
     pub keep_monthly: u32,
     #[serde(default)]
     pub keep_yearly: u32,
+    /// Always keep the newest N snapshots regardless of period, so a fresh
+    /// backup is not eligible for pruning just because it shares a bucket
+    /// with an older entry.
+    #[serde(default = "default_keep_last")]
+    pub keep_last: u32,
+}
+
+fn default_keep_last() -> u32 {
+    1
 }
 
 impl Default for RetentionPolicy {
@@ -101,7 +116,88 @@ impl Default for RetentionPolicy {
             keep_weekly: 4,
             keep_monthly: 12,
             keep_yearly: 0,
+            keep_last: 1,
         }
+    }
+}
+
+impl RetentionPolicy {
+    /// Select which snapshot IDs to keep from the input list. The list may
+    /// be in any order; the output is a stable set of IDs.
+    ///
+    /// Each bucket is computed independently so that filling one bucket
+    /// does not crowd out another. The final keep set is the union of:
+    /// - the newest `keep_last` snapshots
+    /// - the newest snapshot for each of the `keep_daily` most recent UTC
+    ///   calendar days
+    /// - same for `keep_weekly` (ISO 8601 year-week), `keep_monthly`
+    ///   (calendar year-month), `keep_yearly` (calendar year)
+    pub fn select_keep(&self, snapshots: &[Manifest]) -> std::collections::HashSet<String> {
+        use chrono::Datelike;
+        let mut ordered: Vec<&Manifest> = snapshots.iter().collect();
+        ordered.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+        let mut keep: std::collections::HashSet<String> =
+            std::collections::HashSet::with_capacity(ordered.len());
+
+        // keep_last N newest, regardless of period.
+        for s in ordered.iter().take(self.keep_last as usize) {
+            keep.insert(s.id.clone());
+        }
+
+        // Each bucket independently picks the newest snapshot per period,
+        // up to its configured count.
+        fn fill<K, F>(
+            dst: &mut std::collections::HashSet<String>,
+            ordered: &[&Manifest],
+            limit: u32,
+            key: F,
+        ) where
+            K: Eq + std::hash::Hash,
+            F: Fn(&Manifest) -> K,
+        {
+            if limit == 0 {
+                return;
+            }
+            let mut seen: std::collections::HashSet<K> = std::collections::HashSet::new();
+            for s in ordered {
+                if seen.len() >= limit as usize {
+                    break;
+                }
+                let k = key(s);
+                if seen.insert(k) {
+                    dst.insert(s.id.clone());
+                }
+            }
+        }
+
+        fill(&mut keep, &ordered, self.keep_daily, |s| {
+            s.created_at.naive_utc().date()
+        });
+        fill(&mut keep, &ordered, self.keep_weekly, |s| {
+            let iso = s.created_at.naive_utc().date().iso_week();
+            (iso.year(), iso.week())
+        });
+        fill(&mut keep, &ordered, self.keep_monthly, |s| {
+            let d = s.created_at.naive_utc().date();
+            (d.year(), d.month())
+        });
+        fill(&mut keep, &ordered, self.keep_yearly, |s| {
+            s.created_at.naive_utc().date().year()
+        });
+
+        keep
+    }
+
+    /// Complement of [`Self::select_keep`]: snapshot IDs eligible for
+    /// deletion.
+    pub fn select_delete(&self, snapshots: &[Manifest]) -> Vec<String> {
+        let keep = self.select_keep(snapshots);
+        snapshots
+            .iter()
+            .filter(|s| !keep.contains(&s.id))
+            .map(|s| s.id.clone())
+            .collect()
     }
 }
 
@@ -266,6 +362,18 @@ impl BackupRepo {
         self.chunks.retain(|id, _| referenced.contains(id.as_str()));
         before - self.chunks.len()
     }
+
+    /// Apply a retention policy: delete snapshots that fall outside the
+    /// GFS buckets, then garbage-collect now-unreferenced chunks.
+    /// Returns `(snapshots_removed, chunks_removed)`.
+    pub fn apply_retention(&mut self, policy: &RetentionPolicy) -> (usize, usize) {
+        let to_delete = policy.select_delete(&self.snapshots);
+        let before = self.snapshots.len();
+        self.snapshots.retain(|s| !to_delete.contains(&s.id));
+        let snapshots_removed = before - self.snapshots.len();
+        let chunks_removed = self.gc();
+        (snapshots_removed, chunks_removed)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -363,6 +471,115 @@ mod tests {
     fn snapshot_not_found() {
         let repo = BackupRepo::new();
         assert!(repo.restore("nonexistent").is_err());
+    }
+
+    fn snapshot_at(id: &str, created: DateTime<Utc>) -> Manifest {
+        Manifest {
+            id: id.to_string(),
+            hostname: "h".into(),
+            paths: vec![],
+            created_at: created,
+            total_size: 0,
+            chunk_ids: vec![],
+            tags: vec![],
+        }
+    }
+
+    #[test]
+    fn retention_keeps_newest_unconditionally() {
+        use chrono::TimeZone;
+        let policy = RetentionPolicy {
+            keep_daily: 0,
+            keep_weekly: 0,
+            keep_monthly: 0,
+            keep_yearly: 0,
+            keep_last: 2,
+        };
+        let snaps = vec![
+            snapshot_at("a", Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap()),
+            snapshot_at("b", Utc.with_ymd_and_hms(2025, 6, 1, 0, 0, 0).unwrap()),
+            snapshot_at("c", Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap()),
+        ];
+        let keep = policy.select_keep(&snaps);
+        // Two newest stay, oldest is removed.
+        assert!(keep.contains("c"));
+        assert!(keep.contains("b"));
+        assert!(!keep.contains("a"));
+    }
+
+    #[test]
+    fn retention_gfs_buckets_are_independent() {
+        use chrono::TimeZone;
+        // Each bucket picks up to N snapshots, one per distinct period,
+        // newest first. With small per-bucket N and distant periods, we
+        // can verify that daily/weekly/monthly/yearly contribute the
+        // expected IDs independently.
+        let snaps = vec![
+            // Two snapshots on the same day → only the newer survives daily.
+            snapshot_at(
+                "d1_new",
+                Utc.with_ymd_and_hms(2025, 12, 31, 12, 0, 0).unwrap(),
+            ),
+            snapshot_at(
+                "d1_old",
+                Utc.with_ymd_and_hms(2025, 12, 31, 3, 0, 0).unwrap(),
+            ),
+            // Previous day.
+            snapshot_at("d2", Utc.with_ymd_and_hms(2025, 12, 30, 3, 0, 0).unwrap()),
+            // Two weeks earlier, different month-week.
+            snapshot_at(
+                "w_old",
+                Utc.with_ymd_and_hms(2025, 12, 14, 3, 0, 0).unwrap(),
+            ),
+            // Different month.
+            snapshot_at("m_old", Utc.with_ymd_and_hms(2025, 10, 1, 3, 0, 0).unwrap()),
+            // Different year.
+            snapshot_at("y_old", Utc.with_ymd_and_hms(2024, 1, 15, 3, 0, 0).unwrap()),
+        ];
+
+        let policy = RetentionPolicy {
+            keep_daily: 2,   // keeps d1_new and d2
+            keep_weekly: 2,  // keeps d1_new (current week) and w_old
+            keep_monthly: 2, // keeps d1_new (2025-12) and m_old (2025-10)
+            keep_yearly: 2,  // keeps d1_new (2025) and y_old (2024)
+            keep_last: 1,
+        };
+        let keep = policy.select_keep(&snaps);
+        assert!(keep.contains("d1_new"), "newest kept by keep_last");
+        assert!(keep.contains("d2"), "second daily bucket");
+        assert!(keep.contains("w_old"), "second weekly bucket");
+        assert!(keep.contains("m_old"), "second monthly bucket");
+        assert!(keep.contains("y_old"), "second yearly bucket");
+        // The older duplicate on d1 is not the newest for any bucket.
+        assert!(!keep.contains("d1_old"), "older same-day snapshot pruned");
+    }
+
+    #[test]
+    fn repo_apply_retention_prunes_and_gcs() {
+        use chrono::TimeZone;
+        let mut repo = BackupRepo::new();
+        let chunks_old = chunk_data(b"old-only", 4);
+        let chunks_new = chunk_data(b"new-only", 4);
+
+        let mut old = repo.create_snapshot("h", vec![], &chunks_old, vec![]);
+        old.created_at = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        // Rewrite the stored copy with the backdated timestamp.
+        if let Some(s) = repo.snapshots.iter_mut().find(|s| s.id == old.id) {
+            s.created_at = old.created_at;
+        }
+        let _new = repo.create_snapshot("h", vec![], &chunks_new, vec![]);
+
+        let policy = RetentionPolicy {
+            keep_daily: 0,
+            keep_weekly: 0,
+            keep_monthly: 0,
+            keep_yearly: 0,
+            keep_last: 1,
+        };
+        let (snaps_removed, chunks_removed) = repo.apply_retention(&policy);
+        assert_eq!(snaps_removed, 1);
+        assert!(chunks_removed > 0);
+        assert_eq!(repo.list_snapshots().len(), 1);
     }
 
     #[tokio::test]
