@@ -98,7 +98,7 @@ fn parse_binding_response(
         }
 
         if attr_type == ATTR_XOR_MAPPED_ADDRESS {
-            return parse_xor_mapped_address(&data[offset..offset + attr_len]);
+            return parse_xor_mapped_address(&data[offset..offset + attr_len], expected_txn_id);
         }
 
         if attr_type == ATTR_MAPPED_ADDRESS {
@@ -115,7 +115,7 @@ fn parse_binding_response(
 }
 
 /// Parse XOR-MAPPED-ADDRESS attribute.
-fn parse_xor_mapped_address(data: &[u8]) -> Result<SocketAddr, StunError> {
+fn parse_xor_mapped_address(data: &[u8], txn_id: &[u8; 12]) -> Result<SocketAddr, StunError> {
     if data.len() < 8 {
         return Err(StunError::ServerError(
             "XOR-MAPPED-ADDRESS too short".into(),
@@ -128,18 +128,27 @@ fn parse_xor_mapped_address(data: &[u8]) -> Result<SocketAddr, StunError> {
 
     match family {
         0x01 => {
-            // IPv4
+            // IPv4: XOR with the magic cookie only.
             let xaddr = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
             let addr = xaddr ^ MAGIC_COOKIE;
             let ip = std::net::Ipv4Addr::from(addr);
             Ok(SocketAddr::new(std::net::IpAddr::V4(ip), port))
         }
         0x02 => {
-            // IPv6
+            // IPv6: XOR with (magic_cookie || transaction_id), per RFC 5389
+            // section 15.2.
             if data.len() < 20 {
                 return Err(StunError::ServerError("IPv6 address too short".into()));
             }
-            Err(StunError::ServerError("IPv6 not yet supported".into()))
+            let mut mask = [0u8; 16];
+            mask[..4].copy_from_slice(&MAGIC_COOKIE.to_be_bytes());
+            mask[4..].copy_from_slice(txn_id);
+            let mut octets = [0u8; 16];
+            for i in 0..16 {
+                octets[i] = data[4 + i] ^ mask[i];
+            }
+            let ip = std::net::Ipv6Addr::from(octets);
+            Ok(SocketAddr::new(std::net::IpAddr::V6(ip), port))
         }
         _ => Err(StunError::ServerError(format!(
             "unknown address family: {family}"
@@ -161,16 +170,35 @@ fn parse_mapped_address(data: &[u8]) -> Result<SocketAddr, StunError> {
             let ip = std::net::Ipv4Addr::new(data[4], data[5], data[6], data[7]);
             Ok(SocketAddr::new(std::net::IpAddr::V4(ip), port))
         }
+        0x02 => {
+            if data.len() < 20 {
+                return Err(StunError::ServerError(
+                    "IPv6 MAPPED-ADDRESS too short".into(),
+                ));
+            }
+            let mut octets = [0u8; 16];
+            octets.copy_from_slice(&data[4..20]);
+            let ip = std::net::Ipv6Addr::from(octets);
+            Ok(SocketAddr::new(std::net::IpAddr::V6(ip), port))
+        }
         _ => Err(StunError::ServerError(format!(
             "unknown address family: {family}"
         ))),
     }
 }
 
+/// Retransmit schedule from RFC 5389 section 7.2.1. Starting RTO 500 ms,
+/// doubled up to `Rc = 7` retransmits, capped at 1.6 s. The caller's
+/// `timeout` is the overall budget and bounds every wait.
+const RETRANSMIT_INITIAL_MS: u64 = 500;
+const RETRANSMIT_MAX_MS: u64 = 1600;
+const RETRANSMIT_MAX_COUNT: u32 = 7;
+
 /// Perform a STUN binding request to discover the public address.
 ///
 /// `server` should be a STUN server address like "stun.l.google.com:19302".
-/// `timeout` is the maximum time to wait for a response.
+/// `timeout` is the total time budget for the whole probe; within it the
+/// client retransmits per RFC 5389 (500 ms, 1 s, 1.6 s, ...).
 pub async fn stun_binding_request(
     server: &str,
     timeout: Duration,
@@ -181,50 +209,75 @@ pub async fn stun_binding_request(
         .next()
         .ok_or_else(|| StunError::ServerError("no address for STUN server".into()))?;
 
-    let socket = UdpSocket::bind("0.0.0.0:0").await?;
+    // Match the address family of the server so we can query IPv6 STUN
+    // servers and get IPv6 reflexive addresses.
+    let bind_addr = match server_addr {
+        SocketAddr::V4(_) => "0.0.0.0:0",
+        SocketAddr::V6(_) => "[::]:0",
+    };
+    let socket = UdpSocket::bind(bind_addr).await?;
     let local_addr = socket.local_addr()?;
 
     let (request, txn_id) = build_binding_request();
     let start = Instant::now();
-
-    // Send the binding request
-    socket.send_to(&request, server_addr).await?;
-
-    // Wait for response with overall timeout. RFC 5389 Section 10.3 requires
-    // discarding any response whose source address does not match the server
-    // we sent the request to. Keep receiving (ignoring mismatches) until
-    // either the correct server responds or the overall timeout elapses.
-    let mut buf = [0u8; 1024];
     let deadline = tokio::time::Instant::now() + timeout;
+
+    // Initial send.
+    socket.send_to(&request, server_addr).await?;
+    let mut next_rto_ms = RETRANSMIT_INITIAL_MS;
+    let mut next_retransmit = tokio::time::Instant::now() + Duration::from_millis(next_rto_ms);
+    let mut retransmit_count: u32 = 0;
+
+    // Main loop: alternate between recv and the retransmit timer.
+    let mut buf = [0u8; 1024];
     let (n, rtt) = loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
             return Err(StunError::Timeout);
         }
-        let (n, peer) = tokio::time::timeout(remaining, socket.recv_from(&mut buf))
-            .await
-            .map_err(|_| StunError::Timeout)?
-            .map_err(StunError::Io)?;
+        let wait_until = next_retransmit.min(deadline);
+        let remaining = wait_until.saturating_duration_since(now);
 
-        if peer != server_addr {
-            tracing::debug!(
-                expected = %server_addr,
-                got = %peer,
-                "dropping STUN response from unexpected source"
-            );
-            continue;
+        match tokio::time::timeout(remaining, socket.recv_from(&mut buf)).await {
+            Ok(Ok((n, peer))) => {
+                if peer != server_addr {
+                    tracing::debug!(
+                        expected = %server_addr,
+                        got = %peer,
+                        "dropping STUN response from unexpected source"
+                    );
+                    continue;
+                }
+                break (n, start.elapsed());
+            }
+            Ok(Err(e)) => return Err(StunError::Io(e)),
+            Err(_) => {
+                // Timed out waiting; decide whether to retransmit or fail.
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(StunError::Timeout);
+                }
+                if retransmit_count >= RETRANSMIT_MAX_COUNT {
+                    // Budget remains but RFC schedule is exhausted; just
+                    // wait out the rest of the deadline for a late reply.
+                    next_retransmit = deadline;
+                    continue;
+                }
+                retransmit_count += 1;
+                next_rto_ms = (next_rto_ms.saturating_mul(2)).min(RETRANSMIT_MAX_MS);
+                tracing::debug!(attempt = retransmit_count, next_rto_ms, "STUN retransmit");
+                socket.send_to(&request, server_addr).await?;
+                next_retransmit = tokio::time::Instant::now() + Duration::from_millis(next_rto_ms);
+            }
         }
-        break (n, start.elapsed());
     };
 
     let mapped_address = parse_binding_response(&buf[..n], &txn_id)?;
 
-    // Determine NAT type based on whether mapped address matches local
+    // Determine NAT type based on whether mapped address matches local.
     let nat_type = if mapped_address.ip() == local_addr.ip() {
         NatType::None
     } else {
-        // Single request can only distinguish None vs "some NAT"
-        // Full NAT type detection requires multiple servers (RFC 3489)
+        // Single-server probing can only distinguish "no NAT" from "some NAT".
         NatType::Unknown
     };
 
@@ -275,12 +328,40 @@ mod tests {
             0x37, 0x3C, // XOR port (5678 ^ 0x2112)
             0x20, 0x10, 0xA7, 0x46, // XOR address
         ];
-        let addr = parse_xor_mapped_address(&data).unwrap();
+        let txn_id = [0u8; 12];
+        let addr = parse_xor_mapped_address(&data, &txn_id).unwrap();
         assert_eq!(
             addr.ip(),
             std::net::IpAddr::V4(std::net::Ipv4Addr::new(1, 2, 3, 4))
         );
         assert_eq!(addr.port(), 5678);
+    }
+
+    #[test]
+    fn parse_xor_mapped_ipv6_uses_full_mask() {
+        use std::net::Ipv6Addr;
+        // Build a deterministic txn_id and an IPv6 mapped address.
+        let txn_id: [u8; 12] = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
+        ];
+        let ip: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let port: u16 = 12345;
+        let mut mask = [0u8; 16];
+        mask[..4].copy_from_slice(&MAGIC_COOKIE.to_be_bytes());
+        mask[4..].copy_from_slice(&txn_id);
+        let octets = ip.octets();
+        let mut xored = [0u8; 16];
+        for i in 0..16 {
+            xored[i] = octets[i] ^ mask[i];
+        }
+        let xport = port ^ ((MAGIC_COOKIE >> 16) as u16);
+        let mut data = vec![0u8, 0x02]; // reserved + family (IPv6)
+        data.extend_from_slice(&xport.to_be_bytes());
+        data.extend_from_slice(&xored);
+
+        let addr = parse_xor_mapped_address(&data, &txn_id).unwrap();
+        assert_eq!(addr.ip(), std::net::IpAddr::V6(ip));
+        assert_eq!(addr.port(), port);
     }
 
     #[test]
