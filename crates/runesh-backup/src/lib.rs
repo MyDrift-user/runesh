@@ -516,12 +516,21 @@ mod tests {
         // expected IDs independently.
         let snaps = vec![
             // Two snapshots on the same day → only the newer survives daily.
-            snapshot_at("d1_new", Utc.with_ymd_and_hms(2025, 12, 31, 12, 0, 0).unwrap()),
-            snapshot_at("d1_old", Utc.with_ymd_and_hms(2025, 12, 31, 3, 0, 0).unwrap()),
+            snapshot_at(
+                "d1_new",
+                Utc.with_ymd_and_hms(2025, 12, 31, 12, 0, 0).unwrap(),
+            ),
+            snapshot_at(
+                "d1_old",
+                Utc.with_ymd_and_hms(2025, 12, 31, 3, 0, 0).unwrap(),
+            ),
             // Previous day.
             snapshot_at("d2", Utc.with_ymd_and_hms(2025, 12, 30, 3, 0, 0).unwrap()),
             // Two weeks earlier, different month-week.
-            snapshot_at("w_old", Utc.with_ymd_and_hms(2025, 12, 14, 3, 0, 0).unwrap()),
+            snapshot_at(
+                "w_old",
+                Utc.with_ymd_and_hms(2025, 12, 14, 3, 0, 0).unwrap(),
+            ),
             // Different month.
             snapshot_at("m_old", Utc.with_ymd_and_hms(2025, 10, 1, 3, 0, 0).unwrap()),
             // Different year.
