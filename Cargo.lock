@@ -6137,7 +6137,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-acl"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "ipnet",
  "serde",
@@ -6148,7 +6148,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-appliance"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6163,7 +6163,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-asset"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "chrono",
  "serde",
@@ -6174,7 +6174,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-audit"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6190,7 +6190,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-auth"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -6218,7 +6218,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-backup"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-recursion",
  "async-trait",
@@ -6237,7 +6237,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-baseline"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "semver",
  "serde",
@@ -6249,7 +6249,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-cli"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "clap",
  "console 0.16.3",
@@ -6263,7 +6263,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-coord"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6280,7 +6280,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-core"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "axum",
  "bytes",
@@ -6306,7 +6306,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-desktop"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "arboard",
  "ashpd",
@@ -6340,7 +6340,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-dns"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "hickory-resolver",
  "serde",
@@ -6352,7 +6352,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-docker"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "bollard",
@@ -6368,7 +6368,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-flow"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "chrono",
  "ipnet",
@@ -6381,7 +6381,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-hyperv"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6396,7 +6396,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-inventory"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "axum",
  "chrono",
@@ -6415,7 +6415,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-ipam"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "ipnet",
  "serde",
@@ -6425,7 +6425,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-jobs"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "rand 0.8.5",
  "serde",
@@ -6437,7 +6437,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-license"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "chrono",
  "serde",
@@ -6447,7 +6447,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-mdm"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6461,7 +6461,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-mesh"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "base64 0.22.1",
  "boringtun",
@@ -6479,7 +6479,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-monitor"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6500,7 +6500,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-notify"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "hex",
@@ -6520,7 +6520,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-patch"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -6532,7 +6532,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-pkg"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -6544,7 +6544,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-proxmox"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6560,7 +6560,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-proxy"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6575,7 +6575,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-relay"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -6593,7 +6593,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-remote"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -6617,7 +6617,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-stun"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "chrono",
  "rand 0.8.5",
@@ -6630,7 +6630,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-tauri"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "dirs",
  "serde",
@@ -6647,7 +6647,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-telemetry"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "http",
  "sentry",
@@ -6661,7 +6661,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-tun"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "bytes",
  "libc",
@@ -6674,7 +6674,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-vault"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -6695,7 +6695,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-vfs"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -6716,7 +6716,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-vmware"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6732,7 +6732,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-winget"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -6748,7 +6748,7 @@ dependencies = [
 
 [[package]]
 name = "runesh-workload"
-version = "0.18.1"
+version = "0.18.2"
 dependencies = [
  "async-trait",
  "serde",
