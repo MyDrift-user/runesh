@@ -67,13 +67,16 @@ pub trait RemoteAuth: Send + Sync + 'static {
     fn authorize(&self, principal: &Principal, op: &Operation) -> Result<(), AuthError>;
 }
 
-/// Allow every request from any token. **Do not use outside tests.** The
-/// loud name is intentional — consumer code that accidentally wires this
-/// up in production should jump out in code review.
-pub struct AllowAllAuth;
+/// Allow every request from any token. Only available under `cfg(test)` or
+/// with the explicit `insecure-test-auth` cargo feature, so it cannot be
+/// wired up by accident from a normal consumer dependency. Never enable
+/// this feature on a shipped binary.
+#[cfg(any(test, feature = "insecure-test-auth"))]
+pub struct InsecureAllowAllAuth;
 
+#[cfg(any(test, feature = "insecure-test-auth"))]
 #[async_trait]
-impl RemoteAuth for AllowAllAuth {
+impl RemoteAuth for InsecureAllowAllAuth {
     async fn authenticate(&self, token: &str) -> Result<Principal, AuthError> {
         Ok(Principal {
             subject: format!("allow-all:{}", &token[..token.len().min(8)]),
