@@ -693,7 +693,12 @@ mod tests {
             }
         }
 
-        let server = RelayServer::new(RelayConfig::default()).with_acl(DenyFirstByte(0xAA));
+        let server = RelayServer::new(RelayConfig::new(
+            "127.0.0.1:0",
+            [0u8; KEY_LEN],
+            RelayAuthConfig::insecure_unauthenticated(),
+        ))
+        .with_acl(DenyFirstByte(0xAA));
         assert!(server.acl.allow(&[1u8; KEY_LEN], &[1u8; KEY_LEN]));
         assert!(!server.acl.allow(&[1u8; KEY_LEN], &[0xAA; KEY_LEN]));
         assert_eq!(server.acl_dropped_count(), 0);
