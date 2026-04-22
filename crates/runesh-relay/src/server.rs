@@ -68,7 +68,9 @@ impl RelayAuthConfig {
     /// Unauthenticated mode. Only safe on a closed test network: any peer
     /// that can reach the TCP port can relay through this server.
     pub fn insecure_unauthenticated() -> Self {
-        Self { mode: AuthMode::None }
+        Self {
+            mode: AuthMode::None,
+        }
     }
 
     /// Clients must echo the pre-shared secret in their `ClientInfo` frame.
@@ -115,7 +117,11 @@ impl RelayConfig {
     /// sane defaults (max 10k clients, 256 buffered frames per client,
     /// 1000 packets-per-second per sender). Mutate fields directly if
     /// different values are needed.
-    pub fn new(bind_addr: impl Into<String>, server_key: [u8; KEY_LEN], auth: RelayAuthConfig) -> Self {
+    pub fn new(
+        bind_addr: impl Into<String>,
+        server_key: [u8; KEY_LEN],
+        auth: RelayAuthConfig,
+    ) -> Self {
         Self {
             bind_addr: bind_addr.into(),
             server_key,

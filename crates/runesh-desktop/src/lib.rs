@@ -44,11 +44,11 @@ pub mod transport;
 #[cfg(feature = "axum")]
 pub mod handlers;
 
+#[cfg(any(test, feature = "insecure-test-auth"))]
+pub use auth::InsecureAllowAllAuth;
 pub use auth::{
     AlwaysDeny, AuthError, ConsentBroker, DenyAllAuth, DesktopAuth, Operation, Principal,
 };
-#[cfg(any(test, feature = "insecure-test-auth"))]
-pub use auth::InsecureAllowAllAuth;
 pub use error::DesktopError;
 pub use session::DesktopConfig;
 
