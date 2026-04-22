@@ -1,6 +1,13 @@
 #![deny(unsafe_code)]
 //! Mobile device management: enrollment, configuration profiles, remote actions.
 
+pub mod attestation;
+
+pub use attestation::{
+    ANDROID_KEY_ATTESTATION_OID, AttestationError, KeyDescription, SecurityLevel,
+    parse_key_description,
+};
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use chrono::{DateTime, Utc};
