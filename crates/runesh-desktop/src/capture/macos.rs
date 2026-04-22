@@ -5,6 +5,49 @@ use core_graphics::display::{CGDisplay, CGPoint, CGRect, CGSize};
 use super::{CapturedFrame, ScreenCapture};
 use crate::error::DesktopError;
 
+/// Query `CGSessionCopyCurrentDictionary` for the
+/// `CGSSessionScreenIsLocked` key. Returns true if the user's session is
+/// locked. Fails closed (returns false) if the API is unavailable; the
+/// caller should treat that as "not locked" rather than proceed.
+fn is_session_locked() -> bool {
+    use core_foundation::base::{CFType, CFTypeRef, TCFType};
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::{CFString, CFStringRef};
+
+    #[allow(unsafe_code)]
+    unsafe {
+        // The symbol is part of the public CoreGraphics interface. Declare
+        // it here rather than pulling a new crate just for one function.
+        #[allow(improper_ctypes)]
+        unsafe extern "C" {
+            fn CGSessionCopyCurrentDictionary() -> CFTypeRef;
+        }
+        let raw = CGSessionCopyCurrentDictionary();
+        if raw.is_null() {
+            return false;
+        }
+        let dict: CFDictionary<CFString, CFType> =
+            CFDictionary::wrap_under_create_rule(raw as *const _);
+        let key = CFString::new("CGSSessionScreenIsLocked");
+        match dict.find(&key) {
+            Some(v) => {
+                // Value is a CFBoolean or CFNumber depending on macOS version.
+                // core-foundation's `downcast` returns `Option<T>`, not `Result`.
+                if let Some(b) = v.downcast::<CFBoolean>() {
+                    bool::from(b)
+                } else if let Some(n) = v.downcast::<CFNumber>() {
+                    n.to_i64().map(|x| x != 0).unwrap_or(false)
+                } else {
+                    false
+                }
+            }
+            None => false,
+        }
+    }
+}
+
 pub struct CgCapturer {
     display_id: u32,
     width: u32,
@@ -33,6 +76,11 @@ impl CgCapturer {
 
 impl ScreenCapture for CgCapturer {
     fn capture_frame(&mut self) -> Result<CapturedFrame, DesktopError> {
+        if is_session_locked() {
+            return Err(DesktopError::Capture(
+                "macOS user session is locked; capture suppressed".into(),
+            ));
+        }
         let display = CGDisplay::new(self.display_id);
 
         // Capture the display
