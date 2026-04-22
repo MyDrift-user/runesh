@@ -17,11 +17,11 @@
 //! use std::sync::Arc;
 //! use axum::{Router, routing::get};
 //! use runesh_desktop::{DesktopConfig, handlers::{DesktopState, ws_desktop_handler}};
-//! use runesh_desktop::auth::{AllowAllAuth, AlwaysDeny};
+//! use runesh_desktop::auth::{DenyAllAuth, AlwaysDeny};
 //!
 //! let state = DesktopState::new(
 //!     DesktopConfig::default(),
-//!     Arc::new(AllowAllAuth),
+//!     Arc::new(DenyAllAuth), // replace with your real auth backend
 //!     Arc::new(AlwaysDeny),
 //! );
 //! let app = Router::new()
@@ -44,9 +44,10 @@ pub mod transport;
 #[cfg(feature = "axum")]
 pub mod handlers;
 
+#[cfg(any(test, feature = "insecure-test-auth"))]
+pub use auth::InsecureAllowAllAuth;
 pub use auth::{
-    AllowAllAuth, AlwaysDeny, AuthError, ConsentBroker, DenyAllAuth, DesktopAuth, Operation,
-    Principal,
+    AlwaysDeny, AuthError, ConsentBroker, DenyAllAuth, DesktopAuth, Operation, Principal,
 };
 pub use error::DesktopError;
 pub use session::DesktopConfig;
