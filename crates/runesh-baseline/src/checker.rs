@@ -370,8 +370,7 @@ fn firewall_rule_present(rule: &str) -> Option<bool> {
         return None;
     }
     if !rule.chars().all(|c| {
-        c.is_ascii_alphanumeric()
-            || matches!(c, ' ' | '-' | '_' | '.' | ':' | '/' | '(' | ')')
+        c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | ':' | '/' | '(' | ')')
     }) {
         return None;
     }
@@ -705,7 +704,9 @@ mod tests {
     fn custom_check_rejects_null_byte() {
         let outcome = run_custom_check("echo hi\0; exit 1");
         match outcome {
-            CustomCheckOutcome::InvalidCommand(reason) => assert_eq!(reason, "null byte in command"),
+            CustomCheckOutcome::InvalidCommand(reason) => {
+                assert_eq!(reason, "null byte in command")
+            }
             _ => panic!("expected InvalidCommand"),
         }
     }
