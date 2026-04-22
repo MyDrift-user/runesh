@@ -13,6 +13,8 @@ axum = ["dep:axum", "dep:futures-util"]
 cli = ["dep:portable-pty"]
 fs = []
 watch = ["dep:notify"]
+# Exposes `InsecureAllowAllAuth`. Never enable this on a shipped binary.
+insecure-test-auth = []
 
 [dependencies]
 tokio = { workspace = true }

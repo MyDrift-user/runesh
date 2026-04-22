@@ -32,6 +32,8 @@ clipboard = ["dep:arboard"]
 input = []
 # Real Wayland capture via xdg-desktop-portal + PipeWire (Linux only, also gated at build time).
 wayland = ["dep:ashpd", "dep:pipewire", "dep:libc"]
+# Exposes `InsecureAllowAllAuth`. Never enable this on a shipped binary.
+insecure-test-auth = []
 
 [dependencies]
 tokio = { workspace = true }
