@@ -442,6 +442,76 @@ impl Vault {
         }
         Ok(count)
     }
+
+    /// Re-encrypt every secret under `new_key` and replace the active
+    /// cipher. Each secret gets a fresh 96-bit random nonce and a fresh
+    /// integrity tag. All `rotated_at` fields are advanced to "now".
+    ///
+    /// The rotation is prepared in a scratch map and only swapped in on
+    /// full success, so a failure mid-way (for example a corrupt entry
+    /// that fails to decrypt under the current key) leaves the vault
+    /// unchanged. `created_at` and `expires_at` are preserved.
+    pub fn rotate_master_key(&mut self, new_key: &[u8; 32]) -> Result<(), VaultError> {
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let new_cipher_key = Key::from_slice(new_key);
+        let new_cipher = ChaCha20Poly1305::new(new_cipher_key);
+        let new_integrity_key = derive_integrity_key(new_key);
+        let now = Utc::now();
+
+        let mut fresh: std::collections::HashMap<String, SealedSecret> =
+            std::collections::HashMap::with_capacity(self.secrets.len());
+
+        for (id, sealed) in &self.secrets {
+            // Decrypt under the current key. Any failure here aborts the
+            // rotation so the vault is not left half-rewrapped.
+            let ciphertext = b64
+                .decode(&sealed.ciphertext)
+                .map_err(|_| VaultError::CorruptData)?;
+            let nonce_bytes = b64
+                .decode(&sealed.nonce)
+                .map_err(|_| VaultError::CorruptData)?;
+            let nonce_arr: [u8; 12] = nonce_bytes
+                .try_into()
+                .map_err(|_| VaultError::CorruptData)?;
+            let old_nonce = Nonce::from(nonce_arr);
+            let plaintext = self
+                .cipher
+                .decrypt(&old_nonce, ciphertext.as_ref())
+                .map_err(|_| VaultError::DecryptionFailed)?;
+
+            // Re-encrypt under the new key with a fresh nonce.
+            let mut new_nonce_arr = [0u8; 12];
+            OsRng.fill_bytes(&mut new_nonce_arr);
+            let new_nonce = Nonce::from(new_nonce_arr);
+            let new_ct = new_cipher
+                .encrypt(&new_nonce, plaintext.as_ref())
+                .map_err(|_| VaultError::EncryptionFailed)?;
+            let new_ct_b64 = b64.encode(&new_ct);
+            let new_nonce_b64 = b64.encode(new_nonce_arr);
+            let new_tag =
+                integrity_tag(&new_integrity_key, id, &new_nonce_b64, &new_ct_b64);
+
+            fresh.insert(
+                id.clone(),
+                SealedSecret {
+                    id: sealed.id.clone(),
+                    ciphertext: new_ct_b64,
+                    nonce: new_nonce_b64,
+                    integrity_tag: new_tag,
+                    created_at: sealed.created_at,
+                    rotated_at: Some(now),
+                    expires_at: sealed.expires_at,
+                    secret_type: sealed.secret_type.clone(),
+                },
+            );
+        }
+
+        // All secrets re-encrypted successfully; commit.
+        self.cipher = new_cipher;
+        self.integrity_key = new_integrity_key;
+        self.secrets = fresh;
+        Ok(())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -466,6 +536,50 @@ pub enum VaultError {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn rotate_master_key_rewraps_all_secrets() {
+        let (mut vault, old_key) = Vault::new();
+        vault.put("a", b"value-a", "generic", None).unwrap();
+        vault.put("b", b"value-b", "generic", None).unwrap();
+        vault
+            .put("c", b"value-c", "generic", Some(Utc::now() + chrono::Duration::days(1)))
+            .unwrap();
+
+        let mut new_key = [0u8; 32];
+        OsRng.fill_bytes(&mut new_key);
+        assert_ne!(old_key.expose_secret(), &new_key);
+
+        let old_sealed_a = vault.secrets["a"].clone();
+        vault.rotate_master_key(&new_key).unwrap();
+
+        // Secrets still decrypt after rotation.
+        assert_eq!(vault.get("a").unwrap(), b"value-a");
+        assert_eq!(vault.get("b").unwrap(), b"value-b");
+        assert_eq!(vault.get("c").unwrap(), b"value-c");
+
+        // Rewrapped: nonce, ciphertext and tag all change.
+        let new_sealed_a = &vault.secrets["a"];
+        assert_ne!(old_sealed_a.nonce, new_sealed_a.nonce);
+        assert_ne!(old_sealed_a.ciphertext, new_sealed_a.ciphertext);
+        assert_ne!(old_sealed_a.integrity_tag, new_sealed_a.integrity_tag);
+        assert!(new_sealed_a.rotated_at.is_some());
+
+        // Opening a vault with the OLD key and importing the rewrapped
+        // export must fail integrity check: the new tag is keyed to the
+        // new master key.
+        let mut stale = Vault::open(old_key.expose_secret());
+        let json = vault.export().unwrap();
+        assert!(matches!(
+            stale.import(&json),
+            Err(VaultError::IntegrityCheckFailed(_))
+        ));
+
+        // Opening with the NEW key works.
+        let mut reopened = Vault::open(&new_key);
+        reopened.import(&vault.export().unwrap()).unwrap();
+        assert_eq!(reopened.get("a").unwrap(), b"value-a");
+    }
 
     #[test]
     fn put_and_get() {
