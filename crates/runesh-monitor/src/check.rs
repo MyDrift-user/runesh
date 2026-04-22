@@ -325,8 +325,10 @@ async fn ping_unix(host: &str, timeout: Duration) -> (CheckStatus, String) {
     // milliseconds. We use tokio::time::timeout to bound the whole process
     // and omit -W, which is the portable move.
     let timeout_secs = timeout.as_secs().max(1);
-    let host = host.to_string();
+    let host_owned = host.to_string();
+    let host_for_async = host_owned.clone();
     let fut = async move {
+        let host = host_for_async;
         let out = tokio::process::Command::new("ping")
             .args(["-c", "1", "-n", &host])
             .kill_on_drop(true)
@@ -360,7 +362,7 @@ async fn ping_unix(host: &str, timeout: Duration) -> (CheckStatus, String) {
 
     match tokio::time::timeout(Duration::from_secs(timeout_secs + 1), fut).await {
         Ok(result) => result,
-        Err(_) => (CheckStatus::Critical, format!("ping {host} timeout")),
+        Err(_) => (CheckStatus::Critical, format!("ping {host_owned} timeout")),
     }
 }
 
