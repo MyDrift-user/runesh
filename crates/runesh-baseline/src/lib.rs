@@ -7,9 +7,11 @@
 
 pub mod checker;
 pub mod collector;
+pub mod remediator;
 
 pub use checker::{SystemState, check_compliance};
 pub use collector::collect_system_state;
+pub use remediator::{RemediationOutcome, Remediator, StdRemediator};
 
 use std::collections::{HashMap, HashSet};
 
