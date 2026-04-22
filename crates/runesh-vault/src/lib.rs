@@ -488,8 +488,7 @@ impl Vault {
                 .map_err(|_| VaultError::EncryptionFailed)?;
             let new_ct_b64 = b64.encode(&new_ct);
             let new_nonce_b64 = b64.encode(new_nonce_arr);
-            let new_tag =
-                integrity_tag(&new_integrity_key, id, &new_nonce_b64, &new_ct_b64);
+            let new_tag = integrity_tag(&new_integrity_key, id, &new_nonce_b64, &new_ct_b64);
 
             fresh.insert(
                 id.clone(),
@@ -543,7 +542,12 @@ mod tests {
         vault.put("a", b"value-a", "generic", None).unwrap();
         vault.put("b", b"value-b", "generic", None).unwrap();
         vault
-            .put("c", b"value-c", "generic", Some(Utc::now() + chrono::Duration::days(1)))
+            .put(
+                "c",
+                b"value-c",
+                "generic",
+                Some(Utc::now() + chrono::Duration::days(1)),
+            )
             .unwrap();
 
         let mut new_key = [0u8; 32];
