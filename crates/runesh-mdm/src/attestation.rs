@@ -180,10 +180,16 @@ fn read_enum<'a, R: Reader<'a>>(reader: &mut R) -> Result<i64, der::Error> {
 fn read_raw_sequence<'a, R: Reader<'a>>(reader: &mut R) -> Result<Vec<u8>, der::Error> {
     let header = der::Header::decode(reader)?;
     if header.tag != Tag::Sequence {
-        return Err(reader.error(der::ErrorKind::TagUnexpected {
-            expected: Some(Tag::Sequence),
-            actual: header.tag,
-        }.into()).kind().into());
+        return Err(reader
+            .error(
+                der::ErrorKind::TagUnexpected {
+                    expected: Some(Tag::Sequence),
+                    actual: header.tag,
+                }
+                .into(),
+            )
+            .kind()
+            .into());
     }
     let body = reader.read_slice(header.length)?;
     // Re-emit the header so the returned bytes are a self-contained DER
@@ -272,7 +278,10 @@ mod tests {
         let bytes = sample_key_description();
         let kd = parse_key_description(&bytes).expect("parse");
         assert_eq!(kd.attestation_version, 300);
-        assert_eq!(kd.attestation_security_level, SecurityLevel::TrustedEnvironment);
+        assert_eq!(
+            kd.attestation_security_level,
+            SecurityLevel::TrustedEnvironment
+        );
         assert_eq!(kd.keymint_version, 300);
         assert_eq!(kd.keymint_security_level, SecurityLevel::TrustedEnvironment);
         assert_eq!(kd.attestation_challenge, vec![0xDE, 0xAD, 0xBE, 0xEF]);

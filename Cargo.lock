@@ -6400,6 +6400,7 @@ version = "0.16.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "der",
  "ed25519-dalek",
  "serde",
  "serde_json",
