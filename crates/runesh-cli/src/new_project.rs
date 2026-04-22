@@ -231,6 +231,16 @@ pub fn run(
         WEB_PROVIDERS,
     )
     .map_err(|e| format!("write providers.tsx: {e}"))?;
+    fs::write(
+        web_src.join("components").join("app-shell.tsx"),
+        generate_web_app_shell(&name),
+    )
+    .map_err(|e| format!("write app-shell.tsx: {e}"))?;
+    fs::write(
+        web_src.join("components").join("page-header.tsx"),
+        WEB_PAGE_HEADER,
+    )
+    .map_err(|e| format!("write page-header.tsx: {e}"))?;
     fs::write(web_src.join("lib").join("api.ts"), WEB_API_CLIENT)
         .map_err(|e| format!("write api.ts: {e}"))?;
 
@@ -863,42 +873,71 @@ const WEB_GLOBALS_CSS: &str = r#"@import "tailwindcss";
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.985 0.002 265);
+  --foreground: oklch(0.145 0.012 265);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0.012 265);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0.012 265);
+  --primary: oklch(0.488 0.217 264);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --border: oklch(0.922 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: oklch(0.145 0.012 265);
   --foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
+  --card: oklch(0.205 0.014 265);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0.014 265);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.6 0.2 264);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.269 0.01 265);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0.01 265);
   --muted-foreground: oklch(0.708 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  --accent: oklch(0.269 0.01 265);
+  --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
   color-scheme: dark;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-border: var(--border);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
 }
 "#;
 
@@ -906,6 +945,7 @@ fn generate_web_layout(name: &str) -> String {
     let md = crate::validate::markdown_escape(name);
     format!(
         r#"import type {{ Metadata }} from "next";
+import {{ AppShell }} from "@/components/app-shell";
 import {{ Providers }} from "@/components/providers";
 import "./globals.css";
 
@@ -918,7 +958,9 @@ export default function RootLayout({{ children }}: {{ children: React.ReactNode 
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen bg-background text-foreground antialiased">
-        <Providers>{{children}}</Providers>
+        <Providers>
+          <AppShell>{{children}}</AppShell>
+        </Providers>
       </body>
     </html>
   );
@@ -927,40 +969,176 @@ export default function RootLayout({{ children }}: {{ children: React.ReactNode 
     )
 }
 
-fn generate_web_page(name: &str) -> String {
+fn generate_web_app_shell(name: &str) -> String {
     let md = crate::validate::markdown_escape(name);
     format!(
         r#""use client";
 
-import {{ useQuery }} from "@tanstack/react-query";
-import {{ api }} from "@/lib/api";
+import Link from "next/link";
+import {{ usePathname }} from "next/navigation";
+import {{ Gauge, LucideIcon, Search, Sparkles }} from "lucide-react";
 
-export default function HomePage() {{
-  const health = useQuery({{
-    queryKey: ["readyz"],
-    queryFn: () => api.get("/readyz").then((r) => r.data),
-    refetchInterval: 10_000,
-  }});
+type NavItem = {{ title: string; href: string; icon: LucideIcon }};
+
+const NAV: NavItem[] = [
+  {{ title: "Overview", href: "/", icon: Gauge }},
+];
+
+function isActive(pathname: string, href: string): boolean {{
+  const normalized = pathname.replace(/\/$/, "") || "/";
+  if (href === "/") return normalized === "/";
+  return normalized === href || normalized.startsWith(href + "/");
+}}
+
+export function AppShell({{ children }}: {{ children: React.ReactNode }}) {{
+  const pathname = usePathname();
 
   return (
-    <main className="mx-auto max-w-xl p-8 space-y-4">
-      <h1 className="text-3xl font-semibold">{md}</h1>
-      <p className="text-muted-foreground">
-        Static SPA served by the Rust backend on the same port.
-        <code className="mx-1 rounded bg-muted px-1">/api/*</code>
-        goes to the server, everything else to this page.
-      </p>
-      <div className="rounded-lg border p-4">
-        <div className="text-sm text-muted-foreground">Server health</div>
-        <pre className="mt-2 overflow-x-auto text-sm">
-{{health.isLoading ? "loading..." : JSON.stringify(health.data, null, 2)}}
-        </pre>
+    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+      <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-card">
+        <div className="flex items-center gap-2 px-4 py-4 border-b border-border">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Sparkles className="h-4 w-4" />
+          </div>
+          <span className="text-base font-semibold tracking-tight">{md}</span>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto p-2">
+          {{NAV.map((item) => {{
+            const Icon = item.icon;
+            const active = isActive(pathname, item.href);
+            return (
+              <Link
+                key={{item.href}}
+                href={{item.href}}
+                data-active={{active || undefined}}
+                className="group flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[active=true]:bg-primary/10 data-[active=true]:text-foreground"
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span>{{item.title}}</span>
+              </Link>
+            );
+          }})}}
+        </nav>
+
+        <div className="border-t border-border p-3 text-xs text-muted-foreground">
+          <div className="truncate">{md}</div>
+          <div className="truncate opacity-60">Built on RUNESH</div>
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-card/60 px-4 backdrop-blur">
+          <div className="flex h-9 max-w-md flex-1 items-center gap-2 rounded-md border border-border bg-background/70 px-3 text-sm text-muted-foreground">
+            <Search className="h-4 w-4" />
+            <span className="truncate">Search...</span>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-auto p-4 md:p-6">{{children}}</main>
       </div>
-    </main>
+    </div>
   );
 }}
 "#
     )
+}
+
+const WEB_PAGE_HEADER: &str = r#"type PageHeaderProps = {
+  title: string;
+  description?: string;
+  actions?: React.ReactNode;
+};
+
+export function PageHeader({ title, description, actions }: PageHeaderProps) {
+  return (
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        {description ? (
+          <p className="text-sm text-muted-foreground">{description}</p>
+        ) : null}
+      </div>
+      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+    </div>
+  );
+}
+"#;
+
+fn generate_web_page(_name: &str) -> String {
+    r#""use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { Database as DatabaseIcon, LucideIcon, Server } from "lucide-react";
+
+import { PageHeader } from "@/components/page-header";
+import { api } from "@/lib/api";
+
+type Readyz = { db?: boolean };
+
+export default function OverviewPage() {
+  const health = useQuery<Readyz>({
+    queryKey: ["readyz"],
+    queryFn: () => api.get<Readyz>("/readyz").then((r) => r.data),
+    refetchInterval: 10_000,
+  });
+
+  return (
+    <>
+      <PageHeader
+        title="Overview"
+        description="Live status of the control plane."
+      />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Stat
+          icon={DatabaseIcon}
+          label="Database"
+          value={
+            health.isLoading
+              ? "checking..."
+              : health.data?.db
+                ? "healthy"
+                : "unreachable"
+          }
+          tone={health.data?.db ? "good" : health.isLoading ? "muted" : "bad"}
+        />
+        <Stat icon={Server} label="Server" value="OK" tone="good" />
+      </div>
+    </>
+  );
+}
+
+function Stat({
+  icon: Icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  tone?: "good" | "bad" | "muted";
+}) {
+  const toneClass =
+    tone === "good"
+      ? "text-emerald-500"
+      : tone === "bad"
+        ? "text-destructive"
+        : "text-muted-foreground";
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Icon className="h-4 w-4" />
+        {label}
+      </div>
+      <div className={`mt-2 text-2xl font-semibold tracking-tight ${toneClass}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+"#
+    .to_string()
 }
 
 const WEB_PROVIDERS: &str = r#""use client";
