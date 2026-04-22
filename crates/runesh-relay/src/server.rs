@@ -218,10 +218,7 @@ impl RelayServer {
     /// The caller builds a [`tokio_rustls::TlsAcceptor`] with whatever
     /// certificate, client-auth, and protocol-version policy they need.
     #[cfg(feature = "tls")]
-    pub async fn run_tls(
-        &self,
-        acceptor: tokio_rustls::TlsAcceptor,
-    ) -> Result<(), RelayError> {
+    pub async fn run_tls(&self, acceptor: tokio_rustls::TlsAcceptor) -> Result<(), RelayError> {
         let listener = TcpListener::bind(&self.config.bind_addr).await?;
         tracing::info!(addr = %self.config.bind_addr, "DERP relay listening (TLS)");
 
