@@ -387,19 +387,26 @@ impl WorkloadDriver for DockerDriver {
     async fn resize(
         &self,
         id: &str,
-        _cpu: Option<u32>,
+        cpu: Option<u32>,
         memory_mb: Option<u64>,
     ) -> Result<(), WorkloadError> {
-        if let Some(mem) = memory_mb {
-            let update = bollard::container::UpdateContainerOptions::<String> {
-                memory: Some((mem * 1024 * 1024) as i64),
-                ..Default::default()
-            };
-            self.client
-                .update_container(id, update)
-                .await
-                .map_err(|e| WorkloadError::permanent(format!("resize {id}: {e}")))?;
+        if cpu.is_none() && memory_mb.is_none() {
+            return Ok(());
         }
+        // Docker's NanoCpus is (number of CPUs) * 1e9. That matches
+        // `docker run --cpus=N` behaviour and does not require setting
+        // CpuPeriod and CpuQuota independently.
+        let nano_cpus = cpu.map(|c| (c as i64).saturating_mul(1_000_000_000));
+        let memory = memory_mb.map(|mem| (mem as i64).saturating_mul(1024 * 1024));
+        let update = bollard::container::UpdateContainerOptions::<String> {
+            nano_cpus,
+            memory,
+            ..Default::default()
+        };
+        self.client
+            .update_container(id, update)
+            .await
+            .map_err(|e| WorkloadError::permanent(format!("resize {id}: {e}")))?;
         Ok(())
     }
 }
