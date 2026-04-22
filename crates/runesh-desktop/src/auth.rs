@@ -73,11 +73,16 @@ impl ConsentBroker for AlwaysDeny {
     }
 }
 
-/// Loudly-named test helper that lets everything through.
-pub struct AllowAllAuth;
+/// Test helper that lets everything through. Only available under
+/// `cfg(test)` or with the explicit `insecure-test-auth` cargo feature,
+/// so it cannot be wired up by accident from a normal consumer dependency.
+/// Never enable this feature on a shipped binary.
+#[cfg(any(test, feature = "insecure-test-auth"))]
+pub struct InsecureAllowAllAuth;
 
+#[cfg(any(test, feature = "insecure-test-auth"))]
 #[async_trait]
-impl DesktopAuth for AllowAllAuth {
+impl DesktopAuth for InsecureAllowAllAuth {
     async fn authenticate(&self, token: &str) -> Result<Principal, AuthError> {
         Ok(Principal {
             subject: format!("allow-all:{}", &token[..token.len().min(8)]),
