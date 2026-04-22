@@ -82,7 +82,9 @@ impl X11Capturer {
         }
         match self.conn.screensaver_query_info(self.root) {
             Ok(cookie) => match cookie.reply() {
-                Ok(reply) => matches!(reply.state, ScreenSaverState::ON),
+                // reply.state is a raw u8; ScreenSaverState::ON is a
+                // newtype wrapper. Compare the inner values.
+                Ok(reply) => ScreenSaverState::from(reply.state) == ScreenSaverState::ON,
                 Err(_) => false,
             },
             Err(_) => false,
