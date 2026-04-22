@@ -34,9 +34,10 @@ fn is_session_locked() -> bool {
         match dict.find(&key) {
             Some(v) => {
                 // Value is a CFBoolean or CFNumber depending on macOS version.
-                if let Ok(b) = v.downcast::<CFBoolean>() {
+                // core-foundation's `downcast` returns `Option<T>`, not `Result`.
+                if let Some(b) = v.downcast::<CFBoolean>() {
                     bool::from(b)
-                } else if let Ok(n) = v.downcast::<CFNumber>() {
+                } else if let Some(n) = v.downcast::<CFNumber>() {
                     n.to_i64().map(|x| x != 0).unwrap_or(false)
                 } else {
                     false
