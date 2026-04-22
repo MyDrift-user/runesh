@@ -5,8 +5,10 @@
 //! identity, inventory, config, firewall, health, lifecycle.
 
 pub mod opnsense;
+pub mod unifi;
 
 pub use opnsense::OPNsenseDriver;
+pub use unifi::UniFiDriver;
 
 use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretBox, SecretString};
