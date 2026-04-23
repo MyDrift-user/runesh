@@ -6,23 +6,18 @@
 //! service's own (very privileged) token. Operators want the shell to
 //! feel like the interactive user just typed it, for two reasons:
 //!
-//!   1. **UX**: the shell sees the user's `%USERPROFILE%`, `%PATH%`,
-//!      mapped drives, and proxy settings. A `LocalSystem` shell sees
-//!      none of those.
-//!   2. **Audit**: actions are attributable to the real user, not to
-//!      the machine account.
+//! 1. **UX**: the shell sees the user's `%USERPROFILE%`, `%PATH%`, mapped
+//!    drives, and proxy settings. A `LocalSystem` shell sees none of those.
+//! 2. **Audit**: actions are attributable to the real user, not to the
+//!    machine account.
 //!
 //! This module supplies the missing primitive via ConPTY +
 //! `CreateProcessAsUserW`. Two entry points:
 //!
-//!   * [`spawn_as_active_user`]    — spawn as whoever is signed in to
-//!                                   the active console session. Used
-//!                                   for the "Interactive user" option
-//!                                   in the operator UI.
-//!   * [`spawn_with_credentials`]  — spawn as an explicit
-//!                                   `username` + optional `domain`
-//!                                   + `password`. Used for the
-//!                                   "Custom user" option.
+//! - [`spawn_as_active_user`] - spawn as whoever is signed in to the active
+//!   console session. Used for the "Interactive user" option in the UI.
+//! - [`spawn_with_credentials`] - spawn as an explicit `username` + optional
+//!   `domain` + `password`. Used for the "Custom user" option.
 //!
 //! Both return a [`PtyAsUserHandle`] that exposes the same four
 //! operations the per-portable-pty [`crate::cli::pty::PtyHandle`] does
@@ -57,11 +52,10 @@ use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::RemoteDesktop::{WTSGetActiveConsoleSessionId, WTSQueryUserToken};
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
-    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
-    INFINITE, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
-    PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTF_USESTDHANDLES,
-    STARTUPINFOEXW, STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject,
+    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
+    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 use crate::error::RemoteError;
@@ -113,6 +107,7 @@ impl PtyAsUserHandle {
     /// Spawn the given shell as an explicit user. `domain` may be
     /// `None` for local accounts and MS-account style `user@domain`
     /// names.
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn_with_credentials(
         username: &str,
         domain: Option<&str>,
@@ -145,15 +140,8 @@ impl PtyAsUserHandle {
         // SAFETY: `self.parent_write` is valid; `data` is a borrowed
         // slice that outlives the call; `written` lives across the call.
         #[allow(unsafe_code)]
-        unsafe {
-            WriteFile(
-                self.parent_write,
-                Some(data),
-                Some(&mut written),
-                None,
-            )
-        }
-        .map_err(|e| RemoteError::Internal(format!("WriteFile(child stdin): {e}")))?;
+        unsafe { WriteFile(self.parent_write, Some(data), Some(&mut written), None) }
+            .map_err(|e| RemoteError::Internal(format!("WriteFile(child stdin): {e}")))?;
         if written as usize != data.len() {
             return Err(RemoteError::Internal(format!(
                 "short write to child stdin: {written}/{}",
@@ -171,14 +159,7 @@ impl PtyAsUserHandle {
         let mut read_count: u32 = 0;
         // SAFETY: `self.parent_read` is valid; `buf` outlives the call.
         #[allow(unsafe_code)]
-        let r = unsafe {
-            ReadFile(
-                self.parent_read,
-                Some(buf),
-                Some(&mut read_count),
-                None,
-            )
-        };
+        let r = unsafe { ReadFile(self.parent_read, Some(buf), Some(&mut read_count), None) };
         match r {
             Ok(()) => Ok(read_count as usize),
             Err(e) => {
@@ -471,12 +452,7 @@ fn build_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>), RemoteErr
     // count is the documented "size query" form.
     #[allow(unsafe_code)]
     unsafe {
-        let _ = InitializeProcThreadAttributeList(
-            None,
-            1,
-            None,
-            &mut size,
-        );
+        let _ = InitializeProcThreadAttributeList(None, 1, None, &mut size);
     }
     if size == 0 {
         return Err(RemoteError::Internal(
@@ -488,10 +464,8 @@ fn build_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>), RemoteErr
     let plist = LPPROC_THREAD_ATTRIBUTE_LIST(buf.as_mut_ptr() as *mut _);
     // SAFETY: `buf` is sized per Windows' request; `plist` points into it.
     #[allow(unsafe_code)]
-    unsafe {
-        InitializeProcThreadAttributeList(Some(plist), 1, None, &mut size)
-    }
-    .map_err(|e| RemoteError::Internal(format!("InitializeProcThreadAttributeList: {e}")))?;
+    unsafe { InitializeProcThreadAttributeList(Some(plist), 1, None, &mut size) }
+        .map_err(|e| RemoteError::Internal(format!("InitializeProcThreadAttributeList: {e}")))?;
 
     // SAFETY: `plist` is initialized; `hpc` points at a live HPCON
     // that outlives the attribute list (we keep it in Self).
@@ -582,10 +556,10 @@ fn parse_environment_block(block: *mut core::ffi::c_void) -> HashMap<String, Str
         }
         let slice = unsafe { std::slice::from_raw_parts(p, len) };
         let s = OsString::from_wide(slice);
-        if let Some(entry) = s.to_str() {
-            if let Some((k, v)) = entry.split_once('=') {
-                out.insert(k.to_string(), v.to_string());
-            }
+        if let Some(entry) = s.to_str()
+            && let Some((k, v)) = entry.split_once('=')
+        {
+            out.insert(k.to_string(), v.to_string());
         }
         // Advance past string + NUL terminator.
         p = unsafe { p.add(len + 1) };
@@ -721,6 +695,7 @@ pub fn spawn_as_active_user(
 }
 
 /// Public entry point for the "Custom user" operator option.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_with_credentials(
     username: &str,
     domain: Option<&str>,
@@ -731,7 +706,5 @@ pub fn spawn_with_credentials(
     cwd: Option<&str>,
     env: &HashMap<String, String>,
 ) -> Result<PtyAsUserHandle, RemoteError> {
-    PtyAsUserHandle::spawn_with_credentials(
-        username, domain, password, shell, cols, rows, cwd, env,
-    )
+    PtyAsUserHandle::spawn_with_credentials(username, domain, password, shell, cols, rows, cwd, env)
 }
