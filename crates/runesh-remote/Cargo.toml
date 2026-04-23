@@ -42,3 +42,21 @@ portable-pty = { version = "0.9", optional = true }
 
 # Optional: File system watching
 notify = { version = "8", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# Used by `cli::pty_as_user` to spawn a PTY-wrapped process inside a
+# target user's session via ConPTY + CreateProcessAsUserW. Only pulled
+# in on Windows.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Console",
+    "Win32_System_Environment",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_Threading",
+    "Win32_System_Memory",
+] }

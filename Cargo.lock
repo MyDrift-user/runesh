@@ -6613,6 +6613,7 @@ dependencies = [
  "tracing",
  "uuid",
  "walkdir",
+ "windows 0.62.2",
  "zip 8.5.1",
 ]
 
