@@ -25,7 +25,7 @@ impl PackageManager for WingetManager {
 
     async fn list_installed(&self) -> Result<Vec<PackageInfo>, PkgError> {
         let env = winget_env();
-        let result = run_pkg_command_env(
+        let winget_result = run_pkg_command_env(
             "winget",
             &[
                 "list",
@@ -36,12 +36,31 @@ impl PackageManager for WingetManager {
             "",
             &env,
         )
-        .await?;
+        .await;
 
+        // Fall back to the registry Uninstall keys whenever `winget` isn't
+        // reachable. The most common case is a `LocalSystem` service that
+        // cannot invoke the Store-delivered per-user `winget.exe` binary;
+        // the registry fallback returns a near-identical list populated by
+        // Add/Remove Programs without needing the CLI at all.
+        #[cfg(windows)]
+        {
+            let use_registry = match &winget_result {
+                Err(_) => true,
+                Ok(res) if !res.success => true,
+                Ok(res) => parse_winget_table(&res.output, true)
+                    .map(|v| v.is_empty())
+                    .unwrap_or(true),
+            };
+            if use_registry {
+                return Ok(crate::win_registry::list_installed());
+            }
+        }
+
+        let result = winget_result?;
         if !result.success {
             return Err(PkgError::CommandFailed(result.output));
         }
-
         parse_winget_table(&result.output, true)
     }
 

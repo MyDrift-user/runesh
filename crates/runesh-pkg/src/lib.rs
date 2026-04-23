@@ -15,6 +15,8 @@ pub mod dnf;
 pub mod freebsd;
 pub mod pacman;
 pub mod runner;
+#[cfg(windows)]
+pub mod win_registry;
 pub mod winget;
 pub mod zypper;
 
