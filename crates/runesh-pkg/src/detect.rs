@@ -37,10 +37,13 @@ impl PkgManagerType {
 /// Detect the system package manager by checking for known binaries.
 pub fn detect() -> Option<PkgManagerType> {
     if cfg!(windows) {
-        if which("winget") {
-            return Some(PkgManagerType::Winget);
-        }
-        return None;
+        // WingetManager handles both CLI-in-PATH and the registry
+        // Uninstall fallback internally, so the only way to get "no
+        // package manager" on Windows is to not be on Windows. Don't
+        // gate on `which("winget")` here because a LocalSystem
+        // service can't invoke the per-user Store-delivered winget
+        // binary, and we'd skip the fallback entirely.
+        return Some(PkgManagerType::Winget);
     }
 
     if cfg!(target_os = "macos") {

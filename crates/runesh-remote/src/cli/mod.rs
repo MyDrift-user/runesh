@@ -17,7 +17,9 @@ pub use audit::AuditLogger;
 pub use pty::PtyHandle;
 
 #[cfg(all(feature = "cli", windows))]
-pub use pty_as_user::{PtyAsUserHandle, spawn_as_active_user, spawn_with_credentials};
+pub use pty_as_user::{
+    PtyAsUserHandle, PtyReader, PtyWriter, spawn_as_active_user, spawn_with_credentials,
+};
 
 #[cfg(feature = "cli")]
 pub use session::{SessionConfig, SessionManager};
