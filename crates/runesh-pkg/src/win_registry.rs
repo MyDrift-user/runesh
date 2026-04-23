@@ -16,8 +16,6 @@
 //! need per-user packages should rely on the `HKLM` keys, which is where the
 //! overwhelming majority of line-of-business software registers.
 
-#![cfg(windows)]
-
 use crate::PackageInfo;
 
 use winreg::RegKey;

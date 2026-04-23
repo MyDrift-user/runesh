@@ -28,11 +28,9 @@
 //! Windows-only. On every other platform the module compiles to an
 //! empty stub; callers should fall back to `PtyHandle::spawn`.
 
-#![cfg(windows)]
-
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
-use std::mem;
+use std::mem::{self, ManuallyDrop};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::ptr;
 
@@ -58,7 +56,7 @@ use windows::Win32::System::Threading::{
     STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
-use crate::error::RemoteError;
+use crate::error::{PtyStage, RemoteError};
 
 /// A running pseudo-console process owned by another user.
 ///
@@ -124,31 +122,12 @@ impl PtyAsUserHandle {
 
     /// Resize the pseudo console. Safe to call concurrently with IO.
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), RemoteError> {
-        let size = COORD {
-            X: cols as i16,
-            Y: rows as i16,
-        };
-        // SAFETY: `self.hpc` is valid until `Drop` or `kill`.
-        #[allow(unsafe_code)]
-        unsafe { ResizePseudoConsole(self.hpc, size) }
-            .map_err(|e| RemoteError::Internal(format!("ResizePseudoConsole: {e}")))
+        resize_hpc(self.hpc, cols, rows)
     }
 
     /// Blocking write of `data` to the child's stdin.
     pub fn write_input(&mut self, data: &[u8]) -> Result<(), RemoteError> {
-        let mut written: u32 = 0;
-        // SAFETY: `self.parent_write` is valid; `data` is a borrowed
-        // slice that outlives the call; `written` lives across the call.
-        #[allow(unsafe_code)]
-        unsafe { WriteFile(self.parent_write, Some(data), Some(&mut written), None) }
-            .map_err(|e| RemoteError::Internal(format!("WriteFile(child stdin): {e}")))?;
-        if written as usize != data.len() {
-            return Err(RemoteError::Internal(format!(
-                "short write to child stdin: {written}/{}",
-                data.len()
-            )));
-        }
-        Ok(())
+        write_pipe(self.parent_write, data)
     }
 
     /// Blocking read of up to `buf.len()` bytes from the child's
@@ -156,27 +135,45 @@ impl PtyAsUserHandle {
     /// (typically because it exited). Intended for a dedicated reader
     /// thread — the same shape `portable-pty` uses.
     pub fn read_output(&mut self, buf: &mut [u8]) -> Result<usize, RemoteError> {
-        let mut read_count: u32 = 0;
-        // SAFETY: `self.parent_read` is valid; `buf` outlives the call.
-        #[allow(unsafe_code)]
-        let r = unsafe { ReadFile(self.parent_read, Some(buf), Some(&mut read_count), None) };
-        match r {
-            Ok(()) => Ok(read_count as usize),
-            Err(e) => {
-                // The child closing stdout surfaces as
-                // ERROR_BROKEN_PIPE. Report as clean EOF so the
-                // caller's read loop can exit without a spurious
-                // error badge.
-                let code = e.code().0 as u32;
-                if code == ERROR_BROKEN_PIPE.0 {
-                    Ok(0)
-                } else {
-                    Err(RemoteError::Internal(format!(
-                        "ReadFile(child stdout): {e}"
-                    )))
-                }
-            }
-        }
+        read_pipe(self.parent_read, buf)
+    }
+
+    /// Split this handle into independent reader and writer halves
+    /// that can be moved into separate threads. Mirrors
+    /// `portable-pty`'s `try_clone_reader` + `take_writer` shape:
+    /// park a dedicated thread in `PtyReader::read_output` while the
+    /// main loop calls `PtyWriter::write_input` / `resize` as control
+    /// frames arrive — a shared-`&mut self` handle can't do that
+    /// because the blocking read holds the only mutable borrow.
+    ///
+    /// All teardown responsibilities move to [`PtyWriter`]: closing
+    /// the pseudo console, killing the child, releasing the env
+    /// block, dropping the attribute list, and closing the user
+    /// token. [`PtyReader`] only owns the parent-side stdout pipe
+    /// handle and closes it on drop (which also EOFs any in-flight
+    /// read).
+    pub fn split(self) -> (PtyReader, PtyWriter) {
+        // ManuallyDrop keeps `self`'s Drop from running after we've
+        // moved ownership of the fields into the two halves — each
+        // half has its own Drop that cleans up exactly the handles
+        // it owns.
+        let this = ManuallyDrop::new(self);
+        let reader = PtyReader {
+            // SAFETY: reading non-Copy fields out of ManuallyDrop is
+            // the documented pattern; each field is read exactly
+            // once and we never touch `this` again.
+            parent_read: this.parent_read,
+        };
+        let writer = PtyWriter {
+            hpc: this.hpc,
+            child: this.child,
+            parent_write: this.parent_write,
+            attr_list: unsafe { ptr::read(&this.attr_list) },
+            env_block: this.env_block,
+            user_token: this.user_token,
+            shell: unsafe { ptr::read(&this.shell) },
+        };
+        (reader, writer)
     }
 
     /// Non-blocking exit-code probe. Returns `Some(code)` once the
@@ -348,9 +345,7 @@ impl PtyAsUserHandle {
                 let _ = DestroyEnvironmentBlock(env_block);
                 ClosePseudoConsole(hpc);
             }
-            return Err(RemoteError::Internal(format!(
-                "CreateProcessAsUserW('{shell_path}'): {e}"
-            )));
+            return Err(win_err(PtyStage::CreateProcessAsUser, e));
         }
 
         Ok(Self {
@@ -400,6 +395,201 @@ impl Drop for PtyAsUserHandle {
     }
 }
 
+// ── Split handles ──────────────────────────────────────────────────────────
+
+/// Read half of a [`PtyAsUserHandle`]. Owns only the parent-side
+/// stdout pipe handle so a dedicated thread can park in
+/// [`PtyReader::read_output`] without blocking the writer. Closing
+/// the reader's handle EOFs any in-flight read; the actual teardown
+/// of the pseudo console + child process lives on [`PtyWriter`].
+pub struct PtyReader {
+    parent_read: HANDLE,
+}
+
+// SAFETY: see PtyAsUserHandle.
+#[allow(unsafe_code)]
+unsafe impl Send for PtyReader {}
+#[allow(unsafe_code)]
+unsafe impl Sync for PtyReader {}
+
+impl PtyReader {
+    /// Blocking read of up to `buf.len()` bytes from the child's
+    /// stdout. Returns `Ok(0)` on EOF (child exited, or the writer
+    /// was dropped and closed the pipe).
+    pub fn read_output(&mut self, buf: &mut [u8]) -> Result<usize, RemoteError> {
+        read_pipe(self.parent_read, buf)
+    }
+}
+
+impl Drop for PtyReader {
+    fn drop(&mut self) {
+        close(self.parent_read);
+    }
+}
+
+/// Write half of a [`PtyAsUserHandle`]. Owns the pseudo console
+/// plus every resource whose lifetime must extend until the child
+/// process exits: the parent-side stdin pipe, the user token, the
+/// env block, the proc-thread attribute list, and the child's
+/// process + main-thread handles.
+pub struct PtyWriter {
+    hpc: HPCON,
+    child: PROCESS_INFORMATION,
+    parent_write: HANDLE,
+    attr_list: Vec<u8>,
+    env_block: *mut core::ffi::c_void,
+    user_token: HANDLE,
+    pub shell: String,
+}
+
+// SAFETY: see PtyAsUserHandle.
+#[allow(unsafe_code)]
+unsafe impl Send for PtyWriter {}
+#[allow(unsafe_code)]
+unsafe impl Sync for PtyWriter {}
+
+impl PtyWriter {
+    /// Blocking write of `data` to the child's stdin.
+    pub fn write_input(&mut self, data: &[u8]) -> Result<(), RemoteError> {
+        write_pipe(self.parent_write, data)
+    }
+
+    /// Resize the pseudo console.
+    pub fn resize(&self, cols: u16, rows: u16) -> Result<(), RemoteError> {
+        resize_hpc(self.hpc, cols, rows)
+    }
+
+    /// Non-blocking exit-code probe. Returns `Some(code)` once the
+    /// child has exited, `None` while it's still running.
+    pub fn try_wait(&mut self) -> Option<u32> {
+        try_wait_child(&self.child)
+    }
+
+    /// Terminate the child. Safe to call multiple times.
+    pub fn kill(&mut self) {
+        kill_child(&self.child);
+    }
+}
+
+impl Drop for PtyWriter {
+    fn drop(&mut self) {
+        self.kill();
+        // SAFETY: all fields were populated by a successful spawn.
+        #[allow(unsafe_code)]
+        unsafe {
+            if !self.child.hProcess.is_invalid() {
+                let _ = CloseHandle(self.child.hProcess);
+            }
+            if !self.child.hThread.is_invalid() {
+                let _ = CloseHandle(self.child.hThread);
+            }
+            ClosePseudoConsole(self.hpc);
+            if !self.parent_write.is_invalid() {
+                let _ = CloseHandle(self.parent_write);
+            }
+            if !self.user_token.is_invalid() {
+                let _ = CloseHandle(self.user_token);
+            }
+            if !self.env_block.is_null() {
+                let _ = DestroyEnvironmentBlock(self.env_block);
+            }
+            if !self.attr_list.is_empty() {
+                let plist = LPPROC_THREAD_ATTRIBUTE_LIST(self.attr_list.as_mut_ptr() as *mut _);
+                DeleteProcThreadAttributeList(plist);
+            }
+        }
+    }
+}
+
+// ── Shared IO helpers ──────────────────────────────────────────────────────
+
+fn write_pipe(pipe: HANDLE, data: &[u8]) -> Result<(), RemoteError> {
+    let mut written: u32 = 0;
+    // SAFETY: `pipe` is a valid writable pipe handle for the caller's
+    // lifetime; `data` + `written` outlive the call.
+    #[allow(unsafe_code)]
+    unsafe { WriteFile(pipe, Some(data), Some(&mut written), None) }
+        .map_err(|e| win_err(PtyStage::WriteFile, e))?;
+    if written as usize != data.len() {
+        return Err(RemoteError::Pty {
+            stage: PtyStage::WriteFile,
+            source: std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                format!("short write to child stdin: {written}/{}", data.len()),
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn read_pipe(pipe: HANDLE, buf: &mut [u8]) -> Result<usize, RemoteError> {
+    let mut read_count: u32 = 0;
+    // SAFETY: `pipe` is a valid readable pipe handle; `buf` + `read_count`
+    // outlive the call.
+    #[allow(unsafe_code)]
+    let r = unsafe { ReadFile(pipe, Some(buf), Some(&mut read_count), None) };
+    match r {
+        Ok(()) => Ok(read_count as usize),
+        Err(e) => {
+            // The child closing stdout surfaces as ERROR_BROKEN_PIPE.
+            // Report as clean EOF so the caller's read loop can exit
+            // without a spurious error badge.
+            let code = e.code().0 as u32;
+            if code == ERROR_BROKEN_PIPE.0 {
+                Ok(0)
+            } else {
+                Err(win_err(PtyStage::ReadFile, e))
+            }
+        }
+    }
+}
+
+fn resize_hpc(hpc: HPCON, cols: u16, rows: u16) -> Result<(), RemoteError> {
+    let size = COORD {
+        X: cols as i16,
+        Y: rows as i16,
+    };
+    // SAFETY: `hpc` is valid for the caller's lifetime.
+    #[allow(unsafe_code)]
+    unsafe { ResizePseudoConsole(hpc, size) }.map_err(|e| win_err(PtyStage::ResizePseudoConsole, e))
+}
+
+fn try_wait_child(child: &PROCESS_INFORMATION) -> Option<u32> {
+    // SAFETY: `child.hProcess` is a valid process handle owned by the
+    // caller.
+    #[allow(unsafe_code)]
+    let r = unsafe { WaitForSingleObject(child.hProcess, 0) };
+    if r != WAIT_OBJECT_0 {
+        return None;
+    }
+    let mut code: u32 = 0;
+    #[allow(unsafe_code)]
+    if unsafe { GetExitCodeProcess(child.hProcess, &mut code) }.is_err() {
+        return None;
+    }
+    Some(code)
+}
+
+fn kill_child(child: &PROCESS_INFORMATION) {
+    if child.hProcess.is_invalid() {
+        return;
+    }
+    // SAFETY: `child.hProcess` is valid.
+    #[allow(unsafe_code)]
+    unsafe {
+        let _ = TerminateProcess(child.hProcess, 1);
+        let _ = WaitForSingleObject(child.hProcess, INFINITE);
+    }
+}
+
+/// Wrap a `windows::core::Error` into a structured `RemoteError::Pty`.
+fn win_err(stage: PtyStage, e: windows::core::Error) -> RemoteError {
+    RemoteError::Pty {
+        stage,
+        source: std::io::Error::from_raw_os_error(e.code().0),
+    }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 fn create_pipe_pair() -> Result<(HANDLE, HANDLE), RemoteError> {
@@ -416,7 +606,7 @@ fn create_pipe_pair() -> Result<(HANDLE, HANDLE), RemoteError> {
     // SAFETY: `r`, `w`, and `sa` are valid for the duration of the call.
     #[allow(unsafe_code)]
     unsafe { CreatePipe(&mut r, &mut w, Some(&sa), 0) }
-        .map_err(|e| RemoteError::Internal(format!("CreatePipe: {e}")))?;
+        .map_err(|e| win_err(PtyStage::CreatePipe, e))?;
     Ok((r, w))
 }
 
@@ -433,7 +623,7 @@ fn create_pseudo_console(
     // SAFETY: handles are valid; `size` is POD.
     #[allow(unsafe_code)]
     let hpc = unsafe { CreatePseudoConsole(size, h_input, h_output, 0) }
-        .map_err(|e| RemoteError::Internal(format!("CreatePseudoConsole: {e}")))?;
+        .map_err(|e| win_err(PtyStage::CreatePseudoConsole, e))?;
     Ok(hpc)
 }
 
@@ -455,9 +645,10 @@ fn build_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>), RemoteErr
         let _ = InitializeProcThreadAttributeList(None, 1, None, &mut size);
     }
     if size == 0 {
-        return Err(RemoteError::Internal(
-            "InitializeProcThreadAttributeList returned zero size".into(),
-        ));
+        return Err(RemoteError::Pty {
+            stage: PtyStage::InitializeProcThreadAttributeList,
+            source: std::io::Error::other("returned zero size"),
+        });
     }
 
     let mut buf = vec![0u8; size];
@@ -465,7 +656,7 @@ fn build_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>), RemoteErr
     // SAFETY: `buf` is sized per Windows' request; `plist` points into it.
     #[allow(unsafe_code)]
     unsafe { InitializeProcThreadAttributeList(Some(plist), 1, None, &mut size) }
-        .map_err(|e| RemoteError::Internal(format!("InitializeProcThreadAttributeList: {e}")))?;
+        .map_err(|e| win_err(PtyStage::InitializeProcThreadAttributeList, e))?;
 
     // SAFETY: `plist` is initialized; `hpc` points at a live HPCON
     // that outlives the attribute list (we keep it in Self).
@@ -481,7 +672,7 @@ fn build_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>), RemoteErr
             None,
         )
     }
-    .map_err(|e| RemoteError::Internal(format!("UpdateProcThreadAttribute: {e}")))?;
+    .map_err(|e| win_err(PtyStage::UpdateProcThreadAttribute, e))?;
 
     let mut si = STARTUPINFOEXW {
         StartupInfo: STARTUPINFOW {
@@ -517,7 +708,7 @@ fn build_environment(
     // means the block inherits from the user's profile.
     #[allow(unsafe_code)]
     unsafe { CreateEnvironmentBlock(&mut block, Some(token), false) }
-        .map_err(|e| RemoteError::Internal(format!("CreateEnvironmentBlock: {e}")))?;
+        .map_err(|e| win_err(PtyStage::CreateEnvironmentBlock, e))?;
 
     if overlay.is_empty() {
         return Ok(block);
@@ -620,15 +811,16 @@ fn active_console_user_token() -> Result<HANDLE, RemoteError> {
     #[allow(unsafe_code)]
     let session_id = unsafe { WTSGetActiveConsoleSessionId() };
     if session_id == u32::MAX {
-        return Err(RemoteError::Internal(
-            "no active console session (no user signed in locally)".into(),
-        ));
+        return Err(RemoteError::Pty {
+            stage: PtyStage::NoActiveConsoleSession,
+            source: std::io::Error::other("no user signed in locally"),
+        });
     }
     let mut token = HANDLE::default();
     // SAFETY: `token` is valid for the call.
     #[allow(unsafe_code)]
     unsafe { WTSQueryUserToken(session_id, &mut token) }
-        .map_err(|e| RemoteError::Internal(format!("WTSQueryUserToken({session_id}): {e}")))?;
+        .map_err(|e| win_err(PtyStage::QueryUserToken, e))?;
     Ok(token)
 }
 
@@ -661,7 +853,7 @@ fn logon_user_token(
             &mut token,
         )
     }
-    .map_err(|e| RemoteError::Internal(format!("LogonUserW({username}): {e}")))?;
+    .map_err(|e| win_err(PtyStage::LogonUser, e))?;
     Ok(token)
 }
 
