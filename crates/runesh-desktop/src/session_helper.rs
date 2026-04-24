@@ -54,12 +54,20 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
 
-use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_IO_PENDING, GENERIC_READ, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree,
+    WAIT_OBJECT_0,
+};
+use windows::Win32::Security::Authorization::{
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+};
+use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
     ReadFile, WriteFile,
 };
 use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
+use windows::Win32::System::IO::{CancelIoEx, OVERLAPPED};
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
     PIPE_TYPE_BYTE, PIPE_WAIT,
@@ -69,8 +77,8 @@ use windows::Win32::System::RemoteDesktop::{
     WTSEnumerateSessionsW, WTSFreeMemory, WTSGetActiveConsoleSessionId, WTSQueryUserToken,
 };
 use windows::Win32::System::Threading::{
-    CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, PROCESS_INFORMATION, STARTUPINFOW,
-    TerminateProcess, WaitForSingleObject,
+    CREATE_UNICODE_ENVIRONMENT, CreateEventW, CreateProcessAsUserW, PROCESS_INFORMATION,
+    STARTUPINFOW, TerminateProcess, WaitForMultipleObjects, WaitForSingleObject,
 };
 
 use crate::capture::{CapturedFrame, ScreenCapture};
@@ -181,8 +189,9 @@ pub fn spawn_in_active_user_session(
 ) -> Result<SessionCaptureProxy, DesktopError> {
     let pipe_name = unique_pipe_name();
     // 1. Create the server end of the named pipe. The helper will
-    //    connect to the client end.
-    let pipe = create_server_pipe(&pipe_name)?;
+    //    connect to the client end. `_sd` keeps the security
+    //    descriptor alive until we've finished with the pipe.
+    let (pipe, _sd) = create_server_pipe(&pipe_name)?;
 
     // 2. Acquire a primary token for the active console user.
     let token = active_console_user_token()?;
@@ -247,11 +256,23 @@ pub fn spawn_in_active_user_session(
         )));
     }
 
-    // 5. Wait for the helper to connect to our pipe.
-    // SAFETY: `pipe` is a valid named-pipe server handle.
-    #[allow(unsafe_code)]
-    unsafe { ConnectNamedPipe(pipe, None) }
-        .map_err(|e| DesktopError::Capture(format!("ConnectNamedPipe(session helper): {e}")))?;
+    // 5. Wait for the helper to connect to our pipe, with a deadline
+    //    + child-exit detection so a dead helper (e.g. DXGI init
+    //    failed inside the session) surfaces as a readable error
+    //    instead of an infinite spinner.
+    if let Err(e) = connect_with_deadline(pipe, proc_info.hProcess, 5_000) {
+        close_handle(pipe);
+        close_handle(token);
+        // SAFETY: handles are valid before we close them above.
+        #[allow(unsafe_code)]
+        unsafe {
+            let _ = TerminateProcess(proc_info.hProcess, 1);
+            let _ = CloseHandle(proc_info.hProcess);
+            let _ = CloseHandle(proc_info.hThread);
+            let _ = DestroyEnvironmentBlock(env_block);
+        }
+        return Err(e);
+    }
 
     // 6. Exchange the Hello handshake so we learn the display
     //    dimensions and surface any capture error up front.
@@ -425,24 +446,35 @@ fn unique_pipe_name() -> String {
     )
 }
 
-fn create_server_pipe(name: &str) -> Result<HANDLE, DesktopError> {
+fn create_server_pipe(name: &str) -> Result<(HANDLE, PipeSecurity), DesktopError> {
     let name_w = to_wide(name);
+    // Permissive ACL so the helper (running as the interactive user
+    // via CreateProcessAsUserW) can CreateFileW the client end. The
+    // default DACL Windows applies when we pass NULL only grants the
+    // creator (LocalSystem) + Admins, which means the user-session
+    // helper fails CreateFileW with ERROR_ACCESS_DENIED and the
+    // service blocks on ConnectNamedPipe forever.
+    //
+    //   SY  = LocalSystem        → GA (Generic All)
+    //   BA  = BUILTIN\Admins     → GA
+    //   AU  = Authenticated Users → GRGW (Generic Read + Write)
+    let sa = build_pipe_sa()?;
+
+    // FILE_FLAG_OVERLAPPED so we can wait on ConnectNamedPipe with a
+    // timeout + detect the child dying, instead of hanging forever.
     // SAFETY: name_w is a NUL-terminated UTF-16 buffer that outlives
-    // the call. The 0 SECURITY_ATTRIBUTES default ACL restricts the
-    // pipe to the creator + admins, which is exactly what we want
-    // (the helper impersonates the user via CreateProcessAsUserW and
-    // still has access because the service creates the pipe).
+    // the call; sa's security descriptor outlives the call too.
     #[allow(unsafe_code)]
     let pipe = unsafe {
         CreateNamedPipeW(
             windows::core::PCWSTR(name_w.as_ptr()),
-            PIPE_ACCESS_DUPLEX,
+            PIPE_ACCESS_DUPLEX | PIPE_ACCESS_OVERLAPPED_FLAG,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             1,
             1024 * 1024,
             1024 * 1024,
             0,
-            None,
+            Some(&sa.inner),
         )
     };
     if pipe.is_invalid() {
@@ -450,7 +482,153 @@ fn create_server_pipe(name: &str) -> Result<HANDLE, DesktopError> {
             "CreateNamedPipeW returned INVALID_HANDLE".into(),
         ));
     }
-    Ok(pipe)
+    Ok((pipe, sa))
+}
+
+/// Bit we OR into `PIPE_ACCESS_DUPLEX` so the pipe supports
+/// overlapped IO. Defined here because the `windows` crate exposes
+/// it as `FILE_FLAGS_AND_ATTRIBUTES(0x40000000)` under a different
+/// module path; the raw value is the canonical interface constant.
+const PIPE_ACCESS_OVERLAPPED_FLAG: windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES =
+    windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0x40000000);
+
+/// Wait up to `timeout_ms` for the helper to connect to `pipe`, and
+/// bail early if `child` exits before then. Prevents an infinite spin
+/// when the helper can't open the pipe (which used to happen every
+/// time before we fixed the pipe ACL).
+fn connect_with_deadline(pipe: HANDLE, child: HANDLE, timeout_ms: u32) -> Result<(), DesktopError> {
+    let event = create_manual_event()?;
+    let mut overlapped = OVERLAPPED {
+        hEvent: event,
+        ..Default::default()
+    };
+
+    // SAFETY: `pipe`, `event`, and `overlapped` are valid for the call.
+    #[allow(unsafe_code)]
+    let r = unsafe { ConnectNamedPipe(pipe, Some(&mut overlapped)) };
+    let needs_wait = match r {
+        Ok(()) => false,
+        Err(e) => {
+            let code = e.code().0 as u32;
+            // ERROR_PIPE_CONNECTED (535) = client is already here.
+            // ERROR_IO_PENDING        (997) = async in-flight.
+            if code == 0x217 {
+                false
+            } else if code == ERROR_IO_PENDING.0 {
+                true
+            } else {
+                close_handle(event);
+                return Err(DesktopError::Capture(format!("ConnectNamedPipe: {e}")));
+            }
+        }
+    };
+
+    if needs_wait {
+        let handles = [event, child];
+        // SAFETY: `handles` lives across the call.
+        #[allow(unsafe_code)]
+        let wait = unsafe { WaitForMultipleObjects(&handles, false, timeout_ms) };
+        close_handle(event);
+        // WAIT_OBJECT_0     = pipe event signaled (connected)
+        // WAIT_OBJECT_0 + 1 = child exited before connecting
+        // WAIT_TIMEOUT      = neither within the deadline
+        if wait == WAIT_OBJECT_0 {
+            return Ok(());
+        }
+        // Cancel the async connect so the pipe handle is clean to
+        // close. Best-effort.
+        // SAFETY: `pipe` is valid; passing None cancels all pending
+        // IO issued from this thread.
+        #[allow(unsafe_code)]
+        unsafe {
+            let _ = CancelIoEx(pipe, None);
+        }
+        if wait.0 == WAIT_OBJECT_0.0 + 1 {
+            return Err(DesktopError::Capture(
+                "session helper exited before connecting to the IPC pipe; \
+                 check %ProgramData%\\rumi\\rumi-agentd-startup.log or the \
+                 helper's stderr for details"
+                    .into(),
+            ));
+        }
+        return Err(DesktopError::Capture(format!(
+            "session helper did not connect within {timeout_ms}ms"
+        )));
+    }
+    close_handle(event);
+    Ok(())
+}
+
+fn create_manual_event() -> Result<HANDLE, DesktopError> {
+    // SAFETY: no parameters dangle; all pointers are null.
+    #[allow(unsafe_code)]
+    let ev = unsafe {
+        CreateEventW(
+            None,
+            true,  // manual reset
+            false, // initially non-signaled
+            windows::core::PCWSTR::null(),
+        )
+    }
+    .map_err(|e| DesktopError::Capture(format!("CreateEventW: {e}")))?;
+    Ok(ev)
+}
+
+/// SDDL-based `SECURITY_ATTRIBUTES` that grants the logged-in user
+/// read+write on the pipe so the helper (running in their session)
+/// can connect. Owns the Windows-allocated `SECURITY_DESCRIPTOR`;
+/// drop frees it with `LocalFree`.
+struct PipeSecurity {
+    inner: SECURITY_ATTRIBUTES,
+    sd: PSECURITY_DESCRIPTOR,
+}
+
+// SAFETY: we own the descriptor and only hand out &SECURITY_ATTRIBUTES
+// to the OS; no thread-local state is involved.
+#[allow(unsafe_code)]
+unsafe impl Send for PipeSecurity {}
+
+impl Drop for PipeSecurity {
+    fn drop(&mut self) {
+        if !self.sd.0.is_null() {
+            // SAFETY: `sd` came from ConvertStringSecurityDescriptor…W,
+            // which documents LocalFree as the release call.
+            #[allow(unsafe_code)]
+            unsafe {
+                let _ = LocalFree(Some(HLOCAL(self.sd.0)));
+            }
+        }
+    }
+}
+
+fn build_pipe_sa() -> Result<PipeSecurity, DesktopError> {
+    let sddl: Vec<u16> = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: `sddl` is a valid NUL-terminated UTF-16 buffer.
+    #[allow(unsafe_code)]
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            windows::core::PCWSTR(sddl.as_ptr()),
+            SDDL_REVISION_1,
+            &mut sd,
+            None,
+        )
+    }
+    .map_err(|e| DesktopError::Capture(format!("ConvertStringSecurityDescriptor: {e}")))?;
+    if sd.0.is_null() {
+        return Err(DesktopError::Capture(
+            "ConvertStringSecurityDescriptor returned null SD".into(),
+        ));
+    }
+    let sa = SECURITY_ATTRIBUTES {
+        nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: sd.0,
+        bInheritHandle: false.into(),
+    };
+    Ok(PipeSecurity { inner: sa, sd })
 }
 
 fn connect_client_pipe(name: &str) -> Result<HANDLE, DesktopError> {
