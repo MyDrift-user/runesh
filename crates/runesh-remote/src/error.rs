@@ -50,9 +50,15 @@ pub enum RemoteError {
 /// [`RemoteError::Pty`] so callers can branch on which step failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PtyStage {
-    /// `WTSGetActiveConsoleSessionId` returned no console session.
-    NoActiveConsoleSession,
-    /// `WTSQueryUserToken` on the active session id failed.
+    /// Neither `WTSGetActiveConsoleSessionId` nor an
+    /// `WTSEnumerateSessionsW` sweep found a signed-in user
+    /// (no console user, no active RDP session, no Fast-User-
+    /// Switching session). Retry once a user signs in.
+    NoUserSession,
+    /// `WTSEnumerateSessionsW` failed (permission issue, terminal
+    /// services disabled, or a race during session teardown).
+    EnumerateSessions,
+    /// `WTSQueryUserToken` on the selected session id failed.
     QueryUserToken,
     /// `LogonUserW` on explicit credentials failed.
     LogonUser,
@@ -79,7 +85,8 @@ pub enum PtyStage {
 impl std::fmt::Display for PtyStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            Self::NoActiveConsoleSession => "no_active_console_session",
+            Self::NoUserSession => "no_user_session",
+            Self::EnumerateSessions => "enumerate_sessions",
             Self::QueryUserToken => "query_user_token",
             Self::LogonUser => "logon_user",
             Self::CreatePipe => "create_pipe",

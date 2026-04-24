@@ -47,7 +47,10 @@ use windows::Win32::System::Console::{
 };
 use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
 use windows::Win32::System::Pipes::CreatePipe;
-use windows::Win32::System::RemoteDesktop::{WTSGetActiveConsoleSessionId, WTSQueryUserToken};
+use windows::Win32::System::RemoteDesktop::{
+    WTS_CONNECTSTATE_CLASS, WTS_CURRENT_SERVER_HANDLE, WTS_SESSION_INFOW, WTSActive,
+    WTSEnumerateSessionsW, WTSFreeMemory, WTSGetActiveConsoleSessionId, WTSQueryUserToken,
+};
 use windows::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, DeleteProcThreadAttributeList,
     EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
@@ -814,22 +817,73 @@ fn close(h: HANDLE) {
 // ── Token acquisition ──────────────────────────────────────────────────────
 
 fn active_console_user_token() -> Result<HANDLE, RemoteError> {
-    // SAFETY: no parameters. Returns the session id of the active
-    // console; -1 (u32::MAX) when there isn't one.
+    // 1. Fast path: physical console. Works when a user is signed in
+    //    at the machine's keyboard.
+    // SAFETY: no parameters. u32::MAX means no active console.
     #[allow(unsafe_code)]
-    let session_id = unsafe { WTSGetActiveConsoleSessionId() };
-    if session_id == u32::MAX {
-        return Err(RemoteError::Pty {
-            stage: PtyStage::NoActiveConsoleSession,
-            source: std::io::Error::other("no user signed in locally"),
-        });
+    let console = unsafe { WTSGetActiveConsoleSessionId() };
+    if console != u32::MAX {
+        let mut token = HANDLE::default();
+        // SAFETY: `token` outlives the call.
+        #[allow(unsafe_code)]
+        if unsafe { WTSQueryUserToken(console, &mut token) }.is_ok() {
+            return Ok(token);
+        }
+        // Fall through: console is at the login screen / no user.
     }
-    let mut token = HANDLE::default();
-    // SAFETY: `token` is valid for the call.
+
+    // 2. Slow path: enumerate sessions and pick the first Active one
+    //    whose token query succeeds. Covers RDP-only hosts (which
+    //    have NO active console), Fast User Switching, and servers
+    //    where an admin is connected over RDP but no one is at the
+    //    physical console.
+    let mut info_ptr: *mut WTS_SESSION_INFOW = std::ptr::null_mut();
+    let mut count: u32 = 0;
+    // SAFETY: out-params live across the call; WTS_CURRENT_SERVER_HANDLE is a sentinel.
     #[allow(unsafe_code)]
-    unsafe { WTSQueryUserToken(session_id, &mut token) }
-        .map_err(|e| win_err(PtyStage::QueryUserToken, e))?;
-    Ok(token)
+    unsafe {
+        WTSEnumerateSessionsW(
+            Some(WTS_CURRENT_SERVER_HANDLE),
+            0,
+            1,
+            &mut info_ptr,
+            &mut count,
+        )
+    }
+    .map_err(|e| win_err(PtyStage::EnumerateSessions, e))?;
+
+    // RAII guard so WTSFreeMemory fires even if a later step errors.
+    struct FreeGuard(*mut WTS_SESSION_INFOW);
+    impl Drop for FreeGuard {
+        fn drop(&mut self) {
+            // SAFETY: pointer came from WTSEnumerateSessionsW.
+            #[allow(unsafe_code)]
+            unsafe {
+                WTSFreeMemory(self.0 as _);
+            }
+        }
+    }
+    let _guard = FreeGuard(info_ptr);
+
+    // SAFETY: WTSEnumerateSessionsW wrote `count` contiguous entries at `info_ptr`.
+    #[allow(unsafe_code)]
+    let sessions = unsafe { std::slice::from_raw_parts(info_ptr, count as usize) };
+    for s in sessions {
+        if s.State != WTS_CONNECTSTATE_CLASS(WTSActive.0) {
+            continue;
+        }
+        let mut token = HANDLE::default();
+        // SAFETY: `token` outlives the call.
+        #[allow(unsafe_code)]
+        if unsafe { WTSQueryUserToken(s.SessionId, &mut token) }.is_ok() {
+            return Ok(token);
+        }
+    }
+
+    Err(RemoteError::Pty {
+        stage: PtyStage::NoUserSession,
+        source: std::io::Error::other("no signed-in user on the console, RDP, or FUS sessions"),
+    })
 }
 
 fn logon_user_token(

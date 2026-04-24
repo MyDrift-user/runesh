@@ -64,7 +64,10 @@ use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
     PIPE_TYPE_BYTE, PIPE_WAIT,
 };
-use windows::Win32::System::RemoteDesktop::{WTSGetActiveConsoleSessionId, WTSQueryUserToken};
+use windows::Win32::System::RemoteDesktop::{
+    WTS_CONNECTSTATE_CLASS, WTS_CURRENT_SERVER_HANDLE, WTS_SESSION_INFOW, WTSActive,
+    WTSEnumerateSessionsW, WTSFreeMemory, WTSGetActiveConsoleSessionId, WTSQueryUserToken,
+};
 use windows::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, PROCESS_INFORMATION, STARTUPINFOW,
     TerminateProcess, WaitForSingleObject,
@@ -472,18 +475,73 @@ fn connect_client_pipe(name: &str) -> Result<HANDLE, DesktopError> {
 // ── Token + environment ────────────────────────────────────────────────────
 
 fn active_console_user_token() -> Result<HANDLE, DesktopError> {
-    // SAFETY: no parameters.
+    // 1. Fast path: physical console user.
+    // SAFETY: no parameters. u32::MAX = no active console.
     #[allow(unsafe_code)]
-    let session_id = unsafe { WTSGetActiveConsoleSessionId() };
-    if session_id == u32::MAX {
-        return Err(DesktopError::RequiresInteractiveSession);
+    let console = unsafe { WTSGetActiveConsoleSessionId() };
+    if console != u32::MAX {
+        let mut token = HANDLE::default();
+        // SAFETY: `token` outlives the call.
+        #[allow(unsafe_code)]
+        if unsafe { WTSQueryUserToken(console, &mut token) }.is_ok() {
+            return Ok(token);
+        }
+        // Fall through: console is at the login screen / no user.
     }
-    let mut token = HANDLE::default();
-    // SAFETY: `token` outlives the call.
+
+    // 2. Slow path: enumerate sessions and pick the first Active one
+    //    whose token query succeeds. Catches RDP-only hosts (no
+    //    console user at all), Fast User Switching, and servers
+    //    where an admin is connected over RDP but no one is at the
+    //    physical keyboard. `qwinsta` would show this session as
+    //    `Active`; earlier code missed it because
+    //    `WTSGetActiveConsoleSessionId` only looks at the physical
+    //    console.
+    let mut info_ptr: *mut WTS_SESSION_INFOW = std::ptr::null_mut();
+    let mut count: u32 = 0;
+    // SAFETY: out-params live across the call; the sentinel handle
+    // targets the current server.
     #[allow(unsafe_code)]
-    unsafe { WTSQueryUserToken(session_id, &mut token) }
-        .map_err(|_| DesktopError::RequiresInteractiveSession)?;
-    Ok(token)
+    unsafe {
+        WTSEnumerateSessionsW(
+            Some(WTS_CURRENT_SERVER_HANDLE),
+            0,
+            1,
+            &mut info_ptr,
+            &mut count,
+        )
+    }
+    .map_err(|_| DesktopError::RequiresInteractiveSession)?;
+
+    // RAII guard so WTSFreeMemory fires even on the error paths.
+    struct FreeGuard(*mut WTS_SESSION_INFOW);
+    impl Drop for FreeGuard {
+        fn drop(&mut self) {
+            // SAFETY: pointer came from WTSEnumerateSessionsW.
+            #[allow(unsafe_code)]
+            unsafe {
+                WTSFreeMemory(self.0 as _);
+            }
+        }
+    }
+    let _guard = FreeGuard(info_ptr);
+
+    // SAFETY: WTSEnumerateSessionsW populated `count` contiguous entries.
+    #[allow(unsafe_code)]
+    let sessions = unsafe { std::slice::from_raw_parts(info_ptr, count as usize) };
+    for s in sessions {
+        if s.State != WTS_CONNECTSTATE_CLASS(WTSActive.0) {
+            continue;
+        }
+        let mut token = HANDLE::default();
+        // SAFETY: `token` outlives the call.
+        #[allow(unsafe_code)]
+        if unsafe { WTSQueryUserToken(s.SessionId, &mut token) }.is_ok() {
+            return Ok(token);
+        }
+    }
+
+    Err(DesktopError::RequiresInteractiveSession)
 }
 
 fn build_user_environment(token: HANDLE) -> Result<*mut core::ffi::c_void, DesktopError> {
