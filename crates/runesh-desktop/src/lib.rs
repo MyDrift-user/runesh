@@ -39,6 +39,8 @@ pub mod error;
 pub mod input;
 pub mod protocol;
 pub mod session;
+#[cfg(windows)]
+pub mod session_helper;
 pub mod transport;
 
 #[cfg(feature = "axum")]

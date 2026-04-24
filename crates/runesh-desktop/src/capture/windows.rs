@@ -72,9 +72,24 @@ impl DxgiCapturer {
                 .cast()
                 .map_err(|e| DesktopError::Capture(format!("IDXGIOutput1 cast: {e}")))?;
 
-            let output_dup = output1
-                .DuplicateOutput(&device)
-                .map_err(|e| DesktopError::Capture(format!("DuplicateOutput: {e}")))?;
+            // DuplicateOutput binds to the calling process's session.
+            // From a LocalSystem service in Session 0 it consistently
+            // returns either E_ACCESSDENIED or
+            // DXGI_ERROR_NOT_CURRENTLY_AVAILABLE because Session 0 is
+            // isolated from the interactive desktop. Surface that as
+            // a distinct variant so the caller knows to retry through
+            // the session helper (running inside the user's session).
+            let output_dup = output1.DuplicateOutput(&device).map_err(|e| {
+                let hr = e.code().0 as u32;
+                // E_ACCESSDENIED = 0x80070005
+                // DXGI_ERROR_NOT_CURRENTLY_AVAILABLE = 0x887A0022
+                // DXGI_ERROR_SESSION_DISCONNECTED = 0x887A0028
+                if hr == 0x80070005 || hr == 0x887A0022 || hr == 0x887A0028 {
+                    DesktopError::RequiresInteractiveSession
+                } else {
+                    DesktopError::Capture(format!("DuplicateOutput: {e}"))
+                }
+            })?;
 
             Ok(Self {
                 device,

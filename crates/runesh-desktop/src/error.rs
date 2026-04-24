@@ -28,6 +28,20 @@ pub enum DesktopError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    /// The calling process isn't attached to an interactive user
+    /// session but the chosen capture backend requires one.
+    /// Triggered by `IDXGIOutput1::DuplicateOutput` returning
+    /// `DXGI_ERROR_NOT_CURRENTLY_AVAILABLE` or `E_ACCESSDENIED`
+    /// from a Windows service running in Session 0, and by
+    /// macOS `ScreenCaptureKit` when TCC denies capture.
+    ///
+    /// Callers that want to keep working regardless should retry
+    /// via [`crate::session_helper::spawn_in_active_user_session`],
+    /// which runs the capture inside a helper process spawned with
+    /// the logged-in user's token.
+    #[error("capture requires an interactive user session")]
+    RequiresInteractiveSession,
 }
 
 impl DesktopError {
@@ -42,6 +56,7 @@ impl DesktopError {
             DesktopError::PermissionDenied(_) => 403,
             DesktopError::MaxSessions => 429,
             DesktopError::Internal(_) => 500,
+            DesktopError::RequiresInteractiveSession => 409,
         }
     }
 
@@ -56,6 +71,7 @@ impl DesktopError {
             DesktopError::PermissionDenied(_) => "permission_denied",
             DesktopError::MaxSessions => "max_sessions",
             DesktopError::Internal(_) => "internal",
+            DesktopError::RequiresInteractiveSession => "requires_interactive_session",
         }
     }
 }
