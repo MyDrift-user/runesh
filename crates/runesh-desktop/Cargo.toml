@@ -7,6 +7,10 @@ repository.workspace = true
 authors.workspace = true
 description = "WebRTC-based cross-platform remote desktop with H.264 video, Opus audio, DataChannel input, dirty-rect capture, and xdg-desktop-portal Wayland support"
 
+[[bin]]
+name = "runesh-desktop-helper"
+path = "bin/helper.rs"
+
 [features]
 default = ["axum", "webrtc-transport", "h264", "clipboard", "input"]
 
@@ -85,7 +89,13 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_Environment",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_RemoteDesktop",
     "Win32_System_Threading",
     "Win32_System_StationsAndDesktops",
     "Win32_Media_Audio",

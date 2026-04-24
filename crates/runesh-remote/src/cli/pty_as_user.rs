@@ -49,11 +49,11 @@ use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnviron
 use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::RemoteDesktop::{WTSGetActiveConsoleSessionId, WTSQueryUserToken};
 use windows::Win32::System::Threading::{
-    CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
-    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
-    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
-    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOEXW,
-    STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
+    CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, DeleteProcThreadAttributeList,
+    EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
+    LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, TerminateProcess,
+    UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 use crate::error::{PtyStage, RemoteError};
@@ -317,6 +317,14 @@ impl PtyAsUserHandle {
         // SAFETY: `cmdline` is a writable, NUL-terminated UTF-16
         // buffer; `startup_info` + its attribute list are populated
         // above; `token` and `env_block` are valid for the call.
+        //
+        // No CREATE_NO_WINDOW here: that tells the child "you have no
+        // console", which fights with PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
+        // in the attribute list that says "here is your console". The
+        // MS canonical ConPTY sample passes EXTENDED_STARTUPINFO_PRESENT
+        // alone; cmd.exe detects the pseudo-console and prints its
+        // banner + prompt normally. With CREATE_NO_WINDOW it falls into
+        // silent batch mode and never writes to stdout.
         #[allow(unsafe_code)]
         let created = unsafe {
             CreateProcessAsUserW(
@@ -326,7 +334,7 @@ impl PtyAsUserHandle {
                 None,
                 None,
                 false,
-                CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
+                CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
                 Some(env_block),
                 cwd_ptr,
                 &startup_info.StartupInfo,
