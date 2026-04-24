@@ -35,8 +35,7 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::ptr;
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_BROKEN_PIPE, FALSE, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
-    WAIT_TIMEOUT,
+    CloseHandle, ERROR_BROKEN_PIPE, FALSE, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Security::{
     LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT, LogonUserW, SECURITY_ATTRIBUTES,
@@ -55,8 +54,7 @@ use windows::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, DeleteProcThreadAttributeList,
     EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
     LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION,
-    STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, TerminateProcess,
-    UpdateProcThreadAttribute, WaitForSingleObject,
+    STARTUPINFOEXW, STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 use crate::error::{PtyStage, RemoteError};
@@ -685,18 +683,21 @@ fn build_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>), RemoteErr
     }
     .map_err(|e| win_err(PtyStage::UpdateProcThreadAttribute, e))?;
 
-    let mut si = STARTUPINFOEXW {
+    // Do NOT set STARTF_USESTDHANDLES here. That flag tells Windows
+    // to wire the child's stdio from hStdInput/hStdOutput/hStdError —
+    // which conflicts with PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE that
+    // already binds the child's stdio to the ConPTY. With both set,
+    // cmd.exe's stdio end up pointing at INVALID_HANDLE_VALUE for
+    // most writes, producing the "first-session works, subsequent
+    // sessions 0 bytes out" flake. The MS canonical ConPTY sample
+    // leaves dwFlags clear and lets the pseudo console take over.
+    let si = STARTUPINFOEXW {
         StartupInfo: STARTUPINFOW {
             cb: mem::size_of::<STARTUPINFOEXW>() as u32,
-            dwFlags: STARTF_USESTDHANDLES,
             ..Default::default()
         },
         lpAttributeList: plist,
     };
-    // Mute unused-field warnings if any.
-    si.StartupInfo.hStdInput = INVALID_HANDLE_VALUE;
-    si.StartupInfo.hStdOutput = INVALID_HANDLE_VALUE;
-    si.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
     Ok((si, buf))
 }
 
