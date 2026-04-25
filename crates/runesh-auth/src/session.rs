@@ -147,7 +147,7 @@ impl Default for SessionConfig {
 /// This prevents subdomain cookie injection attacks because an attacker
 /// cannot forge a valid HMAC without the server secret.
 pub fn generate_csrf_token(secret: &str, access_token: &str) -> String {
-    use hmac::{Hmac, KeyInit, Mac};
+    use hmac::{Hmac, Mac};
     use sha2::{Digest, Sha256};
 
     type HmacSha256 = Hmac<Sha256>;
@@ -172,7 +172,7 @@ pub fn generate_csrf_token(secret: &str, access_token: &str) -> String {
 
 /// Verify an HMAC-signed CSRF token.
 pub fn verify_csrf_token(csrf_token: &str, secret: &str, access_token: &str) -> bool {
-    use hmac::{Hmac, KeyInit, Mac};
+    use hmac::{Hmac, Mac};
     use sha2::{Digest, Sha256};
 
     type HmacSha256 = Hmac<Sha256>;
