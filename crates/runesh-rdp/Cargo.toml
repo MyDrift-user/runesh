@@ -1,0 +1,24 @@
+[package]
+name = "runesh-rdp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "RDP client wrapper that produces VideoSamples consumable by runesh-desktop's WebRTC pipeline (v1 scaffold; protocol implementation lands in 0.19.x)"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+secrecy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Producing VideoSamples that plug into the same WebRTC peer the
+# capture path uses. The actual H.264 encoder is created here once
+# the full IronRDP path lands.
+runesh-desktop = { path = "../runesh-desktop" }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
